@@ -1,0 +1,74 @@
+name: vigil
+
+services:
+  postgres:
+    # Postgres 18+ required: the schema uses the native uuidv7() function.
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: vigil
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vigil}
+      POSTGRES_DB: vigil
+    volumes:
+      # postgres:18 stores data under /var/lib/postgresql (PGDATA is
+      # /var/lib/postgresql/18/docker) — mount the parent, not /data, or
+      # the data lands in an anonymous volume and is lost on `down`.
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vigil -d vigil"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    build:
+      context: .
+      target: worker
+    command: ["npx", "drizzle-kit", "migrate"]
+    environment:
+      DATABASE_URL: postgresql://vigil:${POSTGRES_PASSWORD:-vigil}@postgres:5432/vigil
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  app:
+    build:
+      context: .
+      target: web
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://vigil:${POSTGRES_PASSWORD:-vigil}@postgres:5432/vigil
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET in .env}
+      APP_URL: ${APP_URL:-http://localhost:3000}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_FROM: ${EMAIL_FROM:-Vigil <onboarding@resend.dev>}
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://localhost:3000/api/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  worker:
+    build:
+      context: .
+      target: worker
+    environment:
+      DATABASE_URL: postgresql://vigil:${POSTGRES_PASSWORD:-vigil}@postgres:5432/vigil
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET in .env}
+      APP_URL: ${APP_URL:-http://localhost:3000}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_FROM: ${EMAIL_FROM:-Vigil <onboarding@resend.dev>}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  pgdata:

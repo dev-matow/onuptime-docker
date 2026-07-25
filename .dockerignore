@@ -1,0 +1,12 @@
+node_modules
+.next
+.git
+.env*
+!.env.example
+*.md
+e2e
+tests
+playwright.config.ts
+vitest.config.ts
+.github
+.claude

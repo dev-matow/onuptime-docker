@@ -4,6 +4,22 @@ All notable changes to Vigil Core are documented here. Versions follow
 [semantic versioning](https://semver.org): breaking changes bump the
 major, additive features the minor, fixes the patch.
 
+## 1.0.1 — 2026-07-26
+
+Patch release: a defensive fix carried over from the commercial edition.
+No schema migration.
+
+### Fixed
+
+- **Public status page cache key now includes the slug.** The cached
+  page query captured the slug in a closure rather than passing it as an
+  argument, so Next derived the same cache key regardless of slug — it
+  builds that key from the callback's source text, the key parts and the
+  call arguments. Core is single-organization and status pages are
+  unique per organization, so only one page can ever exist and no
+  installation could hit this; the fix keeps it unreachable by
+  construction rather than by circumstance.
+
 ## 1.0.0 — first public release
 
 Vigil Core is the free, self-hostable uptime monitor: two processes and

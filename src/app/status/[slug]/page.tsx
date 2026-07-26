@@ -38,14 +38,22 @@ function reviveIncidentDates(incident: PublicIncident): PublicIncident {
   };
 }
 
+/**
+ * The slug MUST travel as an argument, not as a closure capture. Next
+ * derives the cache key from the callback's source text, the key parts
+ * and `JSON.stringify(arguments)` — a captured slug appears in none of
+ * them, so every status page would share one cache entry. Core is
+ * single-organization, so only one page can exist and the collision is
+ * unreachable here; the argument form keeps it that way by construction.
+ */
 async function cachedPublicStatusPage(
   slug: string,
 ): Promise<PublicStatusPage | null> {
   const page = await unstable_cache(
-    () => getPublicStatusPage(db, slug),
+    (pageSlug: string) => getPublicStatusPage(db, pageSlug),
     ["public-status-page"],
     { revalidate: 60, tags: [`status-page-${slug}`] },
-  )();
+  )(slug);
   if (!page) return null;
   return {
     ...page,

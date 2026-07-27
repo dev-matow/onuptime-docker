@@ -28,8 +28,9 @@ docker compose run --rm worker npx tsx scripts/seed-demo.ts
 ```
 
 Creates the **Altitude Systems** organization: four users (owner /
-admin / responder / viewer, password `vigil-demo-2026`), six
-production-style monitors with 90 days of history, one resolved
+admin / responder / viewer, password `vigil-demo-2026`), eleven
+production-style monitors with 90 days of history — covering all six
+check types — one resolved
 incident with a full timeline + postmortem, one ongoing critical
 incident, and a published status page at `/status/altitude`.
 

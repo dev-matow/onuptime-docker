@@ -41,6 +41,23 @@ CMD ["node", "server.js"]
 FROM node:26-alpine AS worker
 WORKDIR /app
 ENV NODE_ENV=production
+# `ping` monitors shell out to this binary, and this image runs as a
+# non-root user, so something has to grant it an ICMP socket.
+#
+# Belt: `net.ipv4.ping_group_range`, set on the worker service in
+# docker-compose.yml. Docker has defaulted that sysctl open since ~2019
+# and busybox's own ping applet uses the datagram socket happily, so on
+# stock Docker this alone is enough.
+#
+# Braces: Alpine's iputils ping is setuid root, so it also works where
+# that sysctl is NOT open — Kubernetes classifies it as an "unsafe"
+# sysctl requiring explicit opt-in, and the bare-metal path in `docs/`
+# has no Docker defaults at all. Those are the deployments this line
+# exists for.
+#
+# `cap_add: [NET_RAW]` is not an alternative to either: capabilities are
+# not inherited by a non-root process without file capabilities.
+RUN apk add --no-cache iputils
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json tsconfig.json drizzle.config.ts ./
 COPY drizzle ./drizzle

@@ -40,8 +40,20 @@ services:
       DATABASE_URL: postgresql://vigil:${POSTGRES_PASSWORD:-vigil}@postgres:5432/vigil
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET in .env}
       APP_URL: ${APP_URL:-http://localhost:3000}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       EMAIL_FROM: ${EMAIL_FROM:-Vigil <onboarding@resend.dev>}
+      # Enumerated here or it never reaches the container: an operator
+      # following docs/DEMO.md sets it in .env, gets `false`, and stands
+      # up a public host with sign-up enabled and assertNotDemo() inert
+      # — while the demo owner password sits on our own sales pages.
+      DEMO_MODE: ${DEMO_MODE:-false}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      ALLOW_PRIVATE_MONITOR_TARGETS: ${ALLOW_PRIVATE_MONITOR_TARGETS:-false}
+      RDAP_BASE_URL: ${RDAP_BASE_URL:-https://rdap.org}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+      TWILIO_FROM_NUMBER: ${TWILIO_FROM_NUMBER:-}
     healthcheck:
       test:
         - CMD
@@ -66,6 +78,22 @@ services:
       APP_URL: ${APP_URL:-http://localhost:3000}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       EMAIL_FROM: ${EMAIL_FROM:-Vigil <onboarding@resend.dev>}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      ALLOW_PRIVATE_MONITOR_TARGETS: ${ALLOW_PRIVATE_MONITOR_TARGETS:-false}
+      # Domain-expiry monitors resolve through this. An air-gapped
+      # install that sets it in .env and does not see it here reaches
+      # for rdap.org, fails to route, and every domain monitor reports a
+      # false DOWN — a transport error is judged `down`, not `unknown`.
+      RDAP_BASE_URL: ${RDAP_BASE_URL:-https://rdap.org}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+      TWILIO_FROM_NUMBER: ${TWILIO_FROM_NUMBER:-}
+    # Lets the worker, which runs as a non-root user, open an
+    # unprivileged ICMP datagram socket. Without it every `ping` monitor
+    # reports `indeterminate` forever — correctly, since the probe truly
+    # cannot run, but the feature is then dead in the box we ship.
+    sysctls:
+      net.ipv4.ping_group_range: "0 2147483647"
     depends_on:
       migrate:
         condition: service_completed_successfully

@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { PaperPlaneRightIcon } from "@phosphor-icons/react";
+import { PaperPlaneRightIcon, SparkleIcon } from "@phosphor-icons/react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -12,13 +12,23 @@ import { Field, FieldLabel } from "@/components/ui/field";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 
-import { postIncidentUpdateAction } from "../actions";
+import {
+  postIncidentUpdateAction,
+  suggestStatusUpdateAction,
+} from "../actions";
 
-export function UpdateComposer({ incidentId }: { incidentId: string }) {
+export function UpdateComposer({
+  incidentId,
+  aiEnabled,
+}: {
+  incidentId: string;
+  aiEnabled: boolean;
+}) {
   const router = useRouter();
   const [message, setMessage] = useState("");
   const [internal, setInternal] = useState(false);
   const [pending, setPending] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -38,6 +48,18 @@ export function UpdateComposer({ incidentId }: { incidentId: string }) {
     setMessage("");
     toast.success(internal ? "Internal note added." : "Update posted.");
     router.refresh();
+  }
+
+  async function handleSuggest() {
+    setSuggesting(true);
+    const result = await suggestStatusUpdateAction(incidentId);
+    setSuggesting(false);
+    if (!result.ok) {
+      toast.error(result.error);
+      return;
+    }
+    setMessage(result.data.suggestion);
+    toast.success("Suggestion ready — edit before posting.");
   }
 
   return (
@@ -67,6 +89,18 @@ export function UpdateComposer({ incidentId }: { incidentId: string }) {
               />
               Internal note (hidden from the public status page)
             </label>
+            {aiEnabled && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleSuggest}
+                disabled={suggesting || pending}
+              >
+                {suggesting ? <Spinner /> : <SparkleIcon aria-hidden />}
+                Suggest update
+              </Button>
+            )}
             <Button
               type="submit"
               size="sm"

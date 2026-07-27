@@ -4,17 +4,18 @@ Day-to-day reference for working in this codebase.
 
 ## Commands
 
-| Command                                 | What it does                               |
-| --------------------------------------- | ------------------------------------------ |
-| `npm run dev`                           | App with hot reload on :3000               |
-| `npm run worker:dev`                    | Worker with hot reload                     |
-| `npm run db:migrate` / `db:generate`    | Apply / create SQL migrations              |
-| `npm run db:seed`                       | Wipe + recreate the demo organization      |
-| `npm run db:studio`                     | Drizzle Studio (DB browser)                |
-| `npm test` / `npm run test:watch`       | Vitest unit + integration (needs Postgres) |
-| `npm run test:e2e`                      | Playwright golden path (starts dev server) |
-| `npm run lint` / `typecheck` / `format` | Quality gates                              |
-| `npm run build && npm start`            | Production build / serve                   |
+| Command                                 | What it does                                      |
+| --------------------------------------- | ------------------------------------------------- |
+| `npm run dev`                           | App with hot reload on :3000                      |
+| `npm run worker:dev`                    | Worker with hot reload                            |
+| `npm run db:migrate` / `db:generate`    | Apply / create SQL migrations                     |
+| `npm run db:seed`                       | Wipe + recreate the demo organization             |
+| `npm run db:studio`                     | Drizzle Studio (DB browser)                       |
+| `npm test` / `npm run test:watch`       | Vitest unit + integration (needs Postgres)        |
+| `npm run test:e2e`                      | Playwright golden path (starts dev server)        |
+| `npm run lint` / `typecheck` / `format` | Quality gates                                     |
+| `npm run screenshots`                   | Regenerate marketing screenshots from seeded data |
+| `npm run build && npm start`            | Production build / serve                          |
 
 ## Layout
 

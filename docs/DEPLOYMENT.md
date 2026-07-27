@@ -91,6 +91,32 @@ annotated template. Required: `DATABASE_URL`, `BETTER_AUTH_SECRET`,
   _Settings → Notifications_ — no env needed. Receivers verify the
   `X-Vigil-Signature` header (HMAC-SHA-256 of the raw body). See
   ARCHITECTURE.md §8 for the payload and event list.
+- **On-call & escalation**: schedules and escalation policies are
+  configured under _Settings → Escalation_; attach a policy to a monitor
+  on its form. Email steps need no extra config. SMS and voice steps
+  deliver through Twilio — set `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`
+  and `TWILIO_FROM_NUMBER` on the **worker** (it runs escalation);
+  without them those steps are a logged no-op and the ladder still runs.
+  Members set their own escalation phone (E.164) under _Settings →
+  General → Your profile_.
+- **Status-page subscriptions**: visitors to a _public_ status page can
+  subscribe by email (double opt-in) to incident open/update/resolve
+  notifications. Delivery reuses the email transport above — no separate
+  config; without `RESEND_API_KEY` the confirmation and notification
+  emails are written to the logs like every other email. Operators see
+  subscriber counts under _Settings → Status page_.
+- **Automatic recovery**: configured per monitor on its detail page.
+  Point the recovery endpoint at something inside your infrastructure
+  that fixes the failure — a restart hook, a runbook trigger; a
+  dependency-free starter lives in `examples/recovery-receiver.mjs`
+  (verify the signature, run one command), with ready-made Docker,
+  Compose, Kubernetes and systemd templates in
+  `examples/recovery-templates.md`. The worker verifies the
+  failure before triggering and verifies the target again afterwards;
+  attempts are bounded per incident, capped per day (restart-loop
+  guard), and recorded on the incident timeline. With _hold alerts
+  while recovering_ enabled, a verified recovery pages nobody; a
+  failed or overdue one pages immediately.
 - **Scaling**: app and worker are independently horizontal; the queue
   serializes per-monitor work. See ARCHITECTURE.md §10 for the pressure
   → response table.
@@ -98,7 +124,7 @@ annotated template. Required: `DATABASE_URL`, `BETTER_AUTH_SECRET`,
 ## Backups & restore
 
 All state lives in Postgres: domain data, auth, the audit trail,
-status pages and the job queue. The `pgboss` schema is
+status-page subscribers and the job queue. The `pgboss` schema is
 disposable (it rebuilds on worker start), so a single dump is a complete
 backup. The only other thing to keep is your `.env` — **the same
 `BETTER_AUTH_SECRET` must survive a restore**, because sessions and
@@ -153,6 +179,7 @@ Symptom → cause → fix, from real deployments:
 - **Monitor against an internal host fails instantly** — monitor URLs
   are SSRF-guarded: private and loopback addresses are refused by
   default. `ALLOW_PRIVATE_MONITOR_TARGETS=true` lifts this for dev only.
+  Recovery endpoints are the deliberate exception (your own restart
   hooks are usually internal) — see docs/security.
 - **Sign-up disabled / every mutation rejected** — `DEMO_MODE=true` is
   set. That's the read-only public-demo switch (docs/DEMO.md), not a
@@ -160,6 +187,14 @@ Symptom → cause → fix, from real deployments:
 - **Browser sign-in rejected while `curl` works** — `APP_URL` must equal
   the origin users type into the browser (it's the auth trusted origin).
   A port or scheme mismatch fails exactly this way.
+- **SMS/voice escalation steps never fire** — the three `TWILIO_*`
+  variables must be set **on the worker**. Without them those steps are
+  a logged no-op by design; email steps and the rest of the ladder still
+  run.
+- **A recovery attempt shows `running` forever** — the worker was
+  interrupted mid-attempt (recovery jobs deliberately never retry). The
+  nightly retention job closes attempts stuck over an hour as failed;
+  no action needed beyond restarting the worker.
 - **Status page shows slightly stale data** — public pages are cached
   for ~60 s so an outage traffic spike never reaches Postgres. That lag
   is by design.

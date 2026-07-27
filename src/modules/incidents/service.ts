@@ -1,10 +1,11 @@
-import { and, desc, eq, ne, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, ne, sql } from "drizzle-orm";
 
 import type { DbClient } from "@/db";
 import { incidentEvents, incidents, monitors, user } from "@/db/schema";
 import { ConflictError, NotFoundError } from "@/lib/errors";
 import { writeAudit } from "@/modules/audit";
 import type { Monitor } from "@/modules/monitors/service";
+import { describeFailureWindow } from "@/modules/notifications/email-templates";
 
 import {
   canTransition,
@@ -127,6 +128,52 @@ export async function createIncident(
       metadata: { title: incident.title, severity: incident.severity },
     });
     return incident;
+  });
+}
+
+/**
+ * Acknowledges an active incident. Idempotent — the first ack wins and
+ * records who/when; later calls return the existing ack. Acknowledgement
+ * halts escalation (the escalation worker checks `acknowledgedAt`).
+ */
+export async function acknowledgeIncident(
+  db: DbClient,
+  actor: Actor,
+  incidentId: string,
+): Promise<Incident> {
+  return db.transaction(async (tx) => {
+    const incident = await findIncidentOrThrow(
+      tx,
+      actor.organizationId,
+      incidentId,
+    );
+    if (incident.status === "resolved") {
+      throw new ConflictError("This incident is already resolved.");
+    }
+    if (incident.acknowledgedAt) return incident;
+
+    const [updated] = await tx
+      .update(incidents)
+      .set({ acknowledgedAt: new Date(), acknowledgedBy: actor.userId })
+      .where(eq(incidents.id, incidentId))
+      .returning();
+    if (!updated) throw new NotFoundError("Incident not found.");
+
+    await tx.insert(incidentEvents).values({
+      incidentId,
+      type: "system",
+      message: "Incident acknowledged — escalation stopped.",
+      internal: true,
+      createdBy: actor.userId,
+    });
+    await writeAudit(tx, {
+      organizationId: actor.organizationId,
+      actorId: actor.userId,
+      action: "incident.acknowledged",
+      targetType: "incident",
+      targetId: incidentId,
+    });
+    return updated;
   });
 }
 
@@ -326,7 +373,7 @@ export async function openMonitorIncident(
       // Timeline events surface on the public status page — keep the
       // message generic. The raw error (which can embed the monitored
       // URL) stays internal: check history and audit metadata.
-      message: `${monitor.name} failed ${monitor.failureThreshold} consecutive ${monitor.failureThreshold === 1 ? "check" : "checks"} and was marked down.`,
+      message: `${monitor.name} had been failing ${describeFailureWindow(monitor.failureWindowSeconds)} and was marked down.`,
       createdBy: null,
     });
 
@@ -344,6 +391,24 @@ export async function openMonitorIncident(
     });
     return incident;
   });
+}
+
+/**
+ * Claims the exclusive right to send this incident's opened
+ * notifications. Exactly one caller wins — the open path when alerts
+ * aren't held, or recovery exhaustion / the escalation failsafe when
+ * they are. Postgres arbitrates the race via the conditional update.
+ */
+export async function claimIncidentNotification(
+  db: DbClient,
+  incidentId: string,
+): Promise<Incident | null> {
+  const [claimed] = await db
+    .update(incidents)
+    .set({ notifiedAt: new Date() })
+    .where(and(eq(incidents.id, incidentId), isNull(incidents.notifiedAt)))
+    .returning();
+  return claimed ?? null;
 }
 
 /** Auto-resolves open monitor incidents once the monitor recovers. */
@@ -389,6 +454,27 @@ export async function resolveMonitorIncidents(
       resolved.push(updated);
     }
     return resolved;
+  });
+}
+
+/**
+ * Append a machine-authored line to an incident's timeline.
+ *
+ * `type: "system"` is the marker the public status page filters on, so
+ * anything written here stays internal — see `publicIncidents`. Writing
+ * a timeline entry is an incident-module capability; it lived in the
+ * recovery module only because recovery happened to be its first caller.
+ */
+export async function recordSystemEvent(
+  db: DbClient,
+  incidentId: string,
+  message: string,
+): Promise<void> {
+  await db.insert(incidentEvents).values({
+    incidentId,
+    type: "system",
+    message,
+    createdBy: null,
   });
 }
 

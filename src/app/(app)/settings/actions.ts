@@ -1,10 +1,12 @@
 "use server";
 
+import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { z } from "zod";
 
 import { db } from "@/db";
+import { user } from "@/db/schema";
 import {
   actionOk,
   actionError,
@@ -186,6 +188,45 @@ export async function updateOrganizationAction(
       targetType: "organization",
       targetId: ctx.organizationId,
       metadata: { name: parsed.data.name },
+    });
+    revalidatePath("/settings");
+    return actionOk(undefined);
+  } catch (error) {
+    return toActionError(error);
+  }
+}
+
+const profileSchema = z.object({
+  phone: z.string().trim().max(20),
+});
+
+export async function updateProfileAction(
+  input: unknown,
+): Promise<ActionResult> {
+  try {
+    assertNotDemo();
+    const ctx = await requireOrgContext();
+    const parsed = profileSchema.safeParse(input);
+    if (!parsed.success) {
+      return actionError(parsed.error.issues[0]?.message ?? "Invalid input.");
+    }
+    // Store E.164 so Twilio can dial/text it directly; empty clears it.
+    const normalized = parsed.data.phone.replace(/[\s()-]/g, "");
+    const phone = normalized === "" ? null : normalized;
+    if (phone && !/^\+[1-9]\d{6,14}$/.test(phone)) {
+      return actionError(
+        "Enter a phone number in international format, e.g. +15551234567.",
+      );
+    }
+
+    await db.update(user).set({ phone }).where(eq(user.id, ctx.userId));
+    await writeAudit(db, {
+      organizationId: ctx.organizationId,
+      actorId: ctx.userId,
+      action: "profile.updated",
+      targetType: "user",
+      targetId: ctx.userId,
+      metadata: { phone: phone ? "set" : "cleared" },
     });
     revalidatePath("/settings");
     return actionOk(undefined);

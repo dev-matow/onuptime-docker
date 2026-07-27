@@ -1,24 +1,37 @@
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { unstable_cache } from "next/cache";
 
 import { AutoRefresh } from "@/components/auto-refresh";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { db } from "@/db";
+import { member, organization } from "@/db/schema";
+import { and, eq } from "drizzle-orm";
 import { formatDateTime, formatRelativeTime, formatUptime } from "@/lib/format";
+import { getSession } from "@/lib/session";
+import {
+  statusPageUnlockCookie,
+  verifyStatusPageUnlock,
+} from "@/modules/status-pages/access";
 import {
   getPublicStatusPage,
+  getStatusPageAccess,
   type PublicIncident,
   type PublicStatusPage,
+  type StatusPageAccess,
 } from "@/modules/status-pages/service";
 import { cn } from "@/lib/utils";
 
+import { PasswordGate, PrivateSignInGate } from "./gate";
+import { SubscribeForm } from "./subscribe-form";
 import { UptimeBars } from "./uptime-bars";
 
 /**
- * The public status surface. The expensive page query is cached for 60s
- * per slug, so an outage traffic spike still doesn't hit the database on
- * every view.
+ * The public status surface. Access is gated per request (private pages
+ * need a session; password pages need an unlock cookie), so the route is
+ * dynamic — but the expensive page query is cached for 60s per slug, so
+ * an outage traffic spike still doesn't hit the database on every view.
  */
 /**
  * `unstable_cache` JSON-serializes its result, so on a cache hit every
@@ -42,9 +55,8 @@ function reviveIncidentDates(incident: PublicIncident): PublicIncident {
  * The slug MUST travel as an argument, not as a closure capture. Next
  * derives the cache key from the callback's source text, the key parts
  * and `JSON.stringify(arguments)` — a captured slug appears in none of
- * them, so every status page would share one cache entry. Core is
- * single-organization, so only one page can exist and the collision is
- * unreachable here; the argument form keeps it that way by construction.
+ * them, so every status page in the deployment would share one entry
+ * and serve whichever page was requested first.
  */
 async function cachedPublicStatusPage(
   slug: string,
@@ -62,12 +74,30 @@ async function cachedPublicStatusPage(
   };
 }
 
+/** Members of the owning org may view a `private` page. */
+async function canViewPrivate(access: StatusPageAccess): Promise<boolean> {
+  const session = await getSession();
+  if (!session) return false;
+  const membership = await db.query.member.findFirst({
+    where: and(
+      eq(member.userId, session.user.id),
+      eq(member.organizationId, access.organizationId),
+    ),
+    columns: { id: true },
+  });
+  return Boolean(membership);
+}
+
 export async function generateMetadata(
   props: PageProps<"/status/[slug]">,
 ): Promise<Metadata> {
   const { slug } = await props.params;
+  const access = await getStatusPageAccess(db, slug);
+  // Private/password pages get a generic title — no name leak.
+  if (!access || access.visibility !== "public") {
+    return { title: "Status page", robots: { index: false } };
+  }
   const page = await cachedPublicStatusPage(slug);
-  if (!page) return { title: "Status page", robots: { index: false } };
   return {
     title: page ? `${page.name} — status` : "Status page",
     description: page
@@ -108,6 +138,27 @@ export default async function PublicStatusPage(
   props: PageProps<"/status/[slug]">,
 ) {
   const { slug } = await props.params;
+  const access = await getStatusPageAccess(db, slug);
+  if (!access) notFound();
+
+  // Gate by visibility before rendering anything.
+  if (access.visibility === "private") {
+    if (!(await canViewPrivate(access))) {
+      const org = await db.query.organization.findFirst({
+        where: eq(organization.id, access.organizationId),
+        columns: { name: true },
+      });
+      return <PrivateSignInGate orgName={org?.name ?? null} />;
+    }
+  } else if (access.visibility === "password") {
+    const cookieStore = await cookies();
+    const token = cookieStore.get(statusPageUnlockCookie(access.id))?.value;
+    if (!verifyStatusPageUnlock(access.id, token)) {
+      const searchParams = await props.searchParams;
+      return <PasswordGate slug={slug} error={searchParams.e === "1"} />;
+    }
+  }
+
   const page = await cachedPublicStatusPage(slug);
   if (!page) notFound();
 
@@ -198,15 +249,22 @@ export default async function PublicStatusPage(
           )}
         </section>
 
-        <footer className="text-muted-foreground border-t pt-6 text-center text-xs">
-          <a
-            href="https://github.com/artaspervyj-dotcom/vigil-core"
-            target="_blank"
-            rel="noreferrer"
-            className="hover:text-foreground transition-colors"
+        {access.visibility === "public" && (
+          <section
+            className="border-t pt-6"
+            aria-label="Subscribe to updates"
           >
-            Powered by Vigil Core
-          </a>
+            <h2 className="text-sm font-medium">Get status updates</h2>
+            <p className="text-muted-foreground mt-1 mb-3 text-xs">
+              Subscribe to be emailed when an incident opens, updates or
+              resolves.
+            </p>
+            <SubscribeForm slug={slug} />
+          </section>
+        )}
+
+        <footer className="text-muted-foreground border-t pt-6 text-center text-xs">
+          Powered by Vigil
         </footer>
       </div>
     </div>

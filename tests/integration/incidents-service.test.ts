@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { auditLogs, incidentEvents } from "@/db/schema";
 import { ConflictError, NotFoundError } from "@/lib/errors";
 import {
+  acknowledgeIncident,
   changeIncidentSeverity,
   changeIncidentStatus,
   createIncident,
@@ -34,7 +35,10 @@ function monitorInput(
     expectedStatusCode: null,
     bodyKeyword: null,
     keywordAbsent: false,
-    failureThreshold: 3,
+    checkType: "http" as const,
+    tlsCheck: false,
+    tlsWarnDays: 14,
+    failureWindowSeconds: 120,
     ...overrides,
   };
 }
@@ -220,6 +224,71 @@ describe("postIncidentUpdate", () => {
   });
 });
 
+describe("acknowledgeIncident", () => {
+  it("stamps the acknowledgement, writes an internal event and an audit row", async () => {
+    const actor = await createTestOrg();
+    const incident = await createIncident(db, actor, {
+      title: "Paging storm",
+      severity: "critical",
+    });
+
+    const acked = await acknowledgeIncident(db, actor, incident.id);
+    expect(acked.acknowledgedAt).toBeInstanceOf(Date);
+    expect(acked.acknowledgedBy).toBe(actor.userId);
+
+    const events = await db.query.incidentEvents.findMany({
+      where: and(
+        eq(incidentEvents.incidentId, incident.id),
+        eq(incidentEvents.type, "system"),
+      ),
+    });
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      message: "Incident acknowledged — escalation stopped.",
+      internal: true,
+    });
+
+    const audit = await db.query.auditLogs.findMany({
+      where: and(
+        eq(auditLogs.organizationId, actor.organizationId),
+        eq(auditLogs.action, "incident.acknowledged"),
+      ),
+    });
+    expect(audit).toHaveLength(1);
+  });
+
+  it("is idempotent: a second acknowledgement adds no event", async () => {
+    const actor = await createTestOrg();
+    const incident = await createIncident(db, actor, {
+      title: "Double ack",
+      severity: "major",
+    });
+
+    const first = await acknowledgeIncident(db, actor, incident.id);
+    const second = await acknowledgeIncident(db, actor, incident.id);
+    expect(second.acknowledgedAt?.getTime()).toBe(
+      first.acknowledgedAt?.getTime(),
+    );
+
+    const events = await db.query.incidentEvents.findMany({
+      where: and(
+        eq(incidentEvents.incidentId, incident.id),
+        eq(incidentEvents.type, "system"),
+      ),
+    });
+    expect(events).toHaveLength(1);
+  });
+
+  it("rejects acknowledging a resolved incident", async () => {
+    const actor = await createTestOrg();
+    const incident = await createResolvedIncident(actor);
+
+    await expect(acknowledgeIncident(db, actor, incident.id)).rejects.toThrow(
+      ConflictError,
+    );
+  });
+});
+
 describe("changeIncidentSeverity", () => {
   it("records a severity_change event when the severity actually changes", async () => {
     const actor = await createTestOrg();
@@ -335,7 +404,7 @@ describe("monitor-driven incidents", () => {
     const monitor = await createMonitor(
       db,
       actor,
-      monitorInput({ name: "Payments API", failureThreshold: 2 }),
+      monitorInput({ name: "Payments API", failureWindowSeconds: 0 }),
     );
     return { actor, monitor };
   }
@@ -367,7 +436,7 @@ describe("monitor-driven incidents", () => {
     expect(event.type).toBe("created");
     expect(event.createdBy).toBeNull();
     expect(event.message).toBe(
-      "Payments API failed 2 consecutive checks and was marked down.",
+      "Payments API had been failing from its first failed check and was marked down.",
     );
     expect(event.message).not.toContain(RAW_ERROR);
     expect(event.message).not.toContain(monitor.url);

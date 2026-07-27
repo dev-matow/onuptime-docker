@@ -43,8 +43,17 @@ npm run worker:dev          # terminal 2 — background checks
 ## Verify the install
 
 ```bash
-npm run typecheck && npm run lint && npm test   # 164 tests, ~3s
+npm run typecheck && npm run lint && npm test   # 531 tests, ~5s
 ```
+
+## Turn on automatic recovery (optional, ~5 minutes)
+
+Open any monitor → **Automatic recovery**: point it at an endpoint in
+your infrastructure that fixes the failure (a restart hook, a runbook
+trigger) and enable it. `examples/recovery-receiver.mjs` is a
+dependency-free receiver to start from — verify the signature, run one
+command. Use **Send test trigger** to prove the wiring before the
+first real incident.
 
 ## Where to go next
 
@@ -56,4 +65,3 @@ npm run typecheck && npm run lint && npm test   # 164 tests, ~3s
 | Understand the design       | [ARCHITECTURE.md](ARCHITECTURE.md)             |
 | Day-to-day development      | [docs/HANDBOOK.md](docs/HANDBOOK.md)           |
 | Take updates later          | [docs/UPGRADE.md](docs/UPGRADE.md)             |
-| Contribute a change         | [CONTRIBUTING.md](CONTRIBUTING.md)             |

@@ -2,7 +2,7 @@ import {
   BroadcastIcon,
   PulseIcon,
   SirenIcon,
-  UsersThreeIcon,
+  SparkleIcon,
 } from "@phosphor-icons/react/dist/ssr";
 import Link from "next/link";
 
@@ -16,25 +16,25 @@ const FEATURES = [
     icon: PulseIcon,
     title: "Uptime monitoring",
     description:
-      "HTTP(S) checks from every minute to every hour, with keyword assertions, response-time tracking and degradation thresholds.",
+      "HTTP, TCP and TLS-expiry checks from every minute to every hour, with response-time tracking and degradation thresholds.",
   },
   {
     icon: SirenIcon,
     title: "Incident management",
     description:
-      "Incidents open automatically when checks fail, then notify your team by email and signed webhooks — Slack and Discord included.",
+      "Incidents open automatically when checks fail, then page the right people through on-call rotations and escalation policies.",
   },
   {
     icon: BroadcastIcon,
     title: "Public status pages",
     description:
-      "Keep customers informed with a clean public page — live component health, 90 days of history, and an incident timeline.",
+      "Keep customers informed with a clean public page — live component health, 90 days of history, and email subscriptions.",
   },
   {
-    icon: UsersThreeIcon,
-    title: "Your team, your roles",
+    icon: SparkleIcon,
+    title: "AI postmortems",
     description:
-      "Invite teammates as owner, admin, responder or viewer. Read-only viewers never see a signing secret.",
+      "Draft blameless postmortems and public updates from the incident timeline, ready for human review.",
   },
 ];
 
@@ -73,8 +73,8 @@ export default async function LandingPage() {
           </h1>
           <p className="text-muted-foreground max-w-xl text-lg text-balance">
             Vigil watches your endpoints, opens incidents when they fail, and
-            keeps everyone informed — from the engineer on the pager to the
-            customer refreshing your status page.
+            keeps everyone informed — from the on-call engineer to the customer
+            refreshing your status page.
           </p>
           <div className="flex items-center gap-3">
             {env.DEMO_MODE ? (

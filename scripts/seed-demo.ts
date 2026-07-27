@@ -16,20 +16,20 @@ import {
   organization,
   statusPageMonitors,
   statusPages,
+  statusPageSubscribers,
   user,
 } from "@/db/schema";
 import { auth } from "@/lib/auth";
 import { DEMO_ORG, DEMO_PASSWORD, DEMO_USERS } from "@/lib/demo";
 
 /**
- * Seeds a realistic sample team so a fresh install has something to look
- * at: five production-style monitors with 90 days of check history, one
- * resolved incident with a full timeline and postmortem, one ongoing
- * outage, and a published status page.
- *
- * Idempotent — re-running wipes and recreates the sample organization,
- * so it also works as the reset for a public read-only demo (DEMO_MODE,
- * see docs/DEMO.md).
+ * Seeds a realistic demo tenant: a team, eleven production-style
+ * monitors covering all six check types, with 90 days of check history,
+ * one fully resolved incident (timeline + postmortem), one ongoing
+ * outage, and a recovery action with two quiet self-healed incidents
+ * (the runtime fixed them; nobody was paged).
+ * Idempotent — re-running wipes and recreates the demo organization, so
+ * it doubles as the nightly demo reset (see docs/DEMO.md).
  *
  *   npm run db:seed
  */
@@ -52,10 +52,14 @@ const rand = mulberry32(20260702);
 interface MonitorSeed {
   name: string;
   url: string;
+  /** Defaults to `http`; the demo covers all six registered types. */
+  checkType?: string;
+  port?: number;
+  /** Type-specific settings for the types that use the config blob. */
+  config?: Record<string, unknown>;
   method?: "GET" | "HEAD";
   intervalSeconds: number;
   expectedStatusCode?: number;
-  bodyKeyword?: string;
   baseMs: number;
   publicName: string;
   /** UTC ms outage windows: checks inside fail. */
@@ -143,66 +147,122 @@ function checkRowsFor(
 }
 
 async function main() {
-  console.log("Seeding sample data…");
+  console.log("Seeding demo data…");
   await wipe();
-
-  const now = Date.now();
   const { organizationId, ids } = await createTeam();
+  const now = Date.now();
 
-  // The resolved incident: a 70-minute API outage two weeks ago.
   const gatewayOutage: [number, number] = [
-    now - 14 * DAY,
-    now - 14 * DAY + 70 * MIN,
+    now - 6 * DAY - 55 * MIN,
+    now - 6 * DAY - 22 * MIN,
   ];
-  // The ongoing one: checkout has been failing for ~40 minutes.
-  const checkoutOutage: [number, number] = [now - 40 * MIN, now + DAY];
+  const checkoutDownSince = now - 38 * MIN;
+  // Two short Auth Service blips the recovery runtime healed quietly.
+  const authBlips: { start: number; verifySeconds: number; ms: number }[] = [
+    { start: now - 9 * DAY - 47 * MIN, verifySeconds: 41, ms: 152 },
+    { start: now - 31 * DAY - 13 * MIN, verifySeconds: 53, ms: 187 },
+  ];
 
-  const monitorSeeds: MonitorSeed[] = [
+  const seeds: MonitorSeed[] = [
     {
-      name: "Marketing site",
-      url: "https://altitude.example.com/",
-      intervalSeconds: 300,
-      baseMs: 180,
-      publicName: "Website",
-    },
-    {
-      name: "API gateway",
-      url: "https://api.altitude.example.com/health",
+      name: "API Gateway",
+      url: "https://api.github.com",
       intervalSeconds: 60,
-      bodyKeyword: "ok",
-      baseMs: 95,
+      baseMs: 140,
       publicName: "API",
       outages: [gatewayOutage],
     },
     {
-      name: "Checkout service",
-      url: "https://api.altitude.example.com/checkout/health",
-      intervalSeconds: 60,
-      baseMs: 140,
-      publicName: "Checkout",
-      outages: [checkoutOutage],
+      name: "Marketing Site",
+      url: "https://example.com",
+      intervalSeconds: 300,
+      baseMs: 90,
+      publicName: "Website",
     },
     {
-      name: "Auth service",
-      url: "https://auth.altitude.example.com/health",
-      intervalSeconds: 60,
-      bodyKeyword: "healthy",
-      baseMs: 65,
-      publicName: "Sign-in",
+      name: "Documentation",
+      url: "https://developer.mozilla.org",
+      intervalSeconds: 300,
+      baseMs: 180,
+      publicName: "Docs",
     },
     {
-      name: "Docs",
-      url: "https://docs.altitude.example.com/",
+      name: "CDN Edge",
+      url: "https://www.cloudflare.com",
       method: "HEAD",
-      intervalSeconds: 600,
-      baseMs: 210,
-      publicName: "Documentation",
+      intervalSeconds: 120,
+      baseMs: 60,
+      publicName: "CDN",
+    },
+    {
+      name: "Auth Service",
+      url: "https://www.google.com/generate_204",
+      intervalSeconds: 60,
+      expectedStatusCode: 204,
+      baseMs: 110,
+      publicName: "Authentication",
+      outages: authBlips.map(
+        (blip) => [blip.start, blip.start + 4 * MIN] as [number, number],
+      ),
+    },
+    {
+      name: "Checkout Service",
+      url: "https://checkout.altitude-demo.example",
+      intervalSeconds: 60,
+      baseMs: 220,
+      publicName: "Checkout",
+      outages: [[checkoutDownSince, now]],
+    },
+    {
+      name: "Primary database port",
+      url: "db.altitude-demo.example",
+      checkType: "tcp",
+      port: 5432,
+      intervalSeconds: 60,
+      baseMs: 8,
+      publicName: "Database",
+    },
+    {
+      name: "Edge gateway reachability",
+      url: "one.one.one.one",
+      checkType: "ping",
+      intervalSeconds: 60,
+      baseMs: 14,
+      publicName: "Network edge",
+    },
+    {
+      name: "Apex DNS record",
+      url: "altitude-demo.example",
+      checkType: "dns",
+      config: { recordType: "A", expectedValue: null },
+      intervalSeconds: 300,
+      baseMs: 28,
+      publicName: "DNS",
+    },
+    {
+      name: "Certificate — altitude-demo.example",
+      url: "altitude-demo.example",
+      checkType: "tls-expiry",
+      port: 443,
+      config: { warnDays: 14 },
+      intervalSeconds: 3600,
+      baseMs: 62,
+      publicName: "TLS certificate",
+    },
+    {
+      name: "Domain registration",
+      url: "altitude-demo.example",
+      checkType: "domain-expiry",
+      config: { warnDays: 30 },
+      intervalSeconds: 3600,
+      baseMs: 180,
+      publicName: "Domain registration",
     },
   ];
 
-  const monitorIds: string[] = [];
-  for (const seed of monitorSeeds) {
-    const down = seed.outages?.some(([from, to]) => now >= from && now <= to);
+  const monitorIds: Record<string, string> = {};
+  for (const seed of seeds) {
+    const isDown = seed.name === "Checkout Service";
     const [row] = await db
       .insert(monitors)
       .values({
@@ -213,193 +273,280 @@ async function main() {
         method: seed.method ?? "GET",
         intervalSeconds: seed.intervalSeconds,
         expectedStatusCode: seed.expectedStatusCode ?? null,
-        bodyKeyword: seed.bodyKeyword ?? null,
-        currentStatus: down ? "down" : "up",
-        consecutiveFailures: down ? 4 : 0,
+        checkType: seed.checkType ?? "http",
+        config: seed.config ?? null,
+        port: seed.port ?? null,
+        // One interval of failing before an incident opens — the
+        // time-based equivalent of the old failureThreshold: 2.
+        failureWindowSeconds: seed.intervalSeconds,
+        currentStatus: isDown ? "down" : "up",
+        consecutiveFailures: isDown ? 38 : 0,
+        firstFailureAt: isDown ? new Date(checkoutDownSince) : null,
         lastCheckedAt: new Date(now - 2 * MIN),
-        createdAt: new Date(now - 90 * DAY),
+        nextEvaluationAt: new Date(now + seed.intervalSeconds * 1000),
+        createdAt: new Date(now - 89 * DAY),
       })
-      .returning();
-    if (!row) throw new Error(`failed to insert monitor ${seed.name}`);
-    monitorIds.push(row.id);
+      .returning({ id: monitors.id });
+    if (!row) throw new Error(`monitor insert failed: ${seed.name}`);
+    monitorIds[seed.name] = row.id;
 
     const rows = checkRowsFor(row.id, seed, now);
-    for (let i = 0; i < rows.length; i += 500) {
-      await db.insert(monitorChecks).values(rows.slice(i, i + 500));
+    for (let i = 0; i < rows.length; i += 1000) {
+      await db.insert(monitorChecks).values(rows.slice(i, i + 1000));
     }
   }
 
-  // ---- Resolved incident, with the timeline a real team would leave ----
+  // --- Resolved incident with a complete lifecycle + postmortem --------
   const [resolved] = await db
     .insert(incidents)
     .values({
       organizationId,
-      title: "Elevated 502s on the API gateway",
+      title: "Elevated 5xx responses on the API Gateway",
       status: "resolved",
-      severity: "critical",
+      severity: "major",
       source: "monitor",
-      monitorId: monitorIds[1],
-      startedAt: new Date(gatewayOutage[0]),
-      resolvedAt: new Date(gatewayOutage[1]),
-      createdAt: new Date(gatewayOutage[0]),
-      postmortem: `## Summary
-
-A routine deploy of the gateway rolled out a connection-pool setting that was
-too small for peak traffic. Requests queued, then timed out as 502s for 70
-minutes until the change was rolled back.
-
-## Impact
-
-API and checkout returned errors for roughly 8% of requests between 09:12 and
-10:22 UTC. No data was lost.
-
-## Root cause
-
-POOL_MAX was lowered from 40 to 10 in the deploy that shipped the new rate
-limiter. Under normal load the smaller pool is fine; at peak it starves.
-
-## What we changed
-
-- Rolled back the pool setting and pinned it in the base config.
-- Added a load test at peak concurrency to the release checklist.
-- Added a keyword assertion on /health so a degraded gateway is caught
-  before customers see it.`,
+      monitorId: monitorIds["API Gateway"],
+      startedAt: new Date(gatewayOutage[0] + 2 * MIN),
+      resolvedAt: new Date(gatewayOutage[1] + 5 * MIN),
+      createdAt: new Date(gatewayOutage[0] + 2 * MIN),
+      notifiedAt: new Date(gatewayOutage[0] + 2 * MIN),
+      postmortem: [
+        "## Summary",
+        "Between 14:05 and 14:38 UTC the API Gateway returned 502s for roughly a third of requests after a routine deploy exhausted the upstream connection pool.",
+        "",
+        "## Impact",
+        "~33 minutes of degraded API availability. Dashboard and status page remained up; webhook deliveries were delayed but not lost.",
+        "",
+        "## Timeline",
+        "See the incident timeline — detection was automatic (2 consecutive failed checks), rollback restored service in 26 minutes.",
+        "",
+        "## Root cause",
+        "The 14:02 deploy halved `upstream_pool_size` via a misread config template. Connections saturated within three minutes under normal load.",
+        "",
+        "## What went well / what went poorly",
+        "- Well: automatic detection paged the on-call within a minute; rollback path worked first try.",
+        "- Poorly: the config change slipped through review; canary coverage does not include pool-limit regressions.",
+        "",
+        "## Action items",
+        "- [x] Roll back and pin `upstream_pool_size`",
+        "- [ ] Add config-diff linting for capacity-affecting keys",
+        "- [ ] Extend canary checks to catch connection-pool saturation",
+      ].join("\n"),
+      createdBy: null,
     })
-    .returning();
-  if (!resolved) throw new Error("failed to insert resolved incident");
+    .returning({ id: incidents.id });
+  if (!resolved) throw new Error("resolved incident insert failed");
 
+  const t0 = gatewayOutage[0] + 2 * MIN;
   await db.insert(incidentEvents).values([
     {
       incidentId: resolved.id,
       type: "created",
-      message: "Monitor API gateway failed 3 consecutive checks.",
-      createdAt: new Date(gatewayOutage[0]),
+      status: "investigating",
+      message: "API Gateway had been failing for 1 minute and was marked down.",
+      createdBy: null,
+      createdAt: new Date(t0),
     },
     {
       incidentId: resolved.id,
       type: "update",
       message:
-        "Seeing 502s from the gateway. Investigating — checkout is affected too.",
+        "Seeing sustained 502s from the gateway since 14:05. Checking the 14:02 deploy first.",
       createdBy: ids.responder,
-      createdAt: new Date(gatewayOutage[0] + 6 * MIN),
+      createdAt: new Date(t0 + 6 * MIN),
     },
     {
       incidentId: resolved.id,
       type: "status_change",
       status: "identified",
-      message: "Traced to this morning's gateway deploy. Rolling back.",
+      message:
+        "Root cause identified: the 14:02 deploy reduced the upstream connection pool. Rolling back now.",
       createdBy: ids.responder,
-      createdAt: new Date(gatewayOutage[0] + 24 * MIN),
+      createdAt: new Date(t0 + 12 * MIN),
     },
     {
       incidentId: resolved.id,
-      type: "update",
-      message: "Rollback is deploying — error rate already falling.",
+      type: "status_change",
+      status: "monitoring",
+      message:
+        "Rollback deployed. Error rate back to baseline — monitoring for regressions.",
       createdBy: ids.admin,
-      createdAt: new Date(gatewayOutage[0] + 47 * MIN),
+      createdAt: new Date(t0 + 24 * MIN),
     },
     {
       incidentId: resolved.id,
       type: "status_change",
       status: "resolved",
-      message: "Error rates are back to normal. Postmortem to follow.",
-      createdBy: ids.owner,
-      createdAt: new Date(gatewayOutage[1]),
+      message:
+        "Stable for 10 minutes across all regions. Resolving; postmortem to follow.",
+      createdBy: ids.admin,
+      createdAt: new Date(gatewayOutage[1] + 5 * MIN),
     },
   ]);
 
-  // ---- Ongoing incident ----
+  // --- Ongoing critical incident ---------------------------------------
   const [ongoing] = await db
     .insert(incidents)
     .values({
       organizationId,
-      title: "Checkout service is down",
-      status: "investigating",
+      title: "Checkout Service is down",
+      status: "identified",
       severity: "critical",
       source: "monitor",
-      monitorId: monitorIds[2],
-      startedAt: new Date(checkoutOutage[0]),
-      createdAt: new Date(checkoutOutage[0]),
+      monitorId: monitorIds["Checkout Service"],
+      startedAt: new Date(checkoutDownSince + 2 * MIN),
+      createdAt: new Date(checkoutDownSince + 2 * MIN),
+      notifiedAt: new Date(checkoutDownSince + 2 * MIN),
+      createdBy: null,
     })
-    .returning();
-  if (!ongoing) throw new Error("failed to insert ongoing incident");
+    .returning({ id: incidents.id });
+  if (!ongoing) throw new Error("ongoing incident insert failed");
 
   await db.insert(incidentEvents).values([
     {
       incidentId: ongoing.id,
       type: "created",
-      message: "Monitor Checkout service failed 3 consecutive checks.",
-      createdAt: new Date(checkoutOutage[0]),
+      status: "investigating",
+      message:
+        "Checkout Service had been failing for 1 minute and was marked down.",
+      createdBy: null,
+      createdAt: new Date(checkoutDownSince + 2 * MIN),
+    },
+    // Recovery tried first — and lost. That's the escalation story: the
+    // runtime stands down honestly and the humans below take over.
+    {
+      incidentId: ongoing.id,
+      type: "system",
+      message:
+        "Automatic recovery attempt 1 of 2 started for Checkout Service.",
+      createdBy: null,
+      createdAt: new Date(checkoutDownSince + 2 * MIN + 15 * 1000),
+    },
+    {
+      incidentId: ongoing.id,
+      type: "system",
+      message:
+        "Recovery attempt 1 did not restore Checkout Service — post-recovery verification still failing.",
+      createdBy: null,
+      createdAt: new Date(checkoutDownSince + 3 * MIN),
+    },
+    {
+      incidentId: ongoing.id,
+      type: "system",
+      message: "Next automatic recovery attempt in 120 seconds.",
+      createdBy: null,
+      createdAt: new Date(checkoutDownSince + 3 * MIN),
+    },
+    {
+      incidentId: ongoing.id,
+      type: "system",
+      message:
+        "Recovery attempt 2 did not restore Checkout Service — post-recovery verification still failing.",
+      createdBy: null,
+      createdAt: new Date(checkoutDownSince + 6 * MIN),
+    },
+    {
+      incidentId: ongoing.id,
+      type: "system",
+      message:
+        "Automatic recovery exhausted after 2 attempts — waiting for a human.",
+      createdBy: null,
+      createdAt: new Date(checkoutDownSince + 6 * MIN),
     },
     {
       incidentId: ongoing.id,
       type: "update",
       message:
-        "Checkout is returning 502. The gateway itself is healthy, so this looks specific to the checkout upstream.",
+        "DNS for the checkout upstream stopped resolving after the 17:20 infra change — a restart can't fix a missing CNAME, so recovery correctly stood down. Escalated to the platform team.",
       createdBy: ids.responder,
-      createdAt: new Date(checkoutOutage[0] + 9 * MIN),
+      createdAt: new Date(checkoutDownSince + 9 * MIN),
     },
     {
       incidentId: ongoing.id,
-      type: "update",
+      type: "status_change",
+      status: "identified",
       message:
-        "Paging the payments vendor — their status page is quiet but our requests time out.",
-      internal: true,
+        "Confirmed: the zone migration dropped the checkout CNAME. Re-creating the record; ETA ~20 minutes.",
       createdBy: ids.admin,
-      createdAt: new Date(checkoutOutage[0] + 21 * MIN),
+      createdAt: new Date(checkoutDownSince + 16 * MIN),
     },
   ]);
 
-  // ---- Public status page ----
+  // --- Public status page ----------------------------------------------
   const [page] = await db
     .insert(statusPages)
     .values({
       organizationId,
       slug: DEMO_ORG.slug,
-      name: `${DEMO_ORG.name} status`,
+      name: `${DEMO_ORG.name} Status`,
       published: true,
-      createdAt: new Date(now - 80 * DAY),
+      createdAt: new Date(now - 89 * DAY),
     })
-    .returning();
-  if (!page) throw new Error("failed to insert status page");
+    .returning({ id: statusPages.id });
+  if (!page) throw new Error("status page insert failed");
 
   await db.insert(statusPageMonitors).values(
-    monitorSeeds.map((seed, index) => ({
+    seeds.map((seed, index) => ({
       statusPageId: page.id,
-      monitorId: monitorIds[index]!,
+      monitorId: monitorIds[seed.name]!,
       displayName: seed.publicName,
       sortOrder: index,
     })),
   );
 
-  await db.insert(auditLogs).values([
+  // A few status-page subscribers: confirmed ones are emailed on incidents,
+  // one pending row shows the double opt-in state on the settings page.
+  await db.insert(statusPageSubscribers).values([
     {
-      organizationId,
-      actorId: ids.owner,
-      action: "status_page.updated",
-      targetType: "status_page",
-      targetId: page.id,
-      metadata: { slug: page.slug, published: true },
-      createdAt: new Date(now - 80 * DAY),
+      statusPageId: page.id,
+      email: "ops@customer.example",
+      confirmedAt: new Date(now - 80 * DAY),
     },
+    {
+      statusPageId: page.id,
+      email: "sre@partner.example",
+      confirmedAt: new Date(now - 40 * DAY),
+    },
+    { statusPageId: page.id, email: "pending@lead.example" },
   ]);
 
+  // --- A believable audit trail ----------------------------------------
+  await db.insert(auditLogs).values(
+    seeds.map((seed) => ({
+      organizationId,
+      actorId: ids.owner,
+      action: "monitor.created",
+      targetType: "monitor",
+      targetId: monitorIds[seed.name]!,
+      metadata: { name: seed.name, url: seed.url },
+      createdAt: new Date(now - 89 * DAY),
+    })),
+  );
+  await db.insert(auditLogs).values({
+    organizationId,
+    actorId: ids.admin,
+    action: "status_page.updated",
+    targetType: "status_page",
+    targetId: page.id,
+    metadata: { slug: DEMO_ORG.slug, published: true },
+    createdAt: new Date(now - 88 * DAY),
+  });
+
   console.log(`
-Seeded ${DEMO_ORG.name}:
-  ${monitorSeeds.length} monitors with 90 days of history
-  1 resolved incident (timeline + postmortem), 1 ongoing outage
-  public status page at /status/${DEMO_ORG.slug}
+Demo tenant ready — organization "${DEMO_ORG.name}" (${DEMO_ORG.slug})
 
 Sign in with (password: ${DEMO_PASSWORD}):
-${Object.values(DEMO_USERS)
-  .map((u) => `  ${u.email.padEnd(24)} ${u.role}`)
-  .join("\n")}
+  owner      ${DEMO_USERS.owner.email}
+  admin      ${DEMO_USERS.admin.email}
+  responder  ${DEMO_USERS.responder.email}
+  viewer     ${DEMO_USERS.viewer.email}   (used by /api/demo in DEMO_MODE)
+
+Public status page: /status/${DEMO_ORG.slug}
 `);
+  process.exit(0);
 }
 
-main()
-  .then(() => process.exit(0))
-  .catch((error: unknown) => {
-    console.error(error);
-    process.exit(1);
-  });
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

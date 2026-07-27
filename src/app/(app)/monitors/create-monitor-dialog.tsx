@@ -22,7 +22,9 @@ import {
   type MonitorFormValues,
 } from "./monitor-form";
 
-export function CreateMonitorDialog() {
+export function CreateMonitorDialog({
+}: {
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);

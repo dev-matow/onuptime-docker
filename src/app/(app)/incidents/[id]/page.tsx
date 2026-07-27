@@ -11,6 +11,7 @@ import {
 import { IncidentStatusBadge, SeverityBadge } from "@/components/status";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { db } from "@/db";
+import { isAiEnabled } from "@/lib/env";
 import { NotFoundError } from "@/lib/errors";
 import { formatDateTime, formatDuration } from "@/lib/format";
 import { hasPermission } from "@/lib/permissions";
@@ -122,10 +123,11 @@ export default async function IncidentDetailPage(
               incidentId={incident.id}
               postmortem={incident.postmortem}
               canEdit={canPostmortem}
+              aiEnabled={isAiEnabled}
             />
           )}
           {!resolved && canUpdate && (
-            <UpdateComposer incidentId={incident.id} />
+            <UpdateComposer incidentId={incident.id} aiEnabled={isAiEnabled} />
           )}
           <section
             className="flex flex-col gap-4"
@@ -142,6 +144,7 @@ export default async function IncidentDetailPage(
               incidentId={incident.id}
               status={incident.status}
               severity={incident.severity}
+              acknowledged={incident.acknowledgedAt !== null}
               canUpdate={canUpdate}
               canResolve={canResolve}
             />

@@ -42,7 +42,7 @@ export async function notifyIncidentOpened(
   const email = renderIncidentOpenedEmail({
     monitorName: monitor.name,
     monitorUrl: monitor.url,
-    failureThreshold: monitor.failureThreshold,
+    failureWindowSeconds: monitor.failureWindowSeconds,
     incidentUrl: `${env.APP_URL}/incidents/${incident.id}`,
   });
 

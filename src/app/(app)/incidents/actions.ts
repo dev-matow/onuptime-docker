@@ -10,7 +10,9 @@ import {
   type ActionResult,
 } from "@/lib/action-result";
 import { logger } from "@/lib/logger";
+import { checkRateLimit } from "@/lib/rate-limit";
 import { requirePermission } from "@/lib/session";
+import { draftPostmortem, suggestStatusUpdate } from "@/modules/ai/incident-ai";
 import {
   createIncidentSchema,
   incidentUpdateSchema,
@@ -19,6 +21,7 @@ import {
   statusChangeSchema,
 } from "@/modules/incidents/schemas";
 import {
+  acknowledgeIncident,
   changeIncidentSeverity,
   changeIncidentStatus,
   createIncident,
@@ -27,13 +30,31 @@ import {
   savePostmortem,
 } from "@/modules/incidents/service";
 import { sendIncidentWebhook } from "@/modules/notifications/webhook-service";
+import { notifyStatusPageSubscribers } from "@/modules/notifications/subscriber-emails";
 import type { WebhookEvent } from "@/modules/notifications/webhook";
+
+/** Cost guard: 10 AI generations per organization per hour. */
+const AI_RATE_LIMIT = { limit: 10, windowMs: 60 * 60 * 1000 };
 
 /**
  * Fires the org webhook after a manual incident mutation has already
  * committed. Isolated in try/catch so a webhook problem can never turn a
  * successful action into a failed one.
  */
+const SUBSCRIBER_KIND: Record<
+  WebhookEvent,
+  "opened" | "updated" | "resolved" | null
+> = {
+  "incident.opened": "opened",
+  "incident.updated": "updated",
+  "incident.resolved": "resolved",
+  "monitor.down": null,
+  "monitor.up": null,
+  "webhook.test": null,
+  "recovery.execute": null,
+  "recovery.test": null,
+};
+
 async function dispatchIncidentWebhook(
   organizationId: string,
   incidentId: string,
@@ -46,6 +67,14 @@ async function dispatchIncidentWebhook(
       incident: detail.incident,
       monitor: detail.monitor ?? undefined,
     });
+    // Status-page subscribers hear about the same public lifecycle events.
+    const kind = SUBSCRIBER_KIND[event];
+    if (kind) {
+      await notifyStatusPageSubscribers(db, {
+        incident: detail.incident,
+        kind,
+      });
+    }
   } catch (error) {
     logger.warn(
       { err: error, incidentId, event },
@@ -99,6 +128,19 @@ export async function changeIncidentStatusAction(
         ? "incident.resolved"
         : "incident.updated",
     );
+    return actionOk(undefined);
+  } catch (error) {
+    return toActionError(error);
+  }
+}
+
+export async function acknowledgeIncidentAction(
+  incidentId: string,
+): Promise<ActionResult> {
+  try {
+    const ctx = await requirePermission({ incident: ["update"] });
+    await acknowledgeIncident(db, ctx, incidentId);
+    revalidateIncident(incidentId);
     return actionOk(undefined);
   } catch (error) {
     return toActionError(error);
@@ -173,6 +215,38 @@ export async function savePostmortemAction(
     await savePostmortem(db, ctx, incidentId, parsed.data.content);
     revalidateIncident(incidentId);
     return actionOk(undefined);
+  } catch (error) {
+    return toActionError(error);
+  }
+}
+
+export async function draftPostmortemAction(
+  incidentId: string,
+): Promise<ActionResult<{ draft: string }>> {
+  try {
+    const ctx = await requirePermission({ incident: ["postmortem"] });
+    if (!checkRateLimit(`ai:${ctx.organizationId}`, AI_RATE_LIMIT)) {
+      return actionError("AI limit reached for this hour — try again later.");
+    }
+    const detail = await getIncidentDetail(db, ctx.organizationId, incidentId);
+    const draft = await draftPostmortem(detail);
+    return actionOk({ draft });
+  } catch (error) {
+    return toActionError(error);
+  }
+}
+
+export async function suggestStatusUpdateAction(
+  incidentId: string,
+): Promise<ActionResult<{ suggestion: string }>> {
+  try {
+    const ctx = await requirePermission({ incident: ["update"] });
+    if (!checkRateLimit(`ai:${ctx.organizationId}`, AI_RATE_LIMIT)) {
+      return actionError("AI limit reached for this hour — try again later.");
+    }
+    const detail = await getIncidentDetail(db, ctx.organizationId, incidentId);
+    const suggestion = await suggestStatusUpdate(detail);
+    return actionOk({ suggestion });
   } catch (error) {
     return toActionError(error);
   }

@@ -99,7 +99,6 @@ CREATE TABLE "incident_events" (
 	"type" "incident_event_type" NOT NULL,
 	"status" "incident_status",
 	"message" text NOT NULL,
-	"internal" boolean DEFAULT false NOT NULL,
 	"created_by" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
@@ -140,24 +139,12 @@ CREATE TABLE "monitors" (
 	"timeout_ms" integer DEFAULT 10000 NOT NULL,
 	"degraded_threshold_ms" integer DEFAULT 3000 NOT NULL,
 	"expected_status_code" integer,
-	"body_keyword" text,
-	"keyword_absent" boolean DEFAULT false NOT NULL,
 	"failure_threshold" integer DEFAULT 3 NOT NULL,
 	"paused" boolean DEFAULT false NOT NULL,
 	"current_status" "monitor_status" DEFAULT 'unknown' NOT NULL,
 	"consecutive_failures" integer DEFAULT 0 NOT NULL,
 	"last_checked_at" timestamp with time zone,
 	"created_by" text,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
-);
---> statement-breakpoint
-CREATE TABLE "webhook_endpoints" (
-	"id" uuid PRIMARY KEY DEFAULT uuidv7() NOT NULL,
-	"organization_id" text NOT NULL,
-	"url" text DEFAULT '' NOT NULL,
-	"secret" text NOT NULL,
-	"enabled" boolean DEFAULT false NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
@@ -196,7 +183,6 @@ ALTER TABLE "incidents" ADD CONSTRAINT "incidents_created_by_user_id_fk" FOREIGN
 ALTER TABLE "monitor_checks" ADD CONSTRAINT "monitor_checks_monitor_id_monitors_id_fk" FOREIGN KEY ("monitor_id") REFERENCES "public"."monitors"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "monitors" ADD CONSTRAINT "monitors_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "monitors" ADD CONSTRAINT "monitors_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "webhook_endpoints" ADD CONSTRAINT "webhook_endpoints_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "status_page_monitors" ADD CONSTRAINT "status_page_monitors_status_page_id_status_pages_id_fk" FOREIGN KEY ("status_page_id") REFERENCES "public"."status_pages"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "status_page_monitors" ADD CONSTRAINT "status_page_monitors_monitor_id_monitors_id_fk" FOREIGN KEY ("monitor_id") REFERENCES "public"."monitors"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "status_pages" ADD CONSTRAINT "status_pages_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -214,6 +200,5 @@ CREATE INDEX "incidents_organization_id_created_at_index" ON "incidents" USING b
 CREATE INDEX "incidents_monitor_id_index" ON "incidents" USING btree ("monitor_id");--> statement-breakpoint
 CREATE INDEX "monitor_checks_monitor_id_checked_at_index" ON "monitor_checks" USING btree ("monitor_id","checked_at" DESC NULLS LAST);--> statement-breakpoint
 CREATE INDEX "monitors_organization_id_index" ON "monitors" USING btree ("organization_id");--> statement-breakpoint
-CREATE UNIQUE INDEX "webhook_endpoints_organization_id_index" ON "webhook_endpoints" USING btree ("organization_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "status_pages_slug_index" ON "status_pages" USING btree ("slug");--> statement-breakpoint
 CREATE UNIQUE INDEX "status_pages_organization_id_index" ON "status_pages" USING btree ("organization_id");

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 
-import { getOrganizationWithAllMembers } from "@/lib/auth";
+import { ALL_MEMBERS, auth } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { requireOrgContext } from "@/lib/session";
 
@@ -13,7 +13,12 @@ export const metadata: Metadata = { title: "Members — Vigil" };
 
 export default async function MembersPage() {
   const ctx = await requireOrgContext();
-  const org = await getOrganizationWithAllMembers(await headers());
+  const org = await auth.api.getFullOrganization({
+    // Without an explicit limit the member join stops at 100 and the
+    // table would silently omit everyone after that.
+    query: { membersLimit: ALL_MEMBERS },
+    headers: await headers(),
+  });
 
   const members = (org?.members ?? []).map((m) => ({
     id: m.id,

@@ -18,10 +18,12 @@ interface ComponentRow {
 }
 
 export function StatusPageMonitorsForm({
+  statusPageId,
   monitors,
   selected,
   canEdit,
 }: {
+  statusPageId: string;
   monitors: { id: string; name: string }[];
   selected: ComponentRow[];
   canEdit: boolean;
@@ -50,7 +52,10 @@ export function StatusPageMonitorsForm({
 
   async function save() {
     setPending(true);
-    const result = await setStatusPageMonitorsAction({ monitors: rows });
+    const result = await setStatusPageMonitorsAction({
+      statusPageId,
+      monitors: rows,
+    });
     setPending(false);
     if (!result.ok) {
       toast.error(result.error);

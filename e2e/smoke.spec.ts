@@ -16,6 +16,9 @@ const userEmail = `e2e-${runId}@example.com`;
 const userPassword = `e2e-pass-${runId}`;
 const orgName = `E2E Org ${runId}`;
 const orgSlug = `e2e-org-${runId}`;
+// A second tenant, used only to prove status pages don't share a cache.
+const org2Name = `E2E Second ${runId}`;
+const org2Slug = `e2e-second-${runId}`;
 
 test.describe("Vigil golden path", () => {
   let page: Page;
@@ -72,6 +75,66 @@ test.describe("Vigil golden path", () => {
     await expect(row).toBeVisible({ timeout: 10_000 });
     await expect(row).toContainText("Pending");
     await expect(row).toContainText("https://example.com");
+  });
+
+  test("creates a monitor of each new check type through the dialog", async () => {
+    // The form renders itself from the check type registry, so this
+    // walks the four types added in 1.10.0 to prove the descriptor, the
+    // per-type fields and the action layer agree. A type that validates
+    // in isolation but cannot be filled in is not shipped.
+    const cases = [
+      {
+        name: "E2E ping",
+        type: "Ping (ICMP)",
+        label: "Hostname",
+        target: "gateway.example.com",
+      },
+      {
+        name: "E2E dns",
+        type: "DNS record",
+        label: "Hostname",
+        target: "dns.example.com",
+      },
+      {
+        name: "E2E tls",
+        type: "TLS certificate expiry",
+        label: "Hostname",
+        target: "tls.example.com",
+      },
+      {
+        name: "E2E domain",
+        type: "Domain expiry",
+        label: "Domain",
+        target: "expiry-demo.com",
+      },
+    ];
+
+    for (const { name, type, label, target } of cases) {
+      await page.goto("/monitors");
+      await page
+        .getByRole("button", { name: "Create monitor" })
+        .first()
+        .click();
+
+      const dialog = page.getByRole("dialog");
+      await expect(dialog).toBeVisible();
+      await dialog.getByLabel("Name", { exact: true }).fill(name);
+      await dialog.getByLabel("Check type").click();
+      await page.getByRole("option", { name: type }).click();
+      await dialog.getByLabel(label, { exact: true }).fill(target);
+
+      if (type === "DNS record") {
+        await dialog.getByLabel("Record type").click();
+        await page.getByRole("option", { name: "MX" }).click();
+      }
+
+      await dialog.getByRole("button", { name: "Create monitor" }).click();
+      await expect(dialog).toBeHidden({ timeout: 10_000 });
+
+      const created = page.getByRole("row", { name: new RegExp(name) });
+      await expect(created).toBeVisible({ timeout: 10_000 });
+      await expect(created).toContainText(target);
+    }
   });
 
   test("reports an incident and posts a timeline update", async () => {
@@ -156,5 +219,57 @@ test.describe("Vigil golden path", () => {
     await expect(
       page.getByRole("heading", { level: 1, name: `${orgName} status` }),
     ).toBeVisible({ timeout: 10_000 });
+  });
+
+  // Two published status pages in one deployment must never share a
+  // cache entry. This caught a real cross-tenant leak: the slug was
+  // captured in the cached callback's closure instead of passed as an
+  // argument, so Next derived an identical key for every page and the
+  // first slug requested was served under all the others.
+  test("serves a second organization's status page, not the first's", async () => {
+    await page.goto("/onboarding?new=1");
+    await page.getByLabel("Organization name").fill(org2Name);
+    await expect(page.getByLabel("Slug")).toHaveValue(org2Slug);
+    await page.getByRole("button", { name: "Create organization" }).click();
+    await expect(page).toHaveURL(/\/dashboard$/, { timeout: 15_000 });
+
+    await page.goto("/monitors");
+    await page.getByRole("button", { name: "Create monitor" }).first().click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await dialog.getByLabel("Name", { exact: true }).fill("Second Monitor");
+    await dialog.getByLabel("URL").fill("https://example.org");
+    await dialog.getByRole("button", { name: "Create monitor" }).click();
+    await expect(dialog).toBeHidden({ timeout: 10_000 });
+
+    await page.goto("/status-page");
+    const publishSwitch = page.getByRole("switch", { name: "Published" });
+    await publishSwitch.click();
+    await expect(publishSwitch).toBeChecked();
+    await page.getByRole("button", { name: "Save settings" }).click();
+    await expect(page.getByText("Status page updated").first()).toBeVisible({
+      timeout: 10_000,
+    });
+    await page.getByRole("checkbox", { name: "Second Monitor" }).check();
+    await page.getByRole("button", { name: "Save components" }).click();
+    await expect(page.getByText("Components updated").first()).toBeVisible({
+      timeout: 10_000,
+    });
+
+    // The first page was rendered (and cached) in the previous step, so
+    // a shared key would serve it here too. Each slug must show its own.
+    await page.goto(`/status/${org2Slug}`);
+    await expect(
+      page.getByRole("heading", { level: 1, name: `${org2Name} status` }),
+    ).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText("Second Monitor")).toBeVisible();
+    await expect(page.getByText("E2E Monitor")).toHaveCount(0);
+
+    // And the original must not have been displaced by the second.
+    await page.goto(`/status/${orgSlug}`);
+    await expect(
+      page.getByRole("heading", { level: 1, name: `${orgName} status` }),
+    ).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText("Second Monitor")).toHaveCount(0);
   });
 });

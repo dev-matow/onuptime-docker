@@ -9,7 +9,14 @@ import { findDueMonitors } from "@/modules/monitors/service";
 
 import { runMonitorCheck } from "./jobs/monitor-check";
 import { pruneOldChecks } from "./jobs/retention";
-import { QUEUES, type MonitorCheckJob } from "./queues";
+import {
+  QUEUES,
+  type EscalationStepJob,
+  type MonitorCheckJob,
+  type RecoveryEscalateJob,
+  type RecoveryExecuteJob,
+  type RecoveryVerifyJob,
+} from "./queues";
 
 /**
  * The Vigil worker: a separate long-running process that owns all
@@ -39,6 +46,30 @@ async function main() {
     retryLimit: 0,
     expireInSeconds: 60,
   });
+  // No pg-boss retries: the jobs aren't idempotent mid-flow (a re-run
+  // after the trigger fired would fire it twice). A dropped chain is
+  // closed by the nightly stale-attempt sweep (retention job), and the
+  // escalation failsafe pages independently when alerts were held.
+  await boss.createQueue(QUEUES.recoveryExecute, {
+    retryLimit: 0,
+    expireInSeconds: 180,
+  });
+  await boss.createQueue(QUEUES.recoveryVerify, {
+    retryLimit: 0,
+    expireInSeconds: 120,
+  });
+  // Escalation IS idempotent (notifiedAt claim), and as the safety net
+  // it must fire — so unlike the other recovery jobs it gets retries.
+  await boss.createQueue(QUEUES.recoveryEscalate, {
+    retryLimit: 2,
+    expireInSeconds: 60,
+  });
+  // Escalation steps re-check ack/resolution before paging, so a retry
+  // is safe; it must fire, so give it retries like the failsafe.
+  await boss.createQueue(QUEUES.escalationStep, {
+    retryLimit: 2,
+    expireInSeconds: 120,
+  });
   await boss.createQueue(QUEUES.retention);
 
   await boss.work(QUEUES.monitorTick, async () => {
@@ -66,7 +97,7 @@ async function main() {
       await Promise.all(
         jobs.map(async (job) => {
           try {
-            await runMonitorCheck(job.data.monitorId);
+            await runMonitorCheck(job.data.monitorId, { boss });
           } catch (error) {
             // Swallow per-monitor failures: the next tick re-enqueues.
             log.error(
@@ -78,6 +109,7 @@ async function main() {
       );
     },
   );
+
 
   await boss.work(QUEUES.retention, async () => {
     await pruneOldChecks();

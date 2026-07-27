@@ -2,16 +2,29 @@ import { sql } from "drizzle-orm";
 import {
   boolean,
   integer,
+  pgEnum,
   pgTable,
   primaryKey,
   text,
   timestamp,
+  index,
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 
 import { organization } from "./auth";
 import { monitors } from "./monitors";
+
+/**
+ * Who may view a published status page. `public` = anyone; `private` =
+ * signed-in members of the owning organization only; `password` =
+ * anyone holding the shared password.
+ */
+export const statusPageVisibility = pgEnum("status_page_visibility", [
+  "public",
+  "private",
+  "password",
+]);
 
 /** One public status page per organization. */
 export const statusPages = pgTable(
@@ -27,13 +40,43 @@ export const statusPages = pgTable(
     slug: text().notNull(),
     name: text().notNull(),
     published: boolean().notNull().default(false),
+    visibility: statusPageVisibility().notNull().default("public"),
+    /** scrypt hash (`salt:hash` hex) when visibility = password. */
+    passwordHash: text(),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp({ withTimezone: true })
       .notNull()
       .defaultNow()
       .$onUpdate(() => new Date()),
   },
-  (t) => [uniqueIndex().on(t.slug), uniqueIndex().on(t.organizationId)],
+  // Slugs are globally unique because they are the public URL. The
+  // organization is deliberately NOT unique: an organization owns as many
+  // status pages as it likes — one per client, per product, per audience.
+  // Anything that used to assume "the" page for an organization has to
+  // name which one.
+  (t) => [uniqueIndex().on(t.slug), index().on(t.organizationId)],
+);
+
+/**
+ * Email subscribers to a status page. Double opt-in: a row is created on
+ * subscribe but only notified once `confirmedAt` is set (via the link in
+ * the confirmation email). One row per (page, email).
+ */
+export const statusPageSubscribers = pgTable(
+  "status_page_subscribers",
+  {
+    id: uuid()
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    statusPageId: uuid()
+      .notNull()
+      .references(() => statusPages.id, { onDelete: "cascade" }),
+    email: text().notNull(),
+    /** Null until the subscriber confirms; only confirmed rows are paged. */
+    confirmedAt: timestamp({ withTimezone: true }),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex().on(t.statusPageId, t.email)],
 );
 
 /** Monitors exposed on a status page, with a public-facing name. */

@@ -10,7 +10,7 @@ export default function SettingsLayout({
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
         <p className="text-muted-foreground mt-1 text-sm">
-          Organization, team and notifications.
+          Organization, team and audit trail.
         </p>
       </header>
       <SettingsNav />

@@ -34,6 +34,10 @@ export const metadata: Metadata = { title: "Monitors — Vigil" };
 export default async function MonitorsPage() {
   const ctx = await requireOrgContext();
   const monitors = await listMonitors(db, ctx.organizationId);
+  // Empty in the free edition: the escalation picker it feeds is
+  // commercial, and the component ignores an empty list.
+  let policies: { id: string; name: string }[] = [];
+
   const canCreate = hasPermission(ctx.role, { monitor: ["create"] });
   const canUpdate = hasPermission(ctx.role, { monitor: ["update"] });
   const canDelete = hasPermission(ctx.role, { monitor: ["delete"] });
@@ -53,11 +57,13 @@ export default async function MonitorsPage() {
             </Badge>
           </div>
           <p className="text-muted-foreground text-sm">
-            HTTP checks that watch your endpoints and open incidents when they
-            fail.
+            Checks that watch your endpoints and open incidents when they fail.
           </p>
         </div>
-        {canCreate && <CreateMonitorDialog />}
+        {canCreate && (
+          <CreateMonitorDialog
+          />
+        )}
       </div>
 
       {monitors.length === 0 ? (
@@ -72,7 +78,10 @@ export default async function MonitorsPage() {
               times. The first check runs within a minute.
             </EmptyDescription>
           </EmptyHeader>
-          {canCreate && <CreateMonitorDialog />}
+          {canCreate && (
+            <CreateMonitorDialog
+            />
+          )}
         </Empty>
       ) : (
         <>

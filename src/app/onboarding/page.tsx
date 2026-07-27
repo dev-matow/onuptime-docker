@@ -9,40 +9,18 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { db } from "@/db";
 import { requireSession } from "@/lib/session";
 
 import { CreateOrganizationForm } from "./create-organization-form";
 
 export const metadata: Metadata = { title: "Create organization — Vigil" };
 
-export default async function OnboardingPage() {
+export default async function OnboardingPage(props: PageProps<"/onboarding">) {
   const session = await requireSession();
-  if (session.session.activeOrganizationId) {
+  const searchParams = await props.searchParams;
+  // `?new=1` lets an existing member create an additional organization.
+  if (session.session.activeOrganizationId && !searchParams.new) {
     redirect("/dashboard");
-  }
-
-  // Core runs one organization per install. If it already exists, this
-  // account was created without an invitation and has nowhere to go.
-  const existing = await db.query.organization.findFirst({
-    columns: { name: true },
-  });
-  if (existing) {
-    return (
-      <div className="bg-muted/40 flex min-h-svh flex-col items-center justify-center gap-6 p-4">
-        <Logo />
-        <Card className="w-full max-w-sm">
-          <CardHeader>
-            <CardTitle>This install is already set up</CardTitle>
-            <CardDescription>
-              {existing.name} is already running on this Vigil. Ask an
-              administrator to invite you — you&apos;ll get an email with a link
-              that adds you to the team.
-            </CardDescription>
-          </CardHeader>
-        </Card>
-      </div>
-    );
   }
 
   return (

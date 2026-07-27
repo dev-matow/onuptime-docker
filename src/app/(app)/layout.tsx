@@ -40,6 +40,7 @@ export default async function AppLayout({
           image: session.user.image ?? null,
         }}
         organizationName={org?.name ?? "Organization"}
+        role={ctx.role}
       />
       <SidebarInset className="min-w-0">
         <header className="bg-background/80 sticky top-0 z-10 flex h-14 items-center gap-2 border-b px-4 backdrop-blur">

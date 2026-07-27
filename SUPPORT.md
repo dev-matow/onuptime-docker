@@ -1,8 +1,5 @@
 # Support
 
-Vigil Core is free software maintained by one developer. Support is
-best-effort and happens in the open.
-
 ## Check the documentation first
 
 Most questions are answered here:
@@ -14,27 +11,26 @@ Most questions are answered here:
 - [docs/HANDBOOK.md](docs/HANDBOOK.md) — commands, conventions, debugging
 - [ARCHITECTURE.md](ARCHITECTURE.md) — how the pieces fit together
 
-## Asking a question
+## Before you buy
 
-Open a [GitHub issue](https://github.com/artaspervyj-dotcom/vigil-core/issues).
-To get a fast, useful answer, include:
+Questions about licensing, deployment or whether Vigil fits your case:
+message [**@s8kur on Telegram**](https://t.me/s8kur). See
+[COMMERCIAL.md](COMMERCIAL.md) for what a purchase includes.
 
-- your Vigil Core version (see [CHANGELOG.md](CHANGELOG.md)),
+## After you buy
+
+Use the support channel on your purchase receipt. To get a fast, useful
+answer, include:
+
+- your Vigil version (see [CHANGELOG.md](CHANGELOG.md)),
 - which process is affected — the app or the worker,
 - the relevant log lines. Both processes emit structured JSON to stdout;
   set `LOG_LEVEL=debug` temporarily for check-level detail.
 
-Security issues go to [SECURITY.md](SECURITY.md) instead — privately,
-not in an issue.
+## What support covers
 
-## What to expect
-
-Issues are read and triaged, but this is not a product with an SLA. Bug
-reports with a reproduction get attention first; "how do I…" questions
-are answered when time allows and often end up improving the docs.
-
-If you need guaranteed response times, a hosted deployment, or features
-that aren't here, the commercial edition is at
-[vigil-uptime.com](https://vigil-uptime.com) — see
-["What the commercial edition adds"](README.md#what-the-commercial-edition-adds)
-in the README for the honest list of what's different.
+Support covers deploying and running Vigil **as shipped** — install,
+configuration, migrations, Docker, and the documented features. It does
+not cover your own modifications, your third-party infrastructure, or
+custom features built on top. The documentation is written to make those
+self-serviceable.

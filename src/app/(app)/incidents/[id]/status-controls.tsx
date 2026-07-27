@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { CheckCircleIcon } from "@phosphor-icons/react";
+import { BellSlashIcon, CheckCircleIcon } from "@phosphor-icons/react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -35,6 +35,7 @@ import {
 } from "@/modules/incidents/lifecycle";
 
 import {
+  acknowledgeIncidentAction,
   changeIncidentSeverityAction,
   changeIncidentStatusAction,
 } from "../actions";
@@ -43,6 +44,7 @@ interface StatusControlsProps {
   incidentId: string;
   status: IncidentStatus;
   severity: IncidentSeverity;
+  acknowledged: boolean;
   canUpdate: boolean;
   canResolve: boolean;
 }
@@ -51,6 +53,7 @@ export function StatusControls({
   incidentId,
   status,
   severity,
+  acknowledged,
   canUpdate,
   canResolve,
 }: StatusControlsProps) {
@@ -60,6 +63,19 @@ export function StatusControls({
   const [message, setMessage] = useState("");
   const [statusPending, setStatusPending] = useState(false);
   const [severityPending, setSeverityPending] = useState(false);
+  const [ackPending, setAckPending] = useState(false);
+
+  async function handleAcknowledge() {
+    setAckPending(true);
+    const result = await acknowledgeIncidentAction(incidentId);
+    setAckPending(false);
+    if (!result.ok) {
+      toast.error(result.error);
+      return;
+    }
+    toast.success("Acknowledged — escalation stopped.");
+    router.refresh();
+  }
 
   const resolved = status === "resolved";
   const transitions = allowedTransitions(status).filter((next) =>
@@ -133,6 +149,23 @@ export function StatusControls({
           </p>
         ) : (
           <div className="flex flex-col gap-2">
+            {canUpdate &&
+              (acknowledged ? (
+                <p className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400">
+                  <BellSlashIcon aria-hidden className="size-3.5" />
+                  Acknowledged — escalation stopped
+                </p>
+              ) : (
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={handleAcknowledge}
+                  disabled={ackPending}
+                >
+                  {ackPending ? <Spinner /> : <BellSlashIcon aria-hidden />}
+                  Acknowledge
+                </Button>
+              ))}
             {canResolve && (
               <Button
                 className="w-full bg-emerald-600 text-white hover:bg-emerald-600/90"

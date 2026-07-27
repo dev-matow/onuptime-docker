@@ -23,6 +23,7 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
+import type { RoleName } from "@/lib/permissions";
 
 const NAV_ITEMS = [
   { title: "Dashboard", href: "/dashboard", icon: GaugeIcon },
@@ -35,34 +36,17 @@ const NAV_ITEMS = [
 export function AppSidebar({
   user,
   organizationName,
+  role,
 }: {
   user: { name: string; email: string; image: string | null };
   organizationName: string;
+  role: RoleName;
 }) {
   const pathname = usePathname();
 
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton size="lg" asChild tooltip={organizationName}>
-              <Link href="/dashboard">
-                <div className="bg-primary/10 text-primary flex aspect-square size-8 items-center justify-center rounded-md">
-                  <PulseIcon aria-hidden className="size-4" />
-                </div>
-                <div className="grid flex-1 text-left leading-tight">
-                  <span className="truncate text-sm font-medium">
-                    {organizationName}
-                  </span>
-                  <span className="text-muted-foreground truncate text-xs">
-                    Vigil Core
-                  </span>
-                </div>
-              </Link>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>

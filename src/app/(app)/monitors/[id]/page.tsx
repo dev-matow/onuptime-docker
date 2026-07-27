@@ -33,12 +33,16 @@ import {
 } from "@/lib/format";
 import { hasPermission } from "@/lib/permissions";
 import { requireOrgContext } from "@/lib/session";
+import { cn } from "@/lib/utils";
 import {
   getMonitorDetail,
   type MonitorCheck,
   type MonitorDetail,
   type UptimeWindow,
 } from "@/modules/monitors/service";
+import { describeMonitorTarget } from "@/modules/monitors/spec";
+import { describeCheckType } from "@/modules/monitors/types/catalog";
+
 import { MonitorDetailActions } from "./monitor-detail-actions";
 import { ResponseTimeChart } from "./response-time-chart";
 
@@ -70,8 +74,13 @@ export default async function MonitorDetailPage(
   }
 
   const { monitor, windows, recentChecks } = detail;
+  const checkType = describeCheckType(monitor.checkType);
   const canUpdate = hasPermission(ctx.role, { monitor: ["update"] });
   const canDelete = hasPermission(ctx.role, { monitor: ["delete"] });
+
+  // Empty / null in the free edition — see the monitors list page.
+  let policies: { id: string; name: string }[] = [];
+  let assignedPolicyId: string | null = null;
 
   return (
     <div className="flex flex-col gap-6">
@@ -98,23 +107,40 @@ export default async function MonitorDetailPage(
               status={monitor.currentStatus}
               paused={monitor.paused}
             />
-            <a
-              href={monitor.url}
-              target="_blank"
-              rel="noreferrer"
-              className="hover:text-foreground inline-flex max-w-96 items-center gap-1 font-mono text-xs transition-colors hover:underline"
-            >
-              <span className="truncate">{monitor.url}</span>
-              <ArrowSquareOutIcon aria-hidden className="size-3 shrink-0" />
-            </a>
+            {checkType.target.kind === "url" ? (
+              <a
+                href={monitor.url}
+                target="_blank"
+                rel="noreferrer"
+                className="hover:text-foreground inline-flex max-w-96 items-center gap-1 font-mono text-xs transition-colors hover:underline"
+              >
+                <span className="truncate">{monitor.url}</span>
+                <ArrowSquareOutIcon aria-hidden className="size-3 shrink-0" />
+              </a>
+            ) : (
+              <span className="font-mono text-xs">
+                {checkType.label} · {describeMonitorTarget(monitor)}
+              </span>
+            )}
             <span className="font-mono text-xs">
-              {monitor.method} · every{" "}
-              {formatDuration(monitor.intervalSeconds * 1000)}
+              {checkType.form.includes("method") ? monitor.method : "check"} ·
+              around every {formatDuration(monitor.intervalSeconds * 1000)}
             </span>
             {monitor.bodyKeyword && (
               <span className="font-mono text-xs">
                 body {monitor.keywordAbsent ? "excludes" : "contains"} “
                 {monitor.bodyKeyword}”
+              </span>
+            )}
+            {monitor.tlsCheck && monitor.tlsDaysRemaining !== null && (
+              <span
+                className={cn(
+                  "font-mono text-xs",
+                  monitor.tlsDaysRemaining < monitor.tlsWarnDays &&
+                    "text-amber-600 dark:text-amber-400",
+                )}
+              >
+                cert {monitor.tlsDaysRemaining}d left
               </span>
             )}
             <span className="text-xs">
@@ -128,7 +154,9 @@ export default async function MonitorDetailPage(
           monitor={{
             id: monitor.id,
             name: monitor.name,
+            checkType: monitor.checkType,
             url: monitor.url,
+            port: monitor.port,
             method: monitor.method,
             intervalSeconds: monitor.intervalSeconds,
             timeoutMs: monitor.timeoutMs,
@@ -136,7 +164,10 @@ export default async function MonitorDetailPage(
             expectedStatusCode: monitor.expectedStatusCode,
             bodyKeyword: monitor.bodyKeyword,
             keywordAbsent: monitor.keywordAbsent,
-            failureThreshold: monitor.failureThreshold,
+            tlsCheck: monitor.tlsCheck,
+            tlsWarnDays: monitor.tlsWarnDays,
+            failureWindowSeconds: monitor.failureWindowSeconds,
+            config: (monitor.config as Record<string, unknown> | null) ?? null,
             paused: monitor.paused,
           }}
           canUpdate={canUpdate}
@@ -180,6 +211,7 @@ export default async function MonitorDetailPage(
           />
         </CardContent>
       </Card>
+
 
       <section className="space-y-3">
         <h2 className="text-sm font-medium">Recent checks</h2>
@@ -241,6 +273,7 @@ export default async function MonitorDetailPage(
     </div>
   );
 }
+
 
 function CheckResultBadge({
   check,

@@ -1,6 +1,6 @@
 {
   "name": "vigil-core",
-  "version": "1.0.1",
+  "version": "1.11.0",
   "private": false,
   "license": "Apache-2.0",
   "scripts": {
@@ -17,11 +17,13 @@
     "db:migrate": "drizzle-kit migrate",
     "db:seed": "tsx scripts/seed-demo.ts",
     "db:studio": "drizzle-kit studio",
+    "screenshots": "tsx scripts/capture-screenshots.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.109.0",
     "@phosphor-icons/react": "^2.1.10",
     "better-auth": "^1.6.23",
     "class-variance-authority": "^0.7.1",
@@ -66,14 +68,5 @@
     "esbuild@0.25.12": true,
     "esbuild@0.28.1": true,
     "unrs-resolver@1.12.2": true
-  },
-  "description": "Self-hosted uptime monitoring, incident tracking and a public status page. Two processes and one Postgres.",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/artaspervyj-dotcom/vigil-core.git"
-  },
-  "homepage": "https://github.com/artaspervyj-dotcom/vigil-core",
-  "bugs": {
-    "url": "https://github.com/artaspervyj-dotcom/vigil-core/issues"
   }
 }

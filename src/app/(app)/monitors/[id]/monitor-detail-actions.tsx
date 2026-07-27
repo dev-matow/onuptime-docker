@@ -59,7 +59,11 @@ export function MonitorDetailActions({
           {monitor.paused ? "Resume" : "Pause"}
         </Button>
       )}
-      {canUpdate && <EditMonitorDialog monitor={monitor} />}
+      {canUpdate && (
+        <EditMonitorDialog
+          monitor={monitor}
+        />
+      )}
       {canDelete && (
         <>
           <Button

@@ -4,28 +4,24 @@ import { describe, expect, it } from "vitest";
 
 import { db } from "@/db";
 import { member, user } from "@/db/schema";
-import { auth, getOrganizationWithAllMembers } from "@/lib/auth";
+import { ALL_MEMBERS, auth } from "@/lib/auth";
 
 import { createTestOrg } from "../helpers";
 
 /**
- * Team size is deliberately uncapped: Vigil Core is free, and the
- * commercial edition is licensed per company rather than per seat, so a
- * seat limit here would be an artificial one. better-auth's organization
- * plugin defaults `membershipLimit` to 100 when the option is absent,
- * which bites on two separate paths — invitations are refused past the
- * limit, and the member *list* is silently truncated to it. These tests
- * pin both above that default so a dropped option can't quietly
- * reintroduce a seat cap.
+ * Team size is deliberately uncapped: Vigil is licensed per company, not
+ * per seat. better-auth's organization plugin defaults `membershipLimit`
+ * to 100 when the option is absent, and the option is easy to drop.
  *
- * Unlike the commercial edition's copy of this test, the organization is
- * inserted directly rather than created through `auth.api`: Core is
- * single-tenant, so `allowUserToCreateOrganization` refuses once any
- * organization exists, and the shared test database always has several.
+ * The organization is inserted directly rather than created through
+ * `auth.api`, because this file runs in both editions: the free edition
+ * refuses a second organization, and the shared test database always
+ * holds several. A test that quietly depended on multi-tenancy would
+ * pass here and fail the moment the edition seam stripped it.
  */
 
 const BEYOND_DEFAULT_LIMIT = 130; // > better-auth's default of 100
-/** Two owners are seeded per org below: the helper's and the sign-up's. */
+/** Two owners exist per org below: the seeded one and the signed-up one. */
 const OWNERS = 2;
 /** better-auth's undeclared member-join fallback, measured not assumed. */
 const LIBRARY_DEFAULT = 100;
@@ -72,7 +68,7 @@ async function ownerOfPopulatedOrg() {
 }
 
 /** Adds `count` members straight to the table — the guard under test is
- * on the invitation/list paths, not on inserts. */
+ * on the list/invitation paths, not on inserts. */
 async function fillOrganization(organizationId: string, count: number) {
   const rows = Array.from({ length: count }, (_, index) => {
     const id = `${organizationId}-u${index}`;
@@ -102,17 +98,19 @@ describe("team size", () => {
     const { headers, organizationId } = await ownerOfPopulatedOrg();
     await fillOrganization(organizationId, BEYOND_DEFAULT_LIMIT);
 
-    const full = await getOrganizationWithAllMembers(headers, organizationId);
+    const full = await auth.api.getFullOrganization({
+      query: { organizationId, membersLimit: ALL_MEMBERS },
+      headers,
+    });
 
-    // Both owners plus everyone added — no silent truncation at 100.
     expect(full?.members).toHaveLength(BEYOND_DEFAULT_LIMIT + OWNERS);
   });
 
   /**
-   * Characterization, not a requirement: this pins the library behaviour
-   * that `getOrganizationWithAllMembers` exists to work around. If it
-   * ever fails because better-auth stopped truncating, the helper can be
-   * simplified — read it as a note to that future person, not as a rule.
+   * Characterization, not a requirement: it pins the library behaviour
+   * that `ALL_MEMBERS` exists to work around, so a future better-auth
+   * that stopped truncating would say so here rather than leaving a
+   * workaround nobody dares remove.
    */
   it("truncates to exactly 100 when membersLimit is omitted", async () => {
     const { headers, organizationId } = await ownerOfPopulatedOrg();
@@ -127,12 +125,13 @@ describe("team size", () => {
   });
 
   /**
-   * This one does NOT currently guard `membershipLimit`: measured against
-   * better-auth 1.6, removing the option leaves this passing, because the
-   * invitation path does not consult it. It is kept as a product
-   * assertion — inviting into a large organization must work — and
-   * documented so nobody mistakes it for a regression test of the option.
-   * The list test above is what fails when `membershipLimit` is dropped.
+   * This does NOT guard `membershipLimit`. Measured against better-auth
+   * 1.6 by removing the option and re-running: this test still passes,
+   * because the invitation path never consults it. It is kept as a
+   * product assertion — inviting into a large organization must work —
+   * and labelled so nobody mistakes it for a regression test of the
+   * option. The list test above is what fails when the option is
+   * dropped, and until this comment existed the file implied otherwise.
    */
   it("still invites into an organization larger than 100", async () => {
     const { headers, organizationId, suffix } = await ownerOfPopulatedOrg();

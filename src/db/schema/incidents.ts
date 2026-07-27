@@ -42,10 +42,19 @@ export const incidents = pgTable(
     source: incidentSource().notNull().default("manual"),
     /** Monitor that opened this incident, when source = monitor. */
     monitorId: uuid().references(() => monitors.id, { onDelete: "set null" }),
-    /** Markdown postmortem, written by the team after the fact. */
+    /** Markdown; drafted by AI, edited by humans. */
     postmortem: text(),
     startedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     resolvedAt: timestamp({ withTimezone: true }),
+    /**
+     * When opened-notifications went out. Null while a recovery action
+     * holds alerts; whoever claims it (open path, recovery exhaustion,
+     * or the escalation failsafe) sends exactly once.
+     */
+    notifiedAt: timestamp({ withTimezone: true }),
+    /** Acknowledgement halts escalation. Set by the acking operator. */
+    acknowledgedAt: timestamp({ withTimezone: true }),
+    acknowledgedBy: text().references(() => user.id, { onDelete: "set null" }),
     createdBy: text().references(() => user.id, { onDelete: "set null" }),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp({ withTimezone: true })
@@ -83,8 +92,9 @@ export const incidentEvents = pgTable(
     message: text().notNull(),
     /**
      * Operator-only note: kept off the public status page. `system`
-     * events are withheld publicly too, but those stay visible to
-     * operators; an internal note is hidden from public eyes by intent.
+     * recovery events are also withheld publicly, but those stay
+     * visible to operators; an internal note is hidden from public
+     * eyes by intent.
      */
     internal: boolean().notNull().default(false),
     /** Null for events emitted by the system (worker, auto-resolve). */

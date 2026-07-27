@@ -40,28 +40,117 @@ function button(url: string, label: string): string {
   return `<a href="${escapeHtml(url)}" style="display:inline-block;background:#18181b;color:#ffffff;text-decoration:none;font-size:14px;font-weight:500;padding:10px 18px;border-radius:8px">${label}</a>`;
 }
 
+/**
+ * How long a monitor had been failing, in words. Replaces the old
+ * "failed 3 checks" phrasing, which stopped being meaningful once the
+ * interval between those checks became adaptive — three failures could
+ * be three seconds or half an hour and the reader had no way to tell.
+ */
+export function describeFailureWindow(seconds: number): string {
+  // Reads as a clause after "has been failing" *and* after "had been
+  // failing", because it is used in both — the second of which goes on
+  // the public status page. "had been failing on its first failed
+  // check" is not a sentence, and migration 0010 gives a window of 0 to
+  // every 1.9.x monitor that had `failureThreshold: 1`, so it would
+  // have been the most common phrasing in the product.
+  if (seconds <= 0) return "from its first failed check";
+  if (seconds < 60) {
+    return `for ${seconds} ${seconds === 1 ? "second" : "seconds"}`;
+  }
+  if (seconds < 3600) {
+    const minutes = Math.round(seconds / 60);
+    return `for ${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
+  }
+  const hours = Math.round(seconds / 3600);
+  return `for ${hours} ${hours === 1 ? "hour" : "hours"}`;
+}
+
 export function renderIncidentOpenedEmail(input: {
   monitorName: string;
   monitorUrl: string;
-  failureThreshold: number;
+  failureWindowSeconds: number;
   incidentUrl: string;
 }): RenderedEmail {
   const name = escapeHtml(input.monitorName);
-  const checks =
-    input.failureThreshold === 1
-      ? "1 check"
-      : `${input.failureThreshold} checks`;
+  const window = describeFailureWindow(input.failureWindowSeconds);
   return {
     subject: `[Vigil] ${input.monitorName} is down`,
     text: [
-      `${input.monitorName} (${input.monitorUrl}) failed ${checks} and was marked down.`,
+      `${input.monitorName} (${input.monitorUrl}) has been failing ${window} and was marked down.`,
       `An incident was opened automatically: ${input.incidentUrl}`,
     ].join("\n\n"),
     html: shell(
       `<div style="font-size:18px;font-weight:600;margin-bottom:8px">${name} is down</div>
-<p style="font-size:14px;line-height:1.6;color:#3f3f46;margin:0 0 20px">Failed ${checks} in a row and was marked down. An incident was opened automatically.</p>
+<p style="font-size:14px;line-height:1.6;color:#3f3f46;margin:0 0 20px">Failing ${escapeHtml(window)} and marked down. An incident was opened automatically.</p>
 ${button(input.incidentUrl, "View incident")}`,
       "#e5484d",
+    ),
+  };
+}
+
+/** Double opt-in email sent when someone subscribes to a status page. */
+export function renderSubscriptionConfirmEmail(input: {
+  pageName: string;
+  confirmUrl: string;
+}): RenderedEmail {
+  const name = escapeHtml(input.pageName);
+  return {
+    subject: `Confirm your subscription to ${input.pageName}`,
+    text: [
+      `Confirm that you want status updates for ${input.pageName}.`,
+      `Confirm here: ${input.confirmUrl}`,
+      `If you didn't request this, ignore this email — nothing was subscribed.`,
+    ].join("\n\n"),
+    html: shell(
+      `<div style="font-size:18px;font-weight:600;margin-bottom:8px">Confirm your subscription</div>
+<p style="font-size:14px;line-height:1.6;color:#3f3f46;margin:0 0 20px">Confirm that you want incident and recovery updates for <strong>${name}</strong>.</p>
+${button(input.confirmUrl, "Confirm subscription")}`,
+      "#18181b",
+      `You received this because this address was entered on ${name}'s status page. If that wasn't you, no action is needed.`,
+    ),
+  };
+}
+
+const SUBSCRIBER_ACCENT = {
+  opened: "#e5484d",
+  updated: "#f5a623",
+  resolved: "#30b566",
+} as const;
+
+const SUBSCRIBER_VERB = {
+  opened: "opened",
+  updated: "updated",
+  resolved: "resolved",
+} as const;
+
+/** Incident notification sent to confirmed status-page subscribers. */
+export function renderSubscriberIncidentEmail(input: {
+  pageName: string;
+  incidentTitle: string;
+  kind: "opened" | "updated" | "resolved";
+  statusUrl: string;
+  unsubscribeUrl: string;
+  latestUpdate?: string;
+}): RenderedEmail {
+  const title = escapeHtml(input.incidentTitle);
+  const page = escapeHtml(input.pageName);
+  const verb = SUBSCRIBER_VERB[input.kind];
+  const update = input.latestUpdate?.trim();
+  return {
+    subject: `[${input.pageName}] Incident ${verb}: ${input.incidentTitle}`,
+    text: [
+      `An incident on ${input.pageName} was ${verb}: ${input.incidentTitle}`,
+      ...(update ? [update] : []),
+      `Live status: ${input.statusUrl}`,
+      `Unsubscribe: ${input.unsubscribeUrl}`,
+    ].join("\n\n"),
+    html: shell(
+      `<div style="font-size:18px;font-weight:600;margin-bottom:8px">Incident ${verb}</div>
+<p style="font-size:14px;line-height:1.6;color:#3f3f46;margin:0 0 8px"><strong>${title}</strong> on ${page}.</p>
+${update ? `<p style="font-size:14px;line-height:1.6;color:#3f3f46;margin:0 0 20px">${escapeHtml(update)}</p>` : `<div style="margin-bottom:20px"></div>`}
+${button(input.statusUrl, "View status page")}`,
+      SUBSCRIBER_ACCENT[input.kind],
+      `You subscribed to updates for ${page}. <a href="${escapeHtml(input.unsubscribeUrl)}" style="color:#71717a">Unsubscribe</a>.`,
     ),
   };
 }

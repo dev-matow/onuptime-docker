@@ -3,7 +3,11 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { NotebookIcon, PencilSimpleIcon } from "@phosphor-icons/react";
+import {
+  NotebookIcon,
+  PencilSimpleIcon,
+  SparkleIcon,
+} from "@phosphor-icons/react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -19,23 +23,39 @@ import { Field, FieldLabel } from "@/components/ui/field";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 
-import { savePostmortemAction } from "../actions";
+import { draftPostmortemAction, savePostmortemAction } from "../actions";
 
 interface PostmortemCardProps {
   incidentId: string;
   postmortem: string | null;
   canEdit: boolean;
+  aiEnabled: boolean;
 }
 
 export function PostmortemCard({
   incidentId,
   postmortem,
   canEdit,
+  aiEnabled,
 }: PostmortemCardProps) {
   const router = useRouter();
   const [editing, setEditing] = useState(postmortem === null && canEdit);
   const [content, setContent] = useState(postmortem ?? "");
   const [pending, setPending] = useState(false);
+  const [drafting, setDrafting] = useState(false);
+
+  async function handleDraft() {
+    setDrafting(true);
+    const result = await draftPostmortemAction(incidentId);
+    setDrafting(false);
+    if (!result.ok) {
+      toast.error(result.error);
+      return;
+    }
+    setContent(result.data.draft);
+    setEditing(true);
+    toast.success("Draft generated — review before saving.");
+  }
 
   async function handleSave(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -100,6 +120,19 @@ export function PostmortemCard({
               />
             </Field>
             <div className="flex justify-end gap-2">
+              {aiEnabled && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleDraft}
+                  disabled={drafting || pending}
+                  className="mr-auto"
+                >
+                  {drafting ? <Spinner /> : <SparkleIcon aria-hidden />}
+                  Draft with AI
+                </Button>
+              )}
               {postmortem !== null && (
                 <Button
                   type="button"

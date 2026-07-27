@@ -1,8 +1,8 @@
 # Vigil Core
 
-**Self-hosted uptime monitoring, incident tracking and a public status
-page.** Two processes and one Postgres — no Redis, no queue broker, no
-agents to install.
+**Self-hosted uptime monitoring, incidents and status pages.** Two
+processes and one Postgres — no Redis, no queue broker, no agents to
+install.
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Self-hosted](https://img.shields.io/badge/self--hosted-yes-brightgreen.svg)](docs/DEPLOYMENT.md)
@@ -13,116 +13,107 @@ agents to install.
 
 ## What it does
 
-|                        |                                                                                                                                                              |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **HTTP(S) monitoring** | Configurable interval, timeout, expected status code and degraded-response threshold. Consecutive-failure threshold before anything opens.                   |
-| **Keyword assertions** | Assert the response body _contains_ (or _doesn't contain_) a string — catches the 200 that serves an error page.                                             |
-| **Incidents**          | Opened and resolved automatically by the checker, or by hand. Severity, status lifecycle, an immutable timeline, internal-only notes and a postmortem field. |
-| **Public status page** | One per install, on your own domain, with per-monitor display names, 90-day uptime bars and incident history.                                                |
-| **Alerts**             | Email, plus signed webhooks that auto-format for Slack and Discord (detected from the webhook URL). Every payload carries an `X-Vigil-Signature` HMAC.       |
-| **Team**               | Invite teammates with roles — owner, admin, responder, viewer. Viewers are read-only and never see signing secrets.                                          |
-| **Audit trail**        | Every mutation recorded with actor, target and metadata.                                                                                                     |
+- **Six check types** — HTTP(S), TCP/port, ping (ICMP), DNS records,
+  TLS-certificate expiry and domain-registration expiry, behind a
+  registry. Adding one is five files and no dispatch to edit.
+- **Assertions** — expected status, response-time thresholds, body
+  contains or does not contain a keyword, DNS record values, days left
+  on a certificate. A 200 that serves an error page is caught.
+- **Scheduling that adapts** — the interval you set is a baseline, not a
+  fixed rate: a suspicious monitor is probed harder and a steady one
+  backs off. Minimum interval two seconds, which is what the queue
+  actually delivers rather than what the form will accept.
+- **Incidents** — opened and resolved by the check loop, with a failure
+  window measured in seconds rather than a count of checks. Severity, a
+  lifecycle, an append-only timeline, internal-only notes and a
+  markdown postmortem.
+- **Status pages** — as many as you like, each with its own URL,
+  components, 90-day uptime bars and incident history. Public, private
+  or password-protected, with double-opt-in email subscribers.
+- **Team and roles** — owner, admin, responder, viewer. Viewers are
+  read-only at the server boundary, not by hiding a button.
+- **Audit trail** — every mutation recorded with actor, target and
+  metadata, and a page to read it on.
+- **Alerts** — email plus HMAC-signed webhooks that auto-format for
+  Slack and Discord.
 
-Built with Next.js 16, Postgres 18, Drizzle and pg-boss. **164 tests**,
-lint and typecheck clean, Docker images for app and worker.
-
-<details>
-<summary>More screenshots</summary>
-
-![Monitor detail](docs/screenshots/monitor-detail.png)
-![Incident detail](docs/screenshots/incident-detail.png)
-![Status page](docs/screenshots/status-page.png)
-
-</details>
-
----
+No licence key, no telemetry, no expiry, and no cap on monitors, users,
+organizations' members or retention.
 
 ## Quick start
 
 ```bash
-git clone https://github.com/artaspervyj-dotcom/vigil-core.git
+git clone https://github.com/sikurdev/vigil-core.git
 cd vigil-core
-cp .env.example .env          # set DATABASE_URL and BETTER_AUTH_SECRET
-npm install
-npm run db:migrate
-npm run dev                   # terminal 1 — the app
-npm run worker:dev            # terminal 2 — background checks
+cp .env.example .env      # set DATABASE_URL and BETTER_AUTH_SECRET
+docker compose up -d
 ```
 
-Open <http://localhost:3000>, sign up, and you own the install. Want
-sample data to look at first? `npm run db:seed` creates a demo team with
-five monitors, 90 days of history and a published status page.
-
-Docker, managed platforms and bare metal: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
-
-## Documentation
-
-|                                                |                                                        |
-| ---------------------------------------------- | ------------------------------------------------------ |
-| [QUICK_START.md](QUICK_START.md)               | Install and run in under ten minutes                   |
-| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)       | Docker Compose, managed platforms, bare metal, backups |
-| [ARCHITECTURE.md](ARCHITECTURE.md)             | How the pieces fit, and why                            |
-| [docs/CUSTOMIZATION.md](docs/CUSTOMIZATION.md) | Branding, roles, common extensions                     |
-| [docs/HANDBOOK.md](docs/HANDBOOK.md)           | Commands, conventions, debugging                       |
-| [docs/DEMO.md](docs/DEMO.md)                   | Running a public read-only demo                        |
-| [docs/UPGRADE.md](docs/UPGRADE.md)             | Taking updates after you customize                     |
-| [CONTRIBUTING.md](CONTRIBUTING.md)             | Sending a patch                                        |
+Then open http://localhost:3000. [QUICK_START.md](QUICK_START.md) has the
+bare-metal path and the first-monitor walkthrough.
 
 ## Honest limitations
 
 Worth knowing before you deploy:
 
 - **Checks run from one host.** A monitor going down means _your Vigil
-  host_ could not reach it. The failure threshold filters blips, but this
-  is not multi-region confirmation and never claims to be. Run Vigil
-  outside the blast radius of what it watches.
-- **HTTP(S) only.** No TCP, ping, DNS or push/heartbeat checks.
-- **No SMS or phone paging**, and no on-call schedules.
-- **No password reset yet** — a forgotten password means an admin
-  re-invites you. It's the top item on the list.
-- **One organization per install.** Fine for a team; not built to run
-  many separate clients side by side.
+  host_ could not reach it. The failure window filters blips, but this is
+  not multi-region confirmation and never claims to be. Run Vigil outside
+  the blast radius of what it watches.
+- **Six check types.** Uptime Kuma has roughly thirty-one, including
+  databases, message brokers and push/heartbeat. If your monitoring is
+  mostly "is this database reachable", Kuma does that today and this
+  does not.
+- **Four notification channels** — email, webhook, and the Slack and
+  Discord formats of that webhook. Kuma has around ninety.
+- **No password reset yet.** A forgotten password means an admin
+  re-invites you. Top of the list.
+- **One organization per install.** Fine for a team watching its own
+  systems; not built to run many separate clients side by side.
 
-If any of these are blockers, [Uptime Kuma](https://github.com/louislam/uptime-kuma)
-is excellent and free, and Better Stack does managed global probes well.
-Use what fits.
+## How this repository is produced
 
-## What the commercial edition adds
+Vigil Core is not maintained by hand. It is generated from the
+commercial edition's tree by deleting every file and statement marked
+`@edition:ee`, and the same script runs in that repository's build gate —
+so Core cannot quietly fall behind. If it did, the build would be red
+before the release existed.
 
-Vigil Core is the free, complete, self-hostable monitor above. A
-commercial edition at **[vigil-uptime.com](https://vigil-uptime.com)**
-builds on the same codebase and adds the things agencies and MSPs asked
-for:
+Both editions are cut from the same commit and carry the same version
+number. **If this repository's version ever trails the commercial one,
+the mechanism is broken and you are looking at the evidence.**
 
-- **Automatic recovery** — Vigil verifies the failure, calls your restart
-  hook with a signed payload, then verifies the fix. Humans are paged
-  only when the automation loses.
-- **Many client organizations in one install**, each with its own
-  branded status page — run monitoring for all your clients from one
-  deployment.
-- **On-call schedules and escalation policies**, with SMS and voice.
-- **Status-page email subscriptions** (double opt-in), and
-  private/password-protected status pages.
-- **TCP/port monitors and TLS-certificate expiry checks.**
-
-Core is not crippled to sell that: nothing here is gated behind a
-license key, there is no telemetry, and no feature stops working. If
-Core is all you need, that's the intended outcome.
+History is never rewritten here and releases are never force-pushed, so
+a pull request always has somewhere to land.
 
 ## Contributing
 
-Issues and pull requests are welcome — see
-[CONTRIBUTING.md](CONTRIBUTING.md). Security issues go privately to
+[CONTRIBUTING.md](CONTRIBUTING.md) — there is no CLA and no copyright
+assignment, and it says plainly what Apache-2.0 lets the maintainer do
+with your contribution. Security issues go privately to
 [SECURITY.md](SECURITY.md), not to the issue tracker.
+
+## The commercial edition
+
+[Vigil](https://vigil-uptime.com) is the same monitor with four things
+Core does not have, none of which Uptime Kuma has either:
+
+- **Isolate** — many client organizations in one install, each with its
+  own status pages and unable to see the others.
+- **Rotate** — on-call schedules and escalation ladders that know whose
+  turn it is tonight, with acknowledgement stopping the ladder.
+- **Reach** — SMS and voice through your own Twilio account.
+- **Repair** — automatic recovery: verify the failure, call a restart
+  hook you own with a signed payload, verify it came back, and page a
+  human only if it did not.
+
+Everything else — every check type, the scheduler, the ledger, the audit
+page, subscribers, password-protected pages — is here, free, and stays
+here. [What we commit to, in writing](https://vigil-uptime.com/commitments.html).
 
 ## License
 
-[Apache-2.0](LICENSE). You can run, modify and redistribute this
-freely, including commercially, and you are not required to publish
-your changes — including when you offer a modified version to others
-over a network. Vigil Core was AGPL-3.0 until this release; Apache is
-the weaker licence for us and the more adoptable one for you.
-
-The copyright holder also offers the code under a separate commercial
-licence; that dual-licensing is why the commercial edition above can
-exist alongside this one.
+[Apache-2.0](LICENSE). Run it, modify it, keep your changes private, run
+it for clients, sell it. There is no copyleft obligation. Vigil Core was
+AGPL-3.0 through 1.0.1; copies obtained under that licence remain
+available under it.

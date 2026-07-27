@@ -4,7 +4,7 @@
 page.** Two processes and one Postgres — no Redis, no queue broker, no
 agents to install.
 
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Self-hosted](https://img.shields.io/badge/self--hosted-yes-brightgreen.svg)](docs/DEPLOYMENT.md)
 
 ![Dashboard](docs/screenshots/dashboard.png)
@@ -117,10 +117,11 @@ Issues and pull requests are welcome — see
 
 ## License
 
-[GNU AGPL-3.0-or-later](LICENSE). You can run, modify and redistribute
-this freely, including commercially. If you modify it and offer it to
-others over a network, you must publish your changes under the same
-license.
+[Apache-2.0](LICENSE). You can run, modify and redistribute this
+freely, including commercially, and you are not required to publish
+your changes — including when you offer a modified version to others
+over a network. Vigil Core was AGPL-3.0 until this release; Apache is
+the weaker licence for us and the more adoptable one for you.
 
 The copyright holder also offers the code under a separate commercial
 licence; that dual-licensing is why the commercial edition above can

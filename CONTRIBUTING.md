@@ -83,15 +83,17 @@ the README is a decent place to look for something worth doing —
 
 ## Licensing your contribution
 
-This project is AGPL-3.0-or-later, and the maintainer also sells a
-commercial licence for the same codebase. That means contributions need
-to be usable under both. By opening a pull request you agree that your
-contribution may be released under the AGPL **and** under the
-maintainer's commercial licence.
+This project is Apache-2.0. Under section 5 of that licence, anything
+you deliberately submit for inclusion is contributed under the same
+terms unless you say otherwise — so **there is no CLA to sign and no
+copyright to assign.**
 
-If you're not comfortable with that, say so in the issue — a bug report
-with a clear reproduction is genuinely valuable on its own, and costs
-you nothing.
+Being plain about the consequence: Apache-2.0 permits the maintainer to
+include your contribution in the commercial edition, which is sold. You
+keep your copyright, your name stays on the commit, and you can use
+your own work anywhere. If that trade is not one you want to make, say
+so in the issue — a bug report with a clear reproduction is genuinely
+valuable on its own and costs you nothing.
 
 ## Code of conduct
 

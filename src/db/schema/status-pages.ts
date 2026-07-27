@@ -43,6 +43,15 @@ export const statusPages = pgTable(
     visibility: statusPageVisibility().notNull().default("public"),
     /** scrypt hash (`salt:hash` hex) when visibility = password. */
     passwordHash: text(),
+    /**
+     * Whether the public page carries a "Powered by Vigil" line.
+     *
+     * Free in both editions, and off is a supported configuration.
+     * Uptime Kuma's status pages are white-label at no cost, so charging
+     * for this would put something behind the paywall that the incumbent
+     * gives away — which is the one rule the edition split rests on.
+     */
+    showBranding: boolean().notNull().default(true),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp({ withTimezone: true })
       .notNull()

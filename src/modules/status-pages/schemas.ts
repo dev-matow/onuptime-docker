@@ -26,6 +26,7 @@ export const updateStatusPageSchema = z.object({
       "Lowercase letters, numbers and dashes only",
     ),
   published: z.boolean(),
+  showBranding: z.boolean().default(true),
   visibility: z.enum(["public", "private", "password"]).default("public"),
   /**
    * New shared password for `password` visibility. Empty string keeps

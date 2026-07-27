@@ -3,6 +3,14 @@ import type {
   ProbeContext,
   ProbeResult,
 } from "./contract";
+import { postgresProbe } from "./probes/postgres";
+import { mysqlProbe } from "./probes/mysql";
+import { mongodbProbe } from "./probes/mongodb";
+import { redisProbe } from "./probes/redis";
+import { dockerProbe } from "./probes/docker";
+import { mqttProbe } from "./probes/mqtt";
+import { smtpProbe } from "./probes/smtp";
+import { jsonQueryProbe } from "./probes/json-query";
 import { domainExpiryProbe } from "./probes/domain-expiry";
 import { dnsProbe } from "./probes/dns";
 import { httpProbe } from "./probes/http";
@@ -34,6 +42,14 @@ const PROBES: Readonly<Record<string, AnyProbe>> = {
   dns: dnsProbe as AnyProbe,
   "tls-expiry": tlsExpiryProbe as AnyProbe,
   "domain-expiry": domainExpiryProbe as AnyProbe,
+  postgres: postgresProbe as AnyProbe,
+  mysql: mysqlProbe as AnyProbe,
+  mongodb: mongodbProbe as AnyProbe,
+  redis: redisProbe as AnyProbe,
+  docker: dockerProbe as AnyProbe,
+  mqtt: mqttProbe as AnyProbe,
+  smtp: smtpProbe as AnyProbe,
+  "json-query": jsonQueryProbe as AnyProbe,
 };
 
 function build(): Record<string, CheckTypeDefinition<unknown>> {

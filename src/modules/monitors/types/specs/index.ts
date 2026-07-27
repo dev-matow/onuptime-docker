@@ -1,4 +1,12 @@
 import type { CheckTypeSpec } from "../contract";
+import { postgresSpec } from "./postgres";
+import { mysqlSpec } from "./mysql";
+import { mongodbSpec } from "./mongodb";
+import { redisSpec } from "./redis";
+import { dockerSpec } from "./docker";
+import { mqttSpec } from "./mqtt";
+import { smtpSpec } from "./smtp";
+import { jsonQuerySpec } from "./json-query";
 import { domainExpirySpec } from "./domain-expiry";
 import { dnsSpec } from "./dns";
 import { httpSpec } from "./http";
@@ -35,6 +43,14 @@ export const CHECK_TYPE_SPECS: Readonly<
   dns: erase(dnsSpec),
   "tls-expiry": erase(tlsExpirySpec),
   "domain-expiry": erase(domainExpirySpec),
+  postgres: erase(postgresSpec),
+  mysql: erase(mysqlSpec),
+  mongodb: erase(mongodbSpec),
+  redis: erase(redisSpec),
+  docker: erase(dockerSpec),
+  mqtt: erase(mqttSpec),
+  smtp: erase(smtpSpec),
+  "json-query": erase(jsonQuerySpec),
 };
 
 export function findSpec(id: string): CheckTypeSpec<unknown> | undefined {
@@ -49,6 +65,14 @@ export function requireSpec(id: string): CheckTypeSpec<unknown> {
 }
 
 export {
+  postgresSpec,
+  mysqlSpec,
+  mongodbSpec,
+  redisSpec,
+  dockerSpec,
+  mqttSpec,
+  smtpSpec,
+  jsonQuerySpec,
   domainExpirySpec,
   dnsSpec,
   httpSpec,

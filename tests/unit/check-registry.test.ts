@@ -5,6 +5,8 @@ import {
   describeCheckType,
   findDescriptor,
 } from "@/modules/monitors/types/catalog";
+import { redactTargetCredentials } from "@/modules/monitors/spec";
+import { connectionErrorMessage } from "@/modules/monitors/types/probes/guard";
 import { CHECK_TYPES } from "@/modules/monitors/types/registry";
 import { CHECK_TYPE_SPECS } from "@/modules/monitors/types/specs";
 
@@ -145,9 +147,70 @@ describe("describeCheckType", () => {
   it("degrades gracefully for a type this build does not have", () => {
     // `check_type` is text so a monitor created by a build with an extra
     // type survives a downgrade as data. The UI must still render it.
-    const unknown = describeCheckType("redis");
-    expect(unknown.id).toBe("redis");
+    //
+    // The id here has to be one nothing will ever register — it used to
+    // be "redis", which stopped being hypothetical the day redis shipped
+    // and turned this into a test of the real descriptor.
+    const unknown = describeCheckType("not-a-real-check-type");
+    expect(unknown.id).toBe("not-a-real-check-type");
     expect(unknown.form).toEqual([]);
-    expect(findDescriptor("redis")).toBeUndefined();
+    expect(findDescriptor("not-a-real-check-type")).toBeUndefined();
+  });
+});
+
+describe("target redaction", () => {
+  /**
+   * A target could not carry a credential until `postgres` shipped, and
+   * the first thing it did was put a password into every incident email
+   * and webhook body. Both send paths go through a redactor now; this
+   * pins the string-level one, which is the guard that still works when
+   * a check type is missing from the build.
+   */
+  it.each([
+    [
+      "postgres://app:hunter2@db.example.com:5432/prod",
+      "postgres://db.example.com:5432/prod",
+    ],
+    [
+      "postgres://db.example.com:5432/prod",
+      "postgres://db.example.com:5432/prod",
+    ],
+    ["https://example.com/health", "https://example.com/health"],
+    // An @ in a path is not userinfo, and must survive untouched.
+    ["https://example.com/a@b", "https://example.com/a@b"],
+    ["db.example.com", "db.example.com"],
+  ])("redacts %s", (input, expected) => {
+    expect(redactTargetCredentials(input)).toBe(expected);
+  });
+});
+
+describe("connectionErrorMessage", () => {
+  /**
+   * Node raises an AggregateError with an EMPTY message when every
+   * address of a multi-homed host fails. `judge` reads a falsy error as
+   * "no transport failure", so returning it verbatim files a dead server
+   * as an assertion failure — or, for a type whose assertions all skip on
+   * missing facts, as up. Two probes hit this independently.
+   */
+  it("unwraps an AggregateError with no message of its own", () => {
+    const aggregate = new AggregateError(
+      [new Error("connect ECONNREFUSED 10.0.0.1:5432")],
+      "",
+    );
+    expect(connectionErrorMessage(aggregate, "Connection failed")).toBe(
+      "connect ECONNREFUSED 10.0.0.1:5432",
+    );
+  });
+
+  it("never returns an empty string", () => {
+    expect(connectionErrorMessage(new AggregateError([], ""), "fallback")).toBe(
+      "fallback",
+    );
+    expect(connectionErrorMessage(new Error(""), "fallback")).toBe("fallback");
+    expect(connectionErrorMessage(undefined, "fallback")).toBe("fallback");
+  });
+
+  it("passes an ordinary error through", () => {
+    expect(connectionErrorMessage(new Error("boom"), "fallback")).toBe("boom");
   });
 });

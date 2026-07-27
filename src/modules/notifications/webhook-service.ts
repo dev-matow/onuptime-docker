@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 
 import { eq } from "drizzle-orm";
 
+import { redactTargetCredentials } from "@/modules/monitors/spec";
 import type { DbClient } from "@/db";
 import { webhookEndpoints } from "@/db/schema";
 import { env } from "@/lib/env";
@@ -110,7 +111,7 @@ function incidentData(incident: Incident, monitor?: WebhookMonitor) {
           monitor: {
             id: monitor.id,
             name: monitor.name,
-            url: monitor.url,
+            url: redactTargetCredentials(monitor.url),
             status: monitor.currentStatus ?? null,
           },
         }

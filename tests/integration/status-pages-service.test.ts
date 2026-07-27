@@ -82,6 +82,7 @@ async function publishPage(
     name,
     slug: page.slug,
     published: true,
+    showBranding: true,
     visibility: "public" as const,
   });
   return updated.slug;
@@ -96,6 +97,33 @@ async function upMonitor(actor: TestActor, name: string): Promise<Monitor> {
   );
   return checked;
 }
+
+describe("white-label", () => {
+  /**
+   * Uptime Kuma's status pages are white-label for nothing, so this is
+   * free in both editions rather than a paid switch. The public read
+   * model carries it because the page is incrementally cached: deciding
+   * in the component from a second query would render the footer from
+   * one page's setting on another page's cache entry.
+   */
+  it("carries the branding flag on the public read model", async () => {
+    const actor = await createTestOrg();
+    const page = await newPage(actor);
+    const slug = await publishPage(actor, page);
+
+    expect((await getPublicStatusPage(db, slug))?.showBranding).toBe(true);
+
+    await updateStatusPage(db, actor, {
+      statusPageId: page.id,
+      name: "P",
+      slug,
+      published: true,
+      showBranding: false,
+      visibility: "public",
+    });
+    expect((await getPublicStatusPage(db, slug))?.showBranding).toBe(false);
+  });
+});
 
 describe("createStatusPage", () => {
   it("creates a page that starts unpublished", async () => {
@@ -140,6 +168,7 @@ describe("updateStatusPage", () => {
       name: "Acme Public Status",
       slug,
       published: true,
+      showBranding: true,
       visibility: "public",
     });
     expect(updated).toMatchObject({
@@ -175,6 +204,7 @@ describe("updateStatusPage", () => {
       name: "A",
       slug,
       published: false,
+      showBranding: true,
       visibility: "public" as const,
     });
 
@@ -184,6 +214,7 @@ describe("updateStatusPage", () => {
         name: "B",
         slug,
         published: false,
+        showBranding: true,
         visibility: "public" as const,
       }),
     ).rejects.toThrow(ConflictError);
@@ -206,6 +237,7 @@ describe("updateStatusPage", () => {
         name: "Hijacked",
         slug: uniqueSlug(),
         published: true,
+        showBranding: true,
         visibility: "public" as const,
       }),
     ).rejects.toThrow(NotFoundError);
@@ -568,6 +600,7 @@ describe("status page visibility & password", () => {
       name: "P",
       slug,
       published: true,
+      showBranding: true,
       visibility: "password",
       password: "s3cret",
     });
@@ -580,6 +613,7 @@ describe("status page visibility & password", () => {
       name: "P",
       slug,
       published: true,
+      showBranding: true,
       visibility: "password",
       password: "",
     });
@@ -591,6 +625,7 @@ describe("status page visibility & password", () => {
       name: "P",
       slug,
       published: true,
+      showBranding: true,
       visibility: "public",
     });
     expect(pub.visibility).toBe("public");
@@ -606,6 +641,7 @@ describe("status page visibility & password", () => {
         name: "P",
         slug: uniqueSlug(),
         published: true,
+        showBranding: true,
         visibility: "password",
         password: "",
       }),
@@ -621,6 +657,7 @@ describe("status page visibility & password", () => {
       name: "Private",
       slug,
       published: false,
+      showBranding: true,
       visibility: "private",
     });
     expect(await getStatusPageAccess(db, slug)).toBeNull();
@@ -630,6 +667,7 @@ describe("status page visibility & password", () => {
       name: "Private",
       slug,
       published: true,
+      showBranding: true,
       visibility: "private",
     });
     const access = await getStatusPageAccess(db, slug);
@@ -646,6 +684,7 @@ describe("status page visibility & password", () => {
       name: "P",
       slug,
       published: true,
+      showBranding: true,
       visibility: "password",
       password: "open-sesame",
     });

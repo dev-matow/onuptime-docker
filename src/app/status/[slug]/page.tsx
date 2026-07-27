@@ -250,10 +250,7 @@ export default async function PublicStatusPage(
         </section>
 
         {access.visibility === "public" && (
-          <section
-            className="border-t pt-6"
-            aria-label="Subscribe to updates"
-          >
+          <section className="border-t pt-6" aria-label="Subscribe to updates">
             <h2 className="text-sm font-medium">Get status updates</h2>
             <p className="text-muted-foreground mt-1 mb-3 text-xs">
               Subscribe to be emailed when an incident opens, updates or
@@ -263,9 +260,11 @@ export default async function PublicStatusPage(
           </section>
         )}
 
-        <footer className="text-muted-foreground border-t pt-6 text-center text-xs">
-          Powered by Vigil
-        </footer>
+        {page.showBranding && (
+          <footer className="text-muted-foreground border-t pt-6 text-center text-xs">
+            Powered by Vigil
+          </footer>
+        )}
       </div>
     </div>
   );

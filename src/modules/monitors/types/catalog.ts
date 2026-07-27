@@ -24,6 +24,13 @@ const RESPONSE_TIME = {
   unit: "ms",
 } as const;
 
+export const DEFAULT_MYSQL_PORT = 3306;
+export const DEFAULT_REDIS_PORT = 6379;
+export const DEFAULT_SMTP_PORT = 25;
+export const DEFAULT_MQTT_PORT = 1883;
+export const DEFAULT_MONGODB_PORT = 27017;
+export const DEFAULT_DOCKER_SOCKET = "/var/run/docker.sock";
+
 export const httpDescriptor: CheckTypeDescriptor = {
   id: "http",
   label: "HTTP(S) request",
@@ -179,6 +186,230 @@ export const domainExpiryDescriptor: CheckTypeDescriptor = {
   supportsRecovery: false,
 };
 
+function unknownDescriptor(id: string): CheckTypeDescriptor {
+  return {
+    id,
+    label: id,
+    description: "This check type is not available in this build.",
+    target: { kind: "hostname", label: "Target", placeholder: "", help: "" },
+    port: null,
+    facts: [],
+    form: [],
+    supportsRecovery: false,
+  };
+}
+
+export const postgresDescriptor: CheckTypeDescriptor = {
+  id: "postgres",
+  label: "PostgreSQL",
+  description: "Connect to a PostgreSQL server and run a query.",
+  target: {
+    kind: "url",
+    label: "Connection string",
+    placeholder: "postgres://user:pass@db.example.com:5432/app",
+    help: "The full connection string, credentials included. They are stored like any other monitor setting, so point it at a role that can connect and nothing more.",
+  },
+  // The port is already in the connection string. A separate field for
+  // it would be a second answer to the same question.
+  port: { required: false, default: null },
+  facts: [
+    { key: "responseTimeMs", label: "Query time", kind: "number", unit: "ms" },
+    { key: "queryOk", label: "Query answered", kind: "boolean" },
+  ],
+  form: [],
+  supportsRecovery: true,
+};
+
+export const mysqlDescriptor: CheckTypeDescriptor = {
+  id: "mysql",
+  label: "MySQL / MariaDB",
+  description: "Read the handshake a MySQL or MariaDB server sends on connect.",
+  target: {
+    kind: "hostname",
+    label: "Hostname",
+    placeholder: "db.example.com",
+    help: "A bare hostname — no scheme, no port.",
+  },
+  port: { required: true, default: DEFAULT_MYSQL_PORT },
+  facts: [
+    { key: "serverVersion", label: "Server version", kind: "string" },
+    { key: "handshakeOk", label: "Handshake read", kind: "boolean" },
+    { key: "protocolVersion", label: "Protocol version", kind: "number" },
+    { key: "serverError", label: "Server error", kind: "string" },
+    {
+      key: "responseTimeMs",
+      label: "Response time",
+      kind: "number",
+      unit: "ms",
+    },
+  ],
+  form: ["port"],
+  supportsRecovery: true,
+};
+
+export const mongodbDescriptor: CheckTypeDescriptor = {
+  id: "mongodb",
+  label: "MongoDB",
+  description:
+    "Run the hello handshake a MongoDB server answers unauthenticated.",
+  target: {
+    kind: "hostname",
+    label: "Hostname",
+    placeholder: "mongo.example.com",
+    help: "A bare hostname — no scheme, no connection string.",
+  },
+  port: { required: true, default: DEFAULT_MONGODB_PORT },
+  facts: [
+    {
+      key: "responseTimeMs",
+      label: "Handshake time",
+      kind: "number",
+      unit: "ms",
+    },
+    { key: "helloOk", label: "Answered hello", kind: "boolean" },
+    { key: "maxWireVersion", label: "Wire version", kind: "number" },
+    { key: "isPrimary", label: "Writable primary", kind: "boolean" },
+    { key: "replicaSet", label: "Replica set", kind: "string" },
+  ],
+  form: ["port"],
+  supportsRecovery: true,
+};
+
+export const redisDescriptor: CheckTypeDescriptor = {
+  id: "redis",
+  label: "Redis",
+  description: "Send a PING to a Redis server and read what comes back.",
+  target: {
+    kind: "hostname",
+    label: "Hostname",
+    placeholder: "cache.example.com",
+    help: "A bare hostname — no scheme, no port.",
+  },
+  port: { required: true, default: DEFAULT_REDIS_PORT },
+  facts: [
+    { key: "pong", label: "Answered PONG", kind: "boolean" },
+    { key: "authRequired", label: "Requires authentication", kind: "boolean" },
+    {
+      key: "responseTimeMs",
+      label: "Response time",
+      kind: "number",
+      unit: "ms",
+    },
+  ],
+  form: ["port"],
+  supportsRecovery: true,
+};
+
+export const dockerDescriptor: CheckTypeDescriptor = {
+  id: "docker",
+  label: "Docker container",
+  description: "Ask a Docker daemon whether a named container is running.",
+  target: {
+    kind: "hostname",
+    label: "Docker host",
+    placeholder: "docker-1.example.com",
+    help: "The machine whose daemon is asked. With the default local socket this is a label.",
+  },
+  port: null,
+  facts: [
+    {
+      key: "responseTimeMs",
+      label: "Response time",
+      kind: "number",
+      unit: "ms",
+    },
+    { key: "running", label: "Running", kind: "boolean" },
+    { key: "state", label: "State", kind: "string" },
+    { key: "health", label: "Health", kind: "string" },
+    { key: "restartCount", label: "Restarts", kind: "number" },
+  ],
+  form: [],
+  supportsRecovery: true,
+};
+
+export const mqttDescriptor: CheckTypeDescriptor = {
+  id: "mqtt",
+  label: "MQTT broker",
+  description:
+    "Connect to an MQTT broker and read the CONNACK it answers with.",
+  target: {
+    kind: "hostname",
+    label: "Hostname",
+    placeholder: "broker.example.com",
+    help: "A bare hostname — no scheme, no port.",
+  },
+  port: { required: true, default: 1883 },
+  facts: [
+    { key: "connack", label: "CONNACK received", kind: "boolean" },
+    { key: "returnCode", label: "Return code", kind: "number" },
+    { key: "returnMessage", label: "Broker response", kind: "string" },
+    {
+      key: "responseTimeMs",
+      label: "Response time",
+      kind: "number",
+      unit: "ms",
+    },
+  ],
+  form: ["port"],
+  supportsRecovery: true,
+};
+
+export const smtpDescriptor: CheckTypeDescriptor = {
+  id: "smtp",
+  label: "SMTP",
+  description: "Greet a mail server and check that it accepts EHLO.",
+  target: {
+    kind: "hostname",
+    label: "Hostname",
+    placeholder: "mail.example.com",
+    help: "A bare hostname — no scheme, no port. The conversation is plaintext, so port 465 (implicit TLS) will never answer; use 25, 587 or 2525.",
+  },
+  port: { required: true, default: DEFAULT_SMTP_PORT },
+  facts: [
+    { key: "greetingCode", label: "Greeting code", kind: "number" },
+    { key: "ehloAccepted", label: "EHLO accepted", kind: "boolean" },
+    { key: "banner", label: "Banner", kind: "string" },
+    {
+      key: "responseTimeMs",
+      label: "Response time",
+      kind: "number",
+      unit: "ms",
+    },
+  ],
+  form: ["port"],
+  supportsRecovery: true,
+};
+
+export const jsonQueryDescriptor: CheckTypeDescriptor = {
+  id: "json-query",
+  label: "JSON query",
+  description: "Fetch a JSON endpoint and assert on one value inside the body.",
+  target: {
+    kind: "url",
+    label: "URL",
+    placeholder: "https://example.com/health",
+    help: "The full URL of an endpoint that answers with JSON.",
+  },
+  port: { required: false, default: null },
+  facts: [
+    { key: "statusCode", label: "Status code", kind: "number" },
+    {
+      key: "responseTimeMs",
+      label: "Response time",
+      kind: "number",
+      unit: "ms",
+    },
+    { key: "jsonValid", label: "Body parsed as JSON", kind: "boolean" },
+    { key: "pathFound", label: "Path found", kind: "boolean" },
+    { key: "actualValue", label: "Value at path", kind: "string" },
+    { key: "matches", label: "Value matches", kind: "boolean" },
+  ],
+  // No shared form section: the path and the expected value are this
+  // type's own config, not something another type renders too.
+  form: [],
+  supportsRecovery: true,
+};
+
 /** Every descriptor, in the order the type selector shows them. */
 export const CHECK_TYPE_DESCRIPTORS: readonly CheckTypeDescriptor[] = [
   httpDescriptor,
@@ -187,11 +418,15 @@ export const CHECK_TYPE_DESCRIPTORS: readonly CheckTypeDescriptor[] = [
   dnsDescriptor,
   tlsExpiryDescriptor,
   domainExpiryDescriptor,
+  postgresDescriptor,
+  mysqlDescriptor,
+  mongodbDescriptor,
+  redisDescriptor,
+  dockerDescriptor,
+  mqttDescriptor,
+  smtpDescriptor,
+  jsonQueryDescriptor,
 ];
-
-export const CHECK_TYPE_IDS = CHECK_TYPE_DESCRIPTORS.map(
-  (descriptor) => descriptor.id,
-) as readonly string[];
 
 export function findDescriptor(id: string): CheckTypeDescriptor | undefined {
   return CHECK_TYPE_DESCRIPTORS.find((descriptor) => descriptor.id === id);
@@ -208,15 +443,6 @@ export function describeCheckType(id: string): CheckTypeDescriptor {
   return findDescriptor(id) ?? unknownDescriptor(id);
 }
 
-function unknownDescriptor(id: string): CheckTypeDescriptor {
-  return {
-    id,
-    label: id,
-    description: "This check type is not available in this build.",
-    target: { kind: "hostname", label: "Target", placeholder: "", help: "" },
-    port: null,
-    facts: [],
-    form: [],
-    supportsRecovery: false,
-  };
-}
+export const CHECK_TYPE_IDS = CHECK_TYPE_DESCRIPTORS.map(
+  (descriptor) => descriptor.id,
+) as readonly string[];

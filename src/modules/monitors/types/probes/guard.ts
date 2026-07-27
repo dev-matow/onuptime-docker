@@ -32,3 +32,33 @@ export async function refusesPrivate(
 export function elapsedSince(startedAt: number): number {
   return Math.round(performance.now() - startedAt);
 }
+
+/**
+ * The message to report for a failed connection.
+ *
+ * When every address of a multi-homed host fails, Node raises an
+ * `AggregateError` whose own `message` is the EMPTY STRING, with the real
+ * reasons in `.errors`. `judge` tests `if (result.error)`, so an empty
+ * string is falsy — the probe reports no transport failure and the check
+ * is judged on its assertions instead. Depending on the type that means
+ * a dead server filed as an assertion failure, or, for a type whose
+ * assertions all skip on missing facts, filed as UP.
+ *
+ * Every serious mail host and database endpoint has multiple A records,
+ * so this is the common path rather than an edge case. Two probes hit it
+ * independently on the day this codebase grew a driver-based check.
+ */
+export function connectionErrorMessage(
+  error: unknown,
+  fallback: string,
+): string {
+  if (error instanceof AggregateError) {
+    for (const inner of error.errors) {
+      const message = connectionErrorMessage(inner, "");
+      if (message) return message;
+    }
+    return error.message || fallback;
+  }
+  if (error instanceof Error && error.message) return error.message;
+  return fallback;
+}

@@ -119,6 +119,7 @@ export default async function StatusPageSettings() {
                     name: page.name,
                     slug: page.slug,
                     published: page.published,
+                    showBranding: page.showBranding,
                     visibility: page.visibility,
                     hasPassword: page.passwordHash !== null,
                   }}

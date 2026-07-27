@@ -156,6 +156,7 @@ export async function updateStatusPage(
         slug: input.slug,
         published: input.published,
         visibility: input.visibility,
+        showBranding: input.showBranding,
         ...(passwordHash === undefined ? {} : { passwordHash }),
       })
       .where(eq(statusPages.id, page.id))
@@ -305,6 +306,8 @@ export interface PublicIncident {
 export interface PublicStatusPage {
   name: string;
   organizationName: string;
+  /** False when the operator turned the footer off — free, both editions. */
+  showBranding: boolean;
   components: PublicComponent[];
   activeIncidents: PublicIncident[];
   recentIncidents: PublicIncident[];
@@ -455,6 +458,7 @@ export async function getPublicStatusPage(
   return {
     name: page.name,
     organizationName: org?.name ?? page.name,
+    showBranding: page.showBranding,
     components,
     activeIncidents,
     recentIncidents,

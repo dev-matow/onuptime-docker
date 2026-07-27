@@ -1,0 +1,1 @@
+ALTER TABLE "status_pages" ADD COLUMN "show_branding" boolean DEFAULT true NOT NULL;

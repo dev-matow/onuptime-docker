@@ -2,7 +2,7 @@ import net from "node:net";
 
 import type { ProbeContext, ProbeResult } from "../contract";
 import type { TcpConfig } from "../specs/tcp";
-import { elapsedSince, refusesPrivate } from "./guard";
+import { elapsedSince, refusesPrivate, connectionErrorMessage } from "./guard";
 
 /**
  * One TCP connect. A completed handshake is the observation; the
@@ -53,7 +53,7 @@ export async function tcpProbe(
         facts: { responseTimeMs },
         responseTimeMs,
         statusCode: null,
-        error: error.message,
+        error: connectionErrorMessage(error, "Connection failed"),
       });
     });
   });

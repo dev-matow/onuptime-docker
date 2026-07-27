@@ -5,6 +5,7 @@ import { member, user } from "@/db/schema";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import type { Incident } from "@/modules/incidents/service";
+import { describeMonitorTarget } from "@/modules/monitors/spec";
 import type { Monitor } from "@/modules/monitors/service";
 
 import {
@@ -41,7 +42,7 @@ export async function notifyIncidentOpened(
   const recipients = await recipientEmails(db, incident.organizationId);
   const email = renderIncidentOpenedEmail({
     monitorName: monitor.name,
-    monitorUrl: monitor.url,
+    monitorUrl: describeMonitorTarget(monitor),
     failureWindowSeconds: monitor.failureWindowSeconds,
     incidentUrl: `${env.APP_URL}/incidents/${incident.id}`,
   });
@@ -66,7 +67,7 @@ export async function notifyIncidentResolved(
   const recipients = await recipientEmails(db, incident.organizationId);
   const email = renderIncidentResolvedEmail({
     monitorName: monitor.name,
-    monitorUrl: monitor.url,
+    monitorUrl: describeMonitorTarget(monitor),
     incidentUrl: `${env.APP_URL}/incidents/${incident.id}`,
   });
 

@@ -6,6 +6,37 @@ free edition; entries for commercial-only features live in the other
 repository, because they are not in this one and listing them here would
 describe software you do not have.
 
+## 1.12.0 — 2026-07-28
+
+### Added
+
+- **Eight check types, 6 → 14**: PostgreSQL, MySQL/MariaDB, MongoDB,
+  Redis, Docker containers, MQTT brokers, SMTP and JSON query. No new
+  dependencies — everything but Postgres speaks the wire protocol
+  directly, because the small image is the point.
+- **White-label status pages**: turn off the "Powered by Vigil" footer.
+  Free, and it stays free.
+
+### Fixed
+
+- A monitor target that carries a credential — a Postgres connection
+  string — is redacted before it reaches an incident email or a webhook.
+- A host whose every address fails is now reported as a transport
+  failure. Node reports that as an `AggregateError` with an empty
+  message, which read as "no error" and let a dead server be judged on
+  its assertions instead.
+- `docs/UPGRADE.md` is Core's own, and says that 1.0.x has no in-place
+  upgrade path. The mirror had been carrying the commercial edition's
+  copy, which does not.
+
+## 1.11.1 — 2026-07-28
+
+`package-lock.json` in the 1.11.0 tag still named the commercial package
+and carried its licence string. Nothing depends on it — `npm ci` works
+either way — but an Apache-2.0 repository should not contain
+`"SEE LICENSE IN LICENSE"`. Both editions are on 1.11.1 so their version
+numbers match, which is the check this project asks you to make.
+
 ## 1.11.0 — 2026-07-28
 
 **The first release generated from the shared tree**, and the reason the

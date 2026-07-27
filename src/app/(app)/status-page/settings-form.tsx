@@ -36,6 +36,7 @@ export function StatusPageSettingsForm({
     name: string;
     slug: string;
     published: boolean;
+    showBranding: boolean;
     visibility: Visibility;
     hasPassword: boolean;
   };
@@ -43,6 +44,7 @@ export function StatusPageSettingsForm({
 }) {
   const router = useRouter();
   const [published, setPublished] = useState(defaults.published);
+  const [showBranding, setShowBranding] = useState(defaults.showBranding);
   const [visibility, setVisibility] = useState<Visibility>(defaults.visibility);
   const [pending, setPending] = useState(false);
 
@@ -56,6 +58,7 @@ export function StatusPageSettingsForm({
       name: String(form.get("name")),
       slug: String(form.get("slug")),
       published,
+      showBranding,
       visibility,
       password: String(form.get("password") ?? ""),
     });
@@ -108,6 +111,23 @@ export function StatusPageSettingsForm({
             <FieldLabel htmlFor="status-page-published">Published</FieldLabel>
             <FieldDescription id="status-page-published-hint">
               Unpublished pages return 404 to visitors.
+            </FieldDescription>
+          </div>
+        </Field>
+        <Field orientation="horizontal">
+          <Switch
+            id="status-page-branding"
+            checked={showBranding}
+            onCheckedChange={setShowBranding}
+            disabled={!canEdit}
+            aria-describedby="status-page-branding-hint"
+          />
+          <div>
+            <FieldLabel htmlFor="status-page-branding">
+              Show &ldquo;Powered by Vigil&rdquo;
+            </FieldLabel>
+            <FieldDescription id="status-page-branding-hint">
+              Turn it off for a white-label page. Free in both editions.
             </FieldDescription>
           </div>
         </Field>

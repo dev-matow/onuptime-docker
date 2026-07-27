@@ -115,7 +115,11 @@ describe("creating each check type through the action layer", () => {
   });
 
   it("rejects a check type this build does not have", () => {
-    const parsed = parseCreate({ checkType: "redis", url: "example.com" });
+    // Not "redis" — that stopped being hypothetical the day redis shipped.
+    const parsed = parseCreate({
+      checkType: "not-a-real-check-type",
+      url: "example.com",
+    });
     expect(parsed.success).toBe(false);
     expect(parsed.error?.issues[0]?.message).toContain("Unknown check type");
   });

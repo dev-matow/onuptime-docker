@@ -43,7 +43,7 @@ npm run worker:dev          # terminal 2 — background checks
 ## Verify the install
 
 ```bash
-npm run typecheck && npm run lint && npm test   # 161 tests, ~3s
+npm run typecheck && npm run lint && npm test   # 164 tests, ~3s
 ```
 
 ## Where to go next

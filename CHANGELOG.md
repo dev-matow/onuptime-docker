@@ -4,6 +4,45 @@ All notable changes to Vigil Core are documented here. Versions follow
 [semantic versioning](https://semver.org): breaking changes bump the
 major, additive features the minor, fixes the patch.
 
+## Unreleased
+
+Relicensed, and the seat cap nobody chose is gone. No schema migration.
+
+### Changed
+
+- **Licence: AGPL-3.0-or-later → Apache-2.0.** The AGPL was costing
+  adoption and protecting nothing — section 13 fires only on _modified_
+  versions offered over a network, so running stock Core for any number
+  of clients never triggered it, while the licence itself is prohibited
+  outright at companies large enough to have a policy. Apache also
+  removes the need for a contributor agreement: under section 5 an
+  inbound contribution already arrives on terms that let it ship in both
+  editions, so there is nothing to sign and no copyright to assign.
+  Copies obtained under the AGPL remain available under it; see NOTICE.
+
+### Fixed
+
+- **An organization was capped at 100 members.** better-auth's
+  organization plugin defaults `membershipLimit` to 100 when the option
+  is absent, and the commercial edition lifted it in its own 1.9.3.
+  Fixing it needs _two_ changes and either one alone leaves a wall:
+  `membershipLimit` on the plugin, and `membersLimit` on the
+  `getFullOrganization` query. Measured against better-auth 1.6 rather
+  than assumed:
+
+  - Without `membershipLimit`, reading a 132-member organization throws
+    `User not found for member` — the user lookup inside the join is
+    what breaks, not the count.
+  - With it but without `membersLimit`, the same call returns **exactly
+    100** members and nothing says the list was cut short.
+  - It does **not** gate `createInvitation` in this version; inviting
+    past 100 succeeds either way. The list path is the whole bug.
+
+  The member-list read now goes through one function,
+  `getOrganizationWithAllMembers`, so there is a single place to get it
+  wrong and a single place a test can hold it right. Three integration
+  tests cover it, and each of the two fixes fails one when reverted.
+
 ## 1.0.1 — 2026-07-26
 
 Patch release: a defensive fix carried over from the commercial edition.

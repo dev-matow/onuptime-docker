@@ -23,7 +23,7 @@ agents to install.
 | **Team**               | Invite teammates with roles — owner, admin, responder, viewer. Viewers are read-only and never see signing secrets.                                          |
 | **Audit trail**        | Every mutation recorded with actor, target and metadata.                                                                                                     |
 
-Built with Next.js 16, Postgres 18, Drizzle and pg-boss. **161 tests**,
+Built with Next.js 16, Postgres 18, Drizzle and pg-boss. **164 tests**,
 lint and typecheck clean, Docker images for app and worker.
 
 <details>

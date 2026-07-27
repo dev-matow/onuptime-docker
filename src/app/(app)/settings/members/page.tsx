@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 
-import { auth } from "@/lib/auth";
+import { getOrganizationWithAllMembers } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { requireOrgContext } from "@/lib/session";
 
@@ -13,9 +13,7 @@ export const metadata: Metadata = { title: "Members — Vigil" };
 
 export default async function MembersPage() {
   const ctx = await requireOrgContext();
-  const org = await auth.api.getFullOrganization({
-    headers: await headers(),
-  });
+  const org = await getOrganizationWithAllMembers(await headers());
 
   const members = (org?.members ?? []).map((m) => ({
     id: m.id,

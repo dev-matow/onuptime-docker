@@ -2,6 +2,7 @@ import { createHmac } from "node:crypto";
 
 import { describe, expect, it, vi } from "vitest";
 
+import type { EgressException, EgressLookup } from "@/modules/monitors/egress";
 import {
   buildDeliveryBody,
   buildWebhookPayload,
@@ -274,5 +275,153 @@ describe("deliverWebhook", () => {
 
     expect(result.delivered).toBe(true);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+});
+
+/**
+ * Delivery is egress too. Until this policy existed it was the only
+ * outbound path with no address check at all: a signed POST went
+ * wherever the saved URL resolved, and the saved URL was typed by a
+ * person into a settings form.
+ */
+describe("deliverWebhook egress policy", () => {
+  const payload = buildWebhookPayload({
+    event: "incident.opened",
+    organizationId: "org_1",
+    data: {},
+  });
+
+  const resolvesTo =
+    (address: string): EgressLookup =>
+    async () => [{ address, family: address.includes(":") ? 6 : 4 }];
+
+  it("refuses an endpoint that resolves to the cloud metadata address", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => okResponse(200));
+    const result = await deliverWebhook(
+      { url: "https://hook.example.com/deliver", secret: SECRET },
+      payload,
+      { fetchImpl, lookup: resolvesTo("169.254.169.254") },
+    );
+
+    expect(result.delivered).toBe(false);
+    expect(result.error).toBe("Target resolves to a cloud metadata address");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("refuses a link-local endpoint although private space is allowed", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => okResponse(200));
+    const result = await deliverWebhook(
+      { url: "https://hook.example.com/deliver", secret: SECRET },
+      payload,
+      { fetchImpl, lookup: resolvesTo("169.254.10.1") },
+    );
+
+    expect(result.error).toBe("Target resolves to a link-local address");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("does not retry a refusal — the address will not fix itself", async () => {
+    const sleep = vi.fn(async () => {});
+    const result = await deliverWebhook(
+      { url: "https://hook.example.com/deliver", secret: SECRET },
+      payload,
+      {
+        fetchImpl: vi.fn<typeof fetch>(async () => okResponse(200)),
+        sleep,
+        attempts: 3,
+        lookup: resolvesTo("169.254.169.254"),
+      },
+    );
+
+    expect(result.attempts).toBe(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it("still delivers to a receiver on the operator's own network", async () => {
+    // The default this policy is required to preserve: a self-hosted
+    // install posting to an internal receiver has worked since 1.0.
+    const fetchImpl = vi.fn<typeof fetch>(async () => okResponse(200));
+    const result = await deliverWebhook(
+      { url: "https://receiver.internal/hook", secret: SECRET },
+      payload,
+      { fetchImpl, lookup: resolvesTo("10.0.0.5") },
+    );
+
+    expect(result.delivered).toBe(true);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("records the approved exception when it does", async () => {
+    const seen: EgressException[] = [];
+    await deliverWebhook(
+      { url: "https://receiver.internal/hook", secret: SECRET },
+      payload,
+      {
+        fetchImpl: vi.fn<typeof fetch>(async () => okResponse(200)),
+        lookup: resolvesTo("10.0.0.5"),
+        onException: (entry) => seen.push(entry),
+      },
+    );
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({
+      channel: "webhook",
+      address: "10.0.0.5",
+      classification: "private",
+      url: "https://receiver.internal/hook",
+    });
+  });
+
+  it("refuses the deny posture an operator can turn on", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => okResponse(200));
+    const result = await deliverWebhook(
+      { url: "https://receiver.internal/hook", secret: SECRET },
+      payload,
+      { fetchImpl, allowPrivate: false, lookup: resolvesTo("10.0.0.5") },
+    );
+
+    expect(result.error).toBe("Target resolves to a private address");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("applies the same floor to a recovery trigger", async () => {
+    // Recovery reuses this machinery on its own channel. Internal
+    // targets stay reachable; the metadata service does not.
+    const fetchImpl = vi.fn<typeof fetch>(async () => okResponse(200));
+
+    const blocked = await deliverWebhook(
+      { url: "https://runbook.internal/restart", secret: SECRET },
+      payload,
+      { fetchImpl, channel: "recovery", lookup: resolvesTo("169.254.169.254") },
+    );
+    expect(blocked.delivered).toBe(false);
+    expect(fetchImpl).not.toHaveBeenCalled();
+
+    const allowed = await deliverWebhook(
+      { url: "https://runbook.internal/restart", secret: SECRET },
+      payload,
+      { fetchImpl, channel: "recovery", lookup: resolvesTo("10.0.0.5") },
+    );
+    expect(allowed.delivered).toBe(true);
+  });
+
+  it("re-resolves the endpoint on every retry", async () => {
+    // A retry is a new connection minutes later, and the record it
+    // resolves is the attacker's to change in between.
+    const lookup = vi.fn<EgressLookup>(async () => [
+      { address: "93.184.216.34", family: 4 },
+    ]);
+    await deliverWebhook(
+      { url: "https://hook.example.com/deliver", secret: SECRET },
+      payload,
+      {
+        fetchImpl: vi.fn<typeof fetch>(async () => okResponse(500)),
+        sleep: async () => {},
+        attempts: 3,
+        lookup,
+      },
+    );
+
+    expect(lookup).toHaveBeenCalledTimes(3);
   });
 });

@@ -57,6 +57,7 @@ export function EditMonitorDialog({
         </DialogHeader>
         <MonitorForm
           initial={monitor}
+          monitorId={monitor.id}
           submitLabel="Save changes"
           pending={pending}
           onSubmit={handleSubmit}

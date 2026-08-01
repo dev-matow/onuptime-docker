@@ -1,0 +1,17 @@
+=== BACKUP / RESTORE, on the fresh install ===
+date: 2026-08-01T20:24:35Z
+commit: d35436b9a1f7e81bf7667525f52ef06fde5db7e8
+monitor hash before: 7ebc16bf204ec54912687e18f317ccdd
+backup: wrote /tmp/claude-1000/-home-s8kur-Claude-VibeCoding/659b8c14-2df9-4bc6-b47f-ebd702f4d8e3/scratchpad/evidence/fresh.dump (196K, 190 archive entries)
+backup: restore it with  scripts/restore.sh /tmp/claude-1000/-home-s8kur-Claude-VibeCoding/659b8c14-2df9-4bc6-b47f-ebd702f4d8e3/scratchpad/evidence/fresh.dump
+dropped and recreated
+--- scripts/restore.sh, the operator's own path ---
+restore: done. Verify before you trust it:
+  npm run db:migrate    # brings the schema up to this build
+  see docs/BACKUP.md for the row-count check
+--- and it refuses a non-empty target unless forced ---
+  database, or pass --force to drop and replace what the archive
+  covers. --force is destructive and does not merge.
+monitor hash after : 7ebc16bf204ec54912687e18f317ccdd
+migrations restored: 19
+RESULT: identical

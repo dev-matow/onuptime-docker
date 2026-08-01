@@ -52,7 +52,11 @@ const REQUEST_ID = 1;
 export async function mongodbProbe(
   ctx: ProbeContext<MongodbConfig>,
 ): Promise<ProbeResult> {
-  const guard = await refusesPrivate(ctx.target, ctx.allowPrivateTargets);
+  const guard = await refusesPrivate(
+    ctx.target,
+    ctx.allowPrivateTargets,
+    ctx.lookup,
+  );
   if (guard) {
     return { facts: {}, responseTimeMs: null, statusCode: null, error: guard };
   }

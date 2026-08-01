@@ -102,7 +102,11 @@ export function pingResult(
 export async function redisProbe(
   ctx: ProbeContext<RedisConfig>,
 ): Promise<ProbeResult> {
-  const guard = await refusesPrivate(ctx.target, ctx.allowPrivateTargets);
+  const guard = await refusesPrivate(
+    ctx.target,
+    ctx.allowPrivateTargets,
+    ctx.lookup,
+  );
   if (guard) {
     return { facts: {}, responseTimeMs: null, statusCode: null, error: guard };
   }

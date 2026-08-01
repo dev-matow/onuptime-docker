@@ -13,9 +13,18 @@ install.
 
 ## What it does
 
-- **Six check types** — HTTP(S), TCP/port, ping (ICMP), DNS records,
-  TLS-certificate expiry and domain-registration expiry, behind a
-  registry. Adding one is five files and no dispatch to edit.
+- **Forty check types**, behind a registry. The web: HTTP(S), JSON
+  query, a real browser engine, TCP/port, UDP, ping (ICMP), DNS records,
+  TLS-certificate and domain-registration expiry. Databases: PostgreSQL,
+  MySQL / MariaDB, MongoDB, Redis, SQL Server, Oracle, Elasticsearch,
+  Memcached. Messaging: MQTT, Kafka, RabbitMQ. Infrastructure: SSH, FTP,
+  IMAP, SMTP, LDAP, NTP, SNMP, RADIUS, gRPC, WebSocket, SIP, Docker
+  containers, systemd services, Tailscale, Globalping, Steam and GameDig.
+  And three that dial nothing: push heartbeats, groups derived from other
+  monitors, and a status an operator sets by hand. Adding one is five
+  files and no dispatch to edit. Everything but PostgreSQL speaks the
+  wire protocol directly, so **not one of them added a dependency** —
+  twenty-six types arrived since 1.12.0 and `package.json` is unchanged.
 - **Assertions** — expected status, response-time thresholds, body
   contains or does not contain a keyword, DNS record values, days left
   on a certificate. A 200 that serves an error page is caught.
@@ -60,14 +69,18 @@ Worth knowing before you deploy:
   host_ could not reach it. The failure window filters blips, but this is
   not multi-region confirmation and never claims to be. Run Vigil outside
   the blast radius of what it watches.
-- **Six check types.** Uptime Kuma has roughly thirty-one, including
-  databases, message brokers and push/heartbeat. If your monitoring is
-  mostly "is this database reachable", Kuma does that today and this
-  does not.
 - **Four notification channels** — email, webhook, and the Slack and
-  Discord formats of that webhook. Kuma has around ninety.
-- **No password reset yet.** A forgotten password means an admin
-  re-invites you. Top of the list.
+  Discord formats of that webhook. Uptime Kuma 2.4.0 ships 94 notification
+  providers. This is the gap that is still real: if you page through
+  PagerDuty, Opsgenie, Telegram or any of the other ninety, Kuma routes
+  to them today and this does not.
+- **An import is not a migration of everything.** Every one of Kuma's 31
+  selectable monitor types has an equivalent here, but a type having one
+  is not a promise that every monitor of that type comes across: Vigil's
+  own rules still refuse what they would refuse from the form, and
+  notification providers, tags and maintenance windows have no
+  counterpart and are reported rather than carried. `docs/KUMA-IMPORT.md`
+  states both numbers and lists every refusal.
 - **One organization per install.** Fine for a team watching its own
   systems; not built to run many separate clients side by side.
 
@@ -75,9 +88,11 @@ Worth knowing before you deploy:
 
 Vigil Core is not maintained by hand. It is generated from the
 commercial edition's tree by deleting every file and statement marked
-`@edition:ee`, and the same script runs in that repository's build gate —
-so Core cannot quietly fall behind. If it did, the build would be red
-before the release existed.
+`@edition:ee`. That same script runs in a required job on every push and
+pull request there — it strips the tree, then lints, typechecks, tests,
+builds, migrates onto an empty Postgres and serves HTTP from what is
+left — so Core cannot quietly fall behind. If it did, the build would be
+red before the release existed.
 
 Both editions are cut from the same commit and carry the same version
 number. **If this repository's version ever trails the commercial one,

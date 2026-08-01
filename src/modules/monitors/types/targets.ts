@@ -1,21 +1,29 @@
 import { z } from "zod";
 
+import { isForbiddenEgressHost } from "../net";
+
 /**
  * Target validation, shared by every check type.
  *
  * Lives here rather than in `schemas.ts` so a type spec can reference a
  * target schema without importing the monitor schemas that import the
  * type specs. Isomorphic: zod only.
+ *
+ * Only the never-reachable classes are refused at this layer, and only
+ * as an early, legible "no". What a target *resolves* to is decided at
+ * execution time by `modules/monitors/egress.ts`, because that is the
+ * only moment the answer is true: a hostname that is public when it is
+ * typed is private the next time DNS is asked.
  */
 
 /**
- * Hostnames a monitor may never target, regardless of environment:
- * cloud metadata endpoints are the classic SSRF jackpot. Private ranges
- * are additionally rejected at DNS-resolution time in the worker (see
- * modules/monitors/net.ts) unless ALLOW_PRIVATE_MONITOR_TARGETS is set.
+ * Re-exported so `modules/monitors/schemas.ts` keeps its published
+ * surface. The definitions moved to `net.ts`, where the recovery
+ * schemas and the worker's egress guard read the same ones — three
+ * copies of "which host is the metadata service" was how
+ * `[::ffff:169.254.169.254]` got past two of them.
  */
-export const FORBIDDEN_HOSTNAMES = new Set(["metadata.google.internal"]);
-export const METADATA_IP = "169.254.169.254";
+export { FORBIDDEN_HOSTNAMES, METADATA_IP } from "../net";
 
 /** Bare hostname — no scheme, no port. */
 export const HOSTNAME_PATTERN =
@@ -227,11 +235,6 @@ function isRegistrableDomain(value: string): boolean {
   return labels.length === suffixLabels + 1;
 }
 
-function forbidden(value: string): boolean {
-  const host = value.toLowerCase();
-  return FORBIDDEN_HOSTNAMES.has(host) || value === METADATA_IP;
-}
-
 export const monitorUrlSchema = z
   .url({ protocol: /^https?$/, hostname: z.regexes.domain })
   .max(2048)
@@ -243,24 +246,55 @@ export const monitorUrlSchema = z
       } catch {
         return true; // invalid URL — let the .url() check reject it
       }
-      return !forbidden(hostname);
+      return !isForbiddenEgressHost(hostname);
     },
     { message: "This host cannot be monitored." },
   );
+
+/** Anything that would corrupt a log line, a CSV cell or a webhook body. */
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
+
+/**
+ * A target nothing dials: the name of a job that reports in, of what a
+ * group covers, of what an operator is vouching for.
+ *
+ * Deliberately permissive about content and strict about shape. There is
+ * no address here to get wrong — no resolver will ever see it — so the
+ * only failures worth refusing are the ones that hurt the surfaces this
+ * string is printed on: control characters (which corrupt a log line, a
+ * CSV export and a webhook body alike) and unbounded length.
+ *
+ * It is not exempt from `redactTargetCredentials`, and must not be:
+ * nothing stops an operator from pasting a URL with a password in it
+ * into a field labelled "Job name", and the redactor is what makes that
+ * a harmless mistake rather than a credential in an incident email.
+ */
+export const monitorLabelSchema = z
+  .string()
+  .trim()
+  .min(1, "Enter a name for this monitor's subject.")
+  .max(200)
+  .refine((value) => !CONTROL_CHARACTERS.test(value), {
+    message: "Remove control characters from this name.",
+  });
 
 export const monitorHostnameSchema = z
   .string()
   .trim()
   .max(253)
-  .refine((value) => HOSTNAME_PATTERN.test(value) && !forbidden(value), {
-    message: "Enter a hostname (no scheme, no port).",
-  });
+  .refine(
+    (value) => HOSTNAME_PATTERN.test(value) && !isForbiddenEgressHost(value),
+    { message: "Enter a hostname (no scheme, no port)." },
+  );
 
 export const monitorDomainSchema = z
   .string()
   .trim()
   .max(253)
-  .refine((value) => isRegistrableDomain(value) && !forbidden(value), {
-    message:
-      "Enter a registrable domain, like example.com or bbc.co.uk — not a subdomain.",
-  });
+  .refine(
+    (value) => isRegistrableDomain(value) && !isForbiddenEgressHost(value),
+    {
+      message:
+        "Enter a registrable domain, like example.com or bbc.co.uk — not a subdomain.",
+    },
+  );

@@ -12,6 +12,8 @@ import {
 } from "@/db/schema";
 import { ConflictError, NotFoundError } from "@/lib/errors";
 import { writeAudit } from "@/modules/audit";
+import { uptimeByMonitor } from "@/modules/monitors/service";
+import { round2, uptimeSegments } from "@/modules/monitors/uptime";
 
 import { hashStatusPagePassword, verifyStatusPagePassword } from "./access";
 import type {
@@ -387,28 +389,30 @@ export async function getPublicStatusPage(
     .orderBy(asc(statusPageMonitors.sortOrder));
 
   const monitorIds = componentRows.map((row) => row.monitorId);
-  const uptimeByMonitor = await dailyUptime(db, monitorIds);
+  const windowEnd = new Date();
+  const windowStart = new Date(windowEnd.getTime() - 90 * 86_400_000);
+  const dailyByMonitor = await dailyUptime(
+    db,
+    monitorIds,
+    windowStart,
+    windowEnd,
+  );
+  const totals = await uptimeByMonitor(db, monitorIds, windowStart, windowEnd);
 
-  const components: PublicComponent[] = componentRows.map((row) => {
-    const daily = uptimeByMonitor.get(row.monitorId) ?? [];
-    // Days that measured nothing are skipped rather than averaged in as
-    // zero — the same rule the strip follows, applied to the headline
-    // number so the two cannot disagree.
-    const measuredDays = daily.filter(
-      (d): d is DailyUptime & { uptimePct: number } => d.uptimePct !== null,
-    );
-    const total = measuredDays.reduce((sum, d) => sum + d.uptimePct, 0);
-    return {
-      name: row.displayName ?? row.internalName,
-      status: row.paused ? "unknown" : row.status,
-      paused: row.paused,
-      uptime90dPct:
-        measuredDays.length > 0
-          ? Math.round((total / measuredDays.length) * 100) / 100
-          : null,
-      dailyUptime: daily,
-    };
-  });
+  const components: PublicComponent[] = componentRows.map((row) => ({
+    name: row.displayName ?? row.internalName,
+    status: row.paused ? "unknown" : row.status,
+    paused: row.paused,
+    // The 90-day number is one ratio over the whole window, not the mean
+    // of ninety daily percentages. A mean of means weights a day holding
+    // three samples exactly as heavily as a day holding seven hundred,
+    // which is a second distortion stacked on the one duration weighting
+    // removes. Summing the segments and dividing once is the same
+    // methodology the strip uses, just at a different resolution — so
+    // the headline and the bars can no longer disagree.
+    uptime90dPct: totals.get(row.monitorId)?.uptimePct ?? null,
+    dailyUptime: dailyByMonitor.get(row.monitorId) ?? [],
+  }));
 
   const activeIncidents = await publicIncidents(
     db,
@@ -466,55 +470,88 @@ export async function getPublicStatusPage(
   };
 }
 
+/**
+ * The 90-day strip: duration-weighted uptime per UTC day.
+ *
+ * Each coverage segment is intersected with each day it touches, so an
+ * outage that straddles midnight is charged to both days in the exact
+ * proportion it occupied them. That is the part a `group by
+ * date_trunc('day', checked_at)` cannot express: it charges a sample
+ * wholly to the day it was *taken*, which puts a 23:59 sample's ten
+ * minutes of evidence entirely on the wrong side of the boundary.
+ */
 async function dailyUptime(
   db: DbClient,
   monitorIds: string[],
+  windowStart: Date,
+  windowEnd: Date,
 ): Promise<Map<string, DailyUptime[]>> {
   if (monitorIds.length === 0) return new Map();
 
-  // Bucket by UTC day: the UI builds its day keys with toISOString(),
-  // so bucketing in server-local time would desync the two after local
+  const segments = uptimeSegments(monitorIds, windowStart, windowEnd);
+  // Bucket by UTC day: the UI builds its day keys with toISOString(), so
+  // bucketing in server-local time would desync the two after local
   // midnight and today's bar would silently render as "no data".
-  const dayExpr = sql`date_trunc('day', ${monitorChecks.checkedAt} at time zone 'utc')`;
-  // Observations that measured nothing are excluded from both halves of
-  // the ratio. Counting them as downtime would paint a 90-day red strip
-  // on a customer-facing page because the worker cannot open a raw
-  // socket — an operator problem rendered as an outage, on the one
-  // surface where that is least forgivable.
-  //
-  // `is distinct from`, never `<>`: `verdict` is NULL on every row
-  // written before 1.10.0, and `<>` would silently drop all of them.
-  const measured = sql`${monitorChecks.verdict} is distinct from 'indeterminate'`;
-  const rows = await db
-    .select({
-      monitorId: monitorChecks.monitorId,
-      day: sql<string>`to_char(${dayExpr}, 'YYYY-MM-DD')`.as("day"),
-      uptimePct: sql<number>`round(
-        count(*) filter (where ${monitorChecks.ok} and ${measured}) * 100.0
-        / nullif(count(*) filter (where ${measured}), 0),
-        2
-      )`,
-    })
-    .from(monitorChecks)
-    .where(
-      and(
-        inArray(monitorChecks.monitorId, monitorIds),
-        gte(monitorChecks.checkedAt, sql`now() - interval '90 days'`),
-      ),
+  // Both segment bounds are converted to UTC wall time up front, so
+  // every subsequent comparison, `generate_series` step and `+ interval
+  // '1 day'` happens in plain `timestamp` space where a day is always
+  // exactly 24 hours. Doing it on `timestamptz` would make day
+  // arithmetic follow the session's TimeZone, and a server in a
+  // DST-observing zone would produce 23- and 25-hour "days".
+  const { rows } = await db.execute<{
+    monitor_id: string;
+    day: string;
+    up_ms: string | null;
+    covered_ms: string | null;
+  }>(sql`
+    with seg as (
+      select
+        raw.monitor_id,
+        raw.ok,
+        raw.seg_start at time zone 'utc' as utc_start,
+        raw.seg_end at time zone 'utc' as utc_end
+      from (${segments}) raw
+    ),
+    overlap as (
+      select
+        seg.monitor_id,
+        seg.ok,
+        d.day,
+        extract(epoch from (
+          least(seg.utc_end, d.day + interval '1 day')
+          - greatest(seg.utc_start, d.day)
+        )) * 1000 as ms
+      from seg
+      join lateral generate_series(
+        date_trunc('day', seg.utc_start),
+        date_trunc('day', seg.utc_end - interval '1 microsecond'),
+        interval '1 day'
+      ) as d(day) on true
     )
-    .groupBy(monitorChecks.monitorId, dayExpr)
-    .orderBy(dayExpr);
+    select
+      monitor_id,
+      to_char(day, 'YYYY-MM-DD') as day,
+      sum(ms) filter (where ok) as up_ms,
+      sum(ms) as covered_ms
+    from overlap
+    group by monitor_id, day
+    order by day
+  `);
 
   const map = new Map<string, DailyUptime[]>();
   for (const row of rows) {
-    const list = map.get(row.monitorId) ?? [];
+    const coveredMs = Number(row.covered_ms ?? 0);
+    const list = map.get(row.monitor_id) ?? [];
     list.push({
       day: row.day,
-      // Preserved as null, not coerced: `Number(null)` is 0, which is
-      // the red bar this whole change exists to stop drawing.
-      uptimePct: row.uptimePct === null ? null : Number(row.uptimePct),
+      // Null, not 0, when the day was never covered: `Number(null)` is 0,
+      // which is the red bar this whole rule exists to stop drawing.
+      uptimePct:
+        coveredMs === 0
+          ? null
+          : round2((Number(row.up_ms ?? 0) / coveredMs) * 100),
     });
-    map.set(row.monitorId, list);
+    map.set(row.monitor_id, list);
   }
   return map;
 }

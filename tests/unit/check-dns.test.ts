@@ -1,3 +1,4 @@
+// @covers-type: dns
 import { describe, expect, it } from "vitest";
 
 import { judge } from "@/modules/monitors/types/conditions";
@@ -8,6 +9,8 @@ import {
   type DnsResolver,
 } from "@/modules/monitors/types/probes/dns";
 import { dnsSpec, type DnsConfig } from "@/modules/monitors/types/specs/dns";
+
+import { publicLookup } from "../probe-lookup";
 
 function context(config: Partial<DnsConfig> = {}): ProbeContext<DnsConfig> {
   return {
@@ -22,6 +25,7 @@ function context(config: Partial<DnsConfig> = {}): ProbeContext<DnsConfig> {
     timeoutMs: 5_000,
     allowPrivateTargets: true,
     fetchImpl: fetch,
+    lookup: publicLookup,
   };
 }
 
@@ -165,6 +169,7 @@ describe("dns spec", () => {
       url: "example.com",
       port: null,
       method: "GET",
+      intervalSeconds: 60,
       timeoutMs: 10_000,
       degradedThresholdMs: 3_000,
       expectedStatusCode: null,

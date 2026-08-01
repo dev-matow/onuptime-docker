@@ -70,8 +70,8 @@ New behaviour needs a test. The suite is split:
 
 ## Scope
 
-Core aims to be a complete, honest uptime monitor for one team: HTTP
-checks, incidents, one status page, email and webhook alerts. Things
+Core aims to be a complete, honest uptime monitor for one team: forty
+check types, incidents, status pages, email and webhook alerts. Things
 that make it a bigger product — multi-tenancy, automatic recovery,
 on-call rotation, paging over SMS — live in the commercial edition and
 won't be merged here. That boundary is stated plainly in the README so
@@ -79,7 +79,7 @@ nobody is surprised by it.
 
 Everything inside that scope is fair game, and the limitations list in
 the README is a decent place to look for something worth doing —
-**password reset** especially.
+**more notification providers** especially.
 
 ## Licensing your contribution
 

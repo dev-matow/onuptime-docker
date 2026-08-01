@@ -1,5 +1,6 @@
+import { mergeConfig } from "./config";
 import type {
-  CheckTypeSpec,
+  AnyCheckTypeSpec,
   FormSection,
   MonitorColumnWrite,
 } from "./contract";
@@ -16,6 +17,12 @@ import type {
  * Driving it off `descriptor.form` — the same list the monitor form
  * renders from — is deliberate: the UI and the writer cannot disagree
  * about which settings a type has, because they read the same array.
+ *
+ * The `config` blob is the exception, and used to be a data-loss bug:
+ * the flat columns are all-or-nothing settings the form always sends,
+ * but a config blob can hold a credential the form was never given. So
+ * config is merged over what is stored rather than rebuilt from the
+ * submission — see `./config.ts` for the three cases that distinguishes.
  */
 
 export interface MonitorSettings {
@@ -29,13 +36,25 @@ export interface MonitorSettings {
   config?: unknown;
 }
 
-function uses(spec: CheckTypeSpec<unknown>, section: FormSection): boolean {
+/**
+ * The row being updated, as far as config merging is concerned.
+ *
+ * Omitted on create — there is nothing to merge over — and the check
+ * type is carried because a config belongs to the type that wrote it.
+ */
+export interface StoredConfigContext {
+  checkType: string;
+  config: unknown;
+}
+
+function uses(spec: AnyCheckTypeSpec, section: FormSection): boolean {
   return spec.descriptor.form.includes(section);
 }
 
 export function monitorColumnsFor(
-  spec: CheckTypeSpec<unknown>,
+  spec: AnyCheckTypeSpec,
   input: MonitorSettings,
+  stored?: StoredConfigContext,
 ): MonitorColumnWrite {
   const portSpec = spec.descriptor.port;
 
@@ -51,6 +70,6 @@ export function monitorColumnsFor(
       : false,
     tlsCheck: uses(spec, "tlsWarning") ? (input.tlsCheck ?? false) : false,
     tlsWarnDays: uses(spec, "tlsWarning") ? (input.tlsWarnDays ?? 14) : 14,
-    config: spec.storedSchema.parse(input.config ?? {}),
+    config: mergeConfig(spec, stored?.config, input.config, stored?.checkType),
   };
 }

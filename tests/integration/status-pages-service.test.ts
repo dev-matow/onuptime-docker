@@ -1024,3 +1024,145 @@ describe("the headline never sits green over something unmeasured", () => {
     expect((await getPublicStatusPage(db, slug))?.overall).toBe("outage");
   });
 });
+
+describe("status-page uptime is duration-weighted", () => {
+  /** Writes checks at controlled timestamps, relative to now. */
+  async function seedDays(
+    monitorId: string,
+    points: { minutesAgo: number; ok: boolean }[],
+  ): Promise<void> {
+    const now = Date.now();
+    await db.insert(monitorChecks).values(
+      points.map((p) => ({
+        monitorId,
+        checkedAt: new Date(now - p.minutesAgo * 60_000),
+        ok: p.ok,
+        responseTimeMs: p.ok ? 100 : null,
+        verdict: p.ok ? "up" : "down",
+      })),
+    );
+  }
+
+  it("does not let a dense burst outweigh the time it covers", async () => {
+    // The scheduler probes a failing monitor up to 16x as often. Under
+    // the old count-based rule those extra rows made a one-minute blip
+    // read as a 43% outage on a customer's public page.
+    const actor = await createTestOrg();
+    const page = await newPage(actor);
+    const monitor = await createMonitor(
+      db,
+      actor,
+      monitorInput({ name: "Checkout" }),
+    );
+    const points: { minutesAgo: number; ok: boolean }[] = [];
+    for (let m = 10; m > 1; m--) points.push({ minutesAgo: m, ok: true });
+    for (let s = 0; s < 12; s++) {
+      points.push({ minutesAgo: 1 - s / 12, ok: false });
+    }
+    await seedDays(monitor.id, points);
+    await setStatusPageMonitors(db, actor, {
+      statusPageId: page.id,
+      monitors: [{ monitorId: monitor.id }],
+    });
+    const slug = await publishPage(actor, page);
+
+    const view = await getPublicStatusPage(db, slug);
+    const component = view?.components[0];
+    // Nine of ten minutes up. By row count it would be 43%.
+    expect(component?.uptime90dPct).toBeGreaterThan(88);
+    expect(component?.uptime90dPct).toBeLessThan(92);
+  });
+
+  it("weights the 90-day headline by duration, not by day", async () => {
+    // A mean of daily percentages counts a day holding two samples as
+    // heavily as a day holding seven hundred. Here: one fully-covered
+    // hour today at 0%, and a single up sample yesterday. Averaging the
+    // two days gives 50%; weighting by duration gives far less, because
+    // yesterday's lone sample only vouches for its horizon.
+    const actor = await createTestOrg();
+    const page = await newPage(actor);
+    const monitor = await createMonitor(
+      db,
+      actor,
+      monitorInput({ name: "API", intervalSeconds: 60 }),
+    );
+    const points: { minutesAgo: number; ok: boolean }[] = [
+      { minutesAgo: 60 * 26, ok: true },
+    ];
+    for (let m = 60; m >= 1; m--) points.push({ minutesAgo: m, ok: false });
+    await seedDays(monitor.id, points);
+    await setStatusPageMonitors(db, actor, {
+      statusPageId: page.id,
+      monitors: [{ monitorId: monitor.id }],
+    });
+    const slug = await publishPage(actor, page);
+
+    const view = await getPublicStatusPage(db, slug);
+    const component = view?.components[0];
+    // Yesterday's sample stands for 3 minutes; today's outage for 60.
+    // 3 / 63 ≈ 4.8%, nowhere near the 50% a mean of means reports.
+    expect(component?.uptime90dPct).toBeLessThan(10);
+    expect(component?.dailyUptime.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("charges an outage that straddles midnight to both days", async () => {
+    // A `group by date_trunc('day', checked_at)` charges a sample wholly
+    // to the day it was taken. A segment that starts at 23:30 and runs
+    // to 00:30 belongs half to each.
+    const actor = await createTestOrg();
+    const page = await newPage(actor);
+    const monitor = await createMonitor(
+      db,
+      actor,
+      monitorInput({ name: "Edge", intervalSeconds: 60 }),
+    );
+    const midnight = new Date();
+    midnight.setUTCHours(0, 0, 0, 0);
+    const minutesSinceMidnight = Math.floor(
+      (Date.now() - midnight.getTime()) / 60_000,
+    );
+    // Only meaningful once the clock is far enough past UTC midnight for
+    // both sides of the boundary to sit inside the retained window.
+    if (minutesSinceMidnight < 40) return;
+
+    const points: { minutesAgo: number; ok: boolean }[] = [];
+    for (
+      let m = minutesSinceMidnight + 30;
+      m >= minutesSinceMidnight - 30;
+      m--
+    ) {
+      points.push({ minutesAgo: m, ok: false });
+    }
+    await seedDays(monitor.id, points);
+    await setStatusPageMonitors(db, actor, {
+      statusPageId: page.id,
+      monitors: [{ monitorId: monitor.id }],
+    });
+    const slug = await publishPage(actor, page);
+
+    const view = await getPublicStatusPage(db, slug);
+    const daily = view?.components[0]?.dailyUptime ?? [];
+    const measured = daily.filter((d) => d.uptimePct !== null);
+    expect(measured.length).toBe(2);
+    expect(measured.every((d) => d.uptimePct === 0)).toBe(true);
+  });
+
+  it("reports a day with no coverage as null, never as zero", async () => {
+    const actor = await createTestOrg();
+    const page = await newPage(actor);
+    const monitor = await createMonitor(
+      db,
+      actor,
+      monitorInput({ name: "Quiet" }),
+    );
+    await setStatusPageMonitors(db, actor, {
+      statusPageId: page.id,
+      monitors: [{ monitorId: monitor.id }],
+    });
+    const slug = await publishPage(actor, page);
+
+    const view = await getPublicStatusPage(db, slug);
+    expect(view?.components[0]?.uptime90dPct).toBeNull();
+    expect(view?.components[0]?.dailyUptime).toEqual([]);
+  });
+});

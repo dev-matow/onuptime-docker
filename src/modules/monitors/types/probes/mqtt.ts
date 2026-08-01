@@ -46,7 +46,11 @@ const CLIENT_ID_PREFIX = "vigil-monitor-";
 export async function mqttProbe(
   ctx: ProbeContext<MqttConfig>,
 ): Promise<ProbeResult> {
-  const guard = await refusesPrivate(ctx.target, ctx.allowPrivateTargets);
+  const guard = await refusesPrivate(
+    ctx.target,
+    ctx.allowPrivateTargets,
+    ctx.lookup,
+  );
   if (guard) {
     return { facts: {}, responseTimeMs: null, statusCode: null, error: guard };
   }

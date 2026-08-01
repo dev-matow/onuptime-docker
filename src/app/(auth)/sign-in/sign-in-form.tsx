@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
@@ -56,7 +57,15 @@ export function SignInForm() {
           />
         </Field>
         <Field>
-          <FieldLabel htmlFor="password">Password</FieldLabel>
+          <div className="flex items-center justify-between gap-2">
+            <FieldLabel htmlFor="password">Password</FieldLabel>
+            <Link
+              href="/forgot-password"
+              className="text-muted-foreground hover:text-foreground text-sm underline"
+            >
+              Forgot it?
+            </Link>
+          </div>
           <Input
             id="password"
             name="password"

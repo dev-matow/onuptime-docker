@@ -1,0 +1,20 @@
+=== FRESH INSTALL, documented path (QUICK_START.md 'without Docker') ===
+date: 2026-08-01T20:24:31Z
+commit: d35436b9a1f7e81bf7667525f52ef06fde5db7e8
+createdb vigil_fresh: ok
+--- npm run db:migrate ---
+npm notice run vigil@1.13.0 npx
+npm notice run 'drizzle-kit' migrate
+Using 'pg' driver for database querying
+[⣷] applying migrations...[2K[1G[⣯] applying migrations...[2K[1G[✓] migrations applied successfully!
+migrate exit: 0
+--- tables created ---
+public tables: 29
+migrations applied: 19
+--- seed + smoke: does a fresh install actually serve? ---
+
+Public status page: /status/altitude
+
+seed exit: 0
+monitors seeded: 11
+users seeded: 4

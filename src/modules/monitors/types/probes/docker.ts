@@ -88,7 +88,11 @@ export async function dockerProbe(
   // never connect to while connecting to one we never checked is the
   // shape of an SSRF hole, not a defence against one.
   if (daemon.kind === "tcp") {
-    const guard = await refusesPrivate(daemon.host, ctx.allowPrivateTargets);
+    const guard = await refusesPrivate(
+      daemon.host,
+      ctx.allowPrivateTargets,
+      ctx.lookup,
+    );
     if (guard) {
       return {
         facts: {},

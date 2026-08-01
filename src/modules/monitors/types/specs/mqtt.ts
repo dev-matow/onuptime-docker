@@ -103,6 +103,7 @@ export const mqttSpec: CheckTypeSpec<MqttConfig> = {
   descriptor: mqttDescriptor,
   configSchema: mqttConfigSchema,
   storedSchema: mqttStoredSchema,
+  secretFields: ["password"],
   targetSchema: monitorHostnameSchema,
   assertions: [answered, accepted, latencyAssertion<MqttConfig>("Answered")],
   fromRow(row: MonitorRowView): MqttConfig {

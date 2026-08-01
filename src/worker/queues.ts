@@ -9,10 +9,24 @@ export const QUEUES = {
   recoveryVerify: "recovery-verify",
   /** Failsafe: pages operators if held alerts outlive the recovery chain. */
   recoveryEscalate: "recovery-escalate",
+  /**
+   * Drains the notification outbox. A queue whose payload is empty on
+   * purpose: the work is the table, and the tick only wakes a worker up
+   * to look at it.
+   */
+  notificationDelivery: "notification-delivery",
   /** One escalation-policy step: page its target unless the incident is acked. */
   escalationStep: "escalation-step",
   /** Nightly pruning of old check results. */
   retention: "retention",
+  /**
+   * Aggregates high-frequency samples into minute/hour/day buckets and
+   * drops the raw ones. Every minute, not nightly: the raw table is a
+   * two-hour buffer taking two thousand rows a second, and a job that
+   * ran once a day would be aggregating a hundred and seventy million
+   * rows that had already been deleted.
+   */
+  highFrequencyRollup: "high-frequency-rollup",
 } as const;
 
 export interface MonitorCheckJob {

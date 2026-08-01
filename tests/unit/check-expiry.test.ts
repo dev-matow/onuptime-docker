@@ -1,3 +1,4 @@
+// @covers-type: tls-expiry, domain-expiry
 import { describe, expect, it, vi } from "vitest";
 
 import { judge } from "@/modules/monitors/types/conditions";
@@ -9,6 +10,8 @@ import {
   type DomainExpiryConfig,
 } from "@/modules/monitors/types/specs/domain-expiry";
 import { tlsExpirySpec } from "@/modules/monitors/types/specs/tls-expiry";
+
+import { publicLookup } from "../probe-lookup";
 
 const NOW = Date.parse("2026-07-26T00:00:00Z");
 const config = { warnDays: 14, degradedThresholdMs: 3_000 };
@@ -124,6 +127,7 @@ function context(fetchImpl: typeof fetch): ProbeContext<DomainExpiryConfig> {
     timeoutMs: 5_000,
     allowPrivateTargets: false,
     fetchImpl,
+    lookup: publicLookup,
   };
 }
 
@@ -159,12 +163,16 @@ describe("domainExpiryProbe", () => {
     expect(typeof result.facts.daysRemaining).toBe("number");
   });
 
-  it("asks for RDAP JSON and follows the bootstrap redirect", async () => {
+  it("asks for RDAP JSON and follows the bootstrap redirect one hop at a time", async () => {
+    // The bootstrap redirect still gets followed — this check cannot
+    // work otherwise — but by the egress loop, which classifies each
+    // hop before issuing it. `redirect: "follow"` handed the whole
+    // chain to the transport, and the chain is chosen by a third party.
     const fetchImpl = rdap(RDAP_BODY);
     await domainExpiryProbe(context(fetchImpl));
     expect(fetchImpl).toHaveBeenCalledWith(
       expect.stringContaining("/domain/example.com"),
-      expect.objectContaining({ redirect: "follow" }),
+      expect.objectContaining({ redirect: "manual" }),
     );
   });
 

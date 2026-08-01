@@ -22,9 +22,14 @@ import {
   type MonitorFormValues,
 } from "./monitor-form";
 
-export function CreateMonitorDialog({
-}: {
-}) {
+export function CreateMonitorDialog(
+  // Marked as a whole parameter, not member by member like the sibling
+  // dialogs. They keep props the free edition needs; this one does not,
+  // and a props type whose every member is commercial strips to `{}` —
+  // the "empty object" type, which allows any non-nullish value and
+  // which eslint rightly refuses. So the free edition takes no props at
+  // all, which is also what its two call sites pass it.
+) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);

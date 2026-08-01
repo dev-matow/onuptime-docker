@@ -1,5 +1,12 @@
 import { judge, type FailureClass, type Verdict } from "./types/conditions";
-import type { FactBag, MonitorRowView } from "./types/contract";
+import { isActiveType } from "./types/contract";
+import type {
+  Assertion,
+  FactBag,
+  MonitorRowView,
+  ProbeContext,
+  ProbeResult,
+} from "./types/contract";
 import { checkTlsExpiryDays, httpProbe } from "./types/probes/http";
 import { tcpProbe } from "./types/probes/tcp";
 import { findCheckType } from "./types/registry";
@@ -47,6 +54,8 @@ export interface CheckSpec {
   keywordAbsent?: boolean;
   tlsCheck?: boolean;
   tlsWarnDays?: number;
+  /** The deadline a passive type judges against. See `MonitorRowView`. */
+  intervalSeconds: number;
   /** Type-specific settings, for the types added since 1.10.0. */
   config?: unknown;
 }
@@ -55,6 +64,8 @@ export interface CheckOptions {
   /** Permit private/loopback targets (development only). */
   allowPrivateTargets?: boolean;
   fetchImpl?: typeof fetch;
+  /** See `ProbeContext.lookup` — injectable so a test need not resolve. */
+  lookup?: ProbeContext<unknown>["lookup"];
 }
 
 /** The legacy HTTP target shape, still used by unit tests and helpers. */
@@ -74,6 +85,7 @@ function rowView(spec: CheckSpec): MonitorRowView {
     url: spec.url,
     port: spec.port,
     method: spec.method,
+    intervalSeconds: spec.intervalSeconds,
     timeoutMs: spec.timeoutMs,
     degradedThresholdMs: spec.degradedThresholdMs,
     expectedStatusCode: spec.expectedStatusCode,
@@ -115,6 +127,26 @@ export async function performCheck(
     };
   }
 
+  // Only an active type has something to dial. The other three kinds
+  // are evaluated by `modules/monitors/evaluate.ts`, which holds the
+  // state they read; reaching this function with one means a caller
+  // treated a heartbeat, a group or an operator's statement as a
+  // target. Answering `indeterminate` says so without inventing an
+  // outage — a probe that was never made is not a probe that failed.
+  if (!isActiveType(definition)) {
+    return {
+      ok: false,
+      degraded: false,
+      statusCode: null,
+      responseTimeMs: null,
+      error: `A ${definition.descriptor.label} monitor is not probed.`,
+      verdict: "indeterminate",
+      failureClass: "misconfigured",
+      facts: {},
+      failedAssertions: [],
+    };
+  }
+
   const config = definition.fromRow(rowView(spec));
   const result = await definition.probe({
     target: spec.url,
@@ -123,9 +155,27 @@ export async function performCheck(
     timeoutMs: spec.timeoutMs,
     allowPrivateTargets: options.allowPrivateTargets ?? false,
     fetchImpl: options.fetchImpl ?? fetch,
+    lookup: options.lookup,
   });
 
-  const verdict = judge(definition.assertions, config, result);
+  return judgeMeasurement(definition.assertions, config, result);
+}
+
+/**
+ * Facts in, verdict out — the step every kind shares.
+ *
+ * Exported because it is now reached from four directions: a probe's
+ * result, a heartbeat's silence, a group's members and an operator's
+ * statement. They differ entirely in how the facts were obtained and
+ * not at all in how they are judged, which is the property that keeps
+ * "probes measure, the runner judges" true for kinds that never probe.
+ */
+export function judgeMeasurement<Config>(
+  assertions: readonly Assertion<Config>[],
+  config: Config,
+  result: ProbeResult,
+): CheckResult {
+  const verdict = judge(assertions, config, result);
 
   return {
     ok: verdict.ok,
@@ -173,6 +223,7 @@ export async function performHttpCheck(
     timeoutMs: target.timeoutMs,
     allowPrivateTargets: options.allowPrivateTargets ?? false,
     fetchImpl: options.fetchImpl ?? fetch,
+    lookup: options.lookup,
   });
   const verdict = judge(httpSpec.assertions, config, result);
   return {
@@ -204,6 +255,7 @@ export async function performTcpCheck(
     timeoutMs: target.timeoutMs,
     allowPrivateTargets: options.allowPrivateTargets ?? false,
     fetchImpl: options.fetchImpl ?? fetch,
+    lookup: options.lookup,
   });
   const verdict = judge(findCheckType("tcp")!.assertions, config, result);
   return {

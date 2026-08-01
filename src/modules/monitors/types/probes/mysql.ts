@@ -42,7 +42,11 @@ const MAX_TEXT_CHARS = 128;
 export async function mysqlProbe(
   ctx: ProbeContext<MysqlConfig>,
 ): Promise<ProbeResult> {
-  const guard = await refusesPrivate(ctx.target, ctx.allowPrivateTargets);
+  const guard = await refusesPrivate(
+    ctx.target,
+    ctx.allowPrivateTargets,
+    ctx.lookup,
+  );
   if (guard) {
     return { facts: {}, responseTimeMs: null, statusCode: null, error: guard };
   }

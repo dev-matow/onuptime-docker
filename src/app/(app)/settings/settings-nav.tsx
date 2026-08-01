@@ -10,6 +10,7 @@ const TABS = [
   { title: "Members", href: "/settings/members", exact: false },
   { title: "Notifications", href: "/settings/notifications", exact: false },
   { title: "Escalation", href: "/settings/escalation", exact: false },
+  { title: "Import", href: "/settings/import", exact: false },
   { title: "Audit log", href: "/settings/audit", exact: false },
 ] as const;
 

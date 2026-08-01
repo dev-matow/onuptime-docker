@@ -1,6 +1,14 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 import { logger } from "@/lib/logger";
+import {
+  EgressBlockedError,
+  egressFetch,
+  egressPolicyFor,
+  type EgressAuditSink,
+  type EgressChannel,
+  type EgressLookup,
+} from "@/modules/monitors/egress";
 
 /**
  * Outbound webhook delivery: compact versioned payloads, HMAC-SHA-256
@@ -11,6 +19,16 @@ import { logger } from "@/lib/logger";
  * and retry behaviour are unit-testable without a network or real
  * timers. `deliverWebhook` never throws — a failing endpoint must never
  * affect incident processing.
+ *
+ * Delivery is also egress, and until 1.13 it was the one outbound path
+ * with no address policy at all: an org webhook URL is operator-typed
+ * and a recovery trigger URL is stored, so both were a signed POST to
+ * wherever a hostname happened to point that minute. Both now go
+ * through `modules/monitors/egress.ts`, which resolves, classifies and
+ * pins before the socket opens. Private space stays reachable by
+ * default on both channels — a receiver on your own network is the
+ * normal deployment — but metadata and link-local space does not,
+ * whatever the URL says or resolves to.
  */
 
 export const WEBHOOK_EVENTS = [
@@ -155,6 +173,16 @@ export interface DeliveryOptions {
   backoffMs?: number;
   fetchImpl?: typeof fetch;
   sleep?: (ms: number) => Promise<void>;
+  /**
+   * Which egress policy applies. Recovery triggers reuse this machinery
+   * but are a different channel with its own switch, so the caller has
+   * to say which one it is rather than inheriting the org webhook's.
+   */
+  channel?: EgressChannel;
+  /** Overrides the channel's private-network default, for tests. */
+  allowPrivate?: boolean;
+  lookup?: EgressLookup;
+  onException?: EgressAuditSink;
 }
 
 export interface DeliveryResult {
@@ -192,22 +220,37 @@ export async function deliverWebhook(
     "x-vigil-signature": signBody(endpoint.secret, body),
   };
 
+  const egress = {
+    // Re-checked on every attempt rather than once before the loop: a
+    // retry is a new connection minutes later, and the record it
+    // resolves is the attacker's to change in between.
+    policy: egressPolicyFor(options.channel ?? "webhook", options.allowPrivate),
+    lookup: options.lookup,
+    onException: options.onException,
+    fetchImpl,
+    // Never follow: a redirect would downgrade the POST to a GET and
+    // drop the body and signature, silently delivering an empty
+    // unsigned request — and it would move a signed request to a host
+    // the operator never configured. Surfaced as a failure instead, so
+    // the operator fixes the URL (e.g. an http→https endpoint).
+    maxRedirects: 0,
+  };
+
   let lastError: string | undefined;
   let lastStatus: number | undefined;
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
-      const response = await fetchImpl(endpoint.url, {
-        method: "POST",
-        headers,
-        body,
-        // Never follow redirects: fetch would downgrade the POST to a
-        // GET and drop the body + signature, silently delivering an
-        // empty, unsigned request. Surface the 3xx as a failure so the
-        // operator fixes the URL (e.g. an http→https endpoint).
-        redirect: "manual",
-        signal: AbortSignal.timeout(timeoutMs),
-      });
+      const { response } = await egressFetch(
+        endpoint.url,
+        {
+          method: "POST",
+          headers,
+          body,
+          signal: AbortSignal.timeout(timeoutMs),
+        },
+        egress,
+      );
       lastStatus = response.status;
       // Drain so keep-alive sockets are reusable; body is irrelevant.
       await response.arrayBuffer().catch(() => undefined);
@@ -226,6 +269,18 @@ export async function deliverWebhook(
       }
       lastError = `endpoint returned ${response.status}`;
     } catch (error) {
+      // A policy refusal is a misconfiguration, not a transient fault:
+      // the same URL resolves to the same forbidden place next time, so
+      // retrying it is three log lines and no delivery. Reported
+      // verbatim — the operator needs to read which address it landed
+      // on to fix the endpoint.
+      if (error instanceof EgressBlockedError) {
+        logger.warn(
+          { event: payload.event, err: error.message },
+          "webhook delivery refused by egress policy",
+        );
+        return { delivered: false, attempts: attempt, error: error.message };
+      }
       lastError =
         error instanceof Error ? error.message : "webhook request failed";
     }

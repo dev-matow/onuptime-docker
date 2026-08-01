@@ -39,7 +39,11 @@ export async function postgresProbe(
     };
   }
 
-  const guard = await refusesPrivate(hostname, ctx.allowPrivateTargets);
+  const guard = await refusesPrivate(
+    hostname,
+    ctx.allowPrivateTargets,
+    ctx.lookup,
+  );
   if (guard) {
     return { facts: {}, responseTimeMs: null, statusCode: null, error: guard };
   }

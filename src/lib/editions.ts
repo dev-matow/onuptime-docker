@@ -10,7 +10,9 @@
  *
  * Hence the assignment rather than a marked declaration: `strip-ee` only
  * deletes, so the value has to exist in Core and be raised by a line the
- * commercial build keeps.
+ * commercial build keeps. `prefer-const` is off for this file in
+ * `eslint.config.mjs` for the same reason — stripped of the raise, this
+ * `let` reads like an oversight, and it is not one.
  */
 let multiOrg = false;
 

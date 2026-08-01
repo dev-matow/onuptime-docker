@@ -4,6 +4,7 @@ import {
   index,
   pgEnum,
   pgTable,
+  uniqueIndex,
   text,
   timestamp,
   uuid,
@@ -65,6 +66,28 @@ export const incidents = pgTable(
   (t) => [
     index().on(t.organizationId, t.createdAt.desc()),
     index().on(t.monitorId),
+    /**
+     * One active automatic incident per monitor, enforced by Postgres.
+     *
+     * `openMonitorIncident` used to guarantee this by reading first and
+     * inserting second. Under READ COMMITTED — which is what every
+     * transaction here runs at — two workers can both read "no open
+     * incident" and both insert, and the monitor ends up with two live
+     * incidents paging two sets of people about one outage. There is no
+     * arrangement of application code that fixes a check-then-act race;
+     * only the database can arbitrate it.
+     *
+     * `monitor_id is not null` is stated rather than left to the fact
+     * that NULLs never collide in a unique index. The intent is real: an
+     * incident orphaned by `ON DELETE SET NULL` when its monitor was
+     * deleted must not block a later monitor from opening one, and
+     * saying so is cheaper than making the next reader derive it.
+     */
+    uniqueIndex("incidents_one_active_per_monitor")
+      .on(t.monitorId)
+      .where(
+        sql`${t.source} = 'monitor' and ${t.status} <> 'resolved' and ${t.monitorId} is not null`,
+      ),
   ],
 );
 

@@ -1,3 +1,4 @@
+// @covers-type: ping
 import { describe, expect, it } from "vitest";
 
 import { judge } from "@/modules/monitors/types/conditions";
@@ -12,6 +13,8 @@ import {
   type PingRun,
 } from "@/modules/monitors/types/probes/ping";
 import { pingSpec, type PingConfig } from "@/modules/monitors/types/specs/ping";
+
+import { publicLookup } from "../probe-lookup";
 
 const REPLY = `PING example.com (93.184.216.34) 56(84) bytes of data.
 64 bytes from 93.184.216.34: icmp_seq=1 ttl=57 time=12.3 ms
@@ -36,6 +39,7 @@ function context(
     // Skips the DNS guard so these tests stay fully offline.
     allowPrivateTargets: true,
     fetchImpl: fetch,
+    lookup: publicLookup,
     ...overrides,
   };
 }

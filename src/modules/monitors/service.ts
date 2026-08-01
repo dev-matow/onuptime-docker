@@ -1,20 +1,40 @@
-import { and, asc, desc, eq, gte, isNull, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNull,
+  notInArray,
+  or,
+  sql,
+} from "drizzle-orm";
 
 import type { DbClient } from "@/db";
 import { monitorChecks, monitors } from "@/db/schema";
-import { NotFoundError } from "@/lib/errors";
+import { ConflictError, NotFoundError } from "@/lib/errors";
 import { writeAudit } from "@/modules/audit";
 import { stampFact } from "@/modules/ledger/service";
 
 import type { CheckResult } from "./check";
 import { nextEvaluationAt, type RecentObservation } from "./scheduling";
+import { MEASURED, round2, uptimeSegments, type UptimeResult } from "./uptime";
 import type { CreateMonitorInput, UpdateMonitorInput } from "./schemas";
 import {
   advanceFailureRun,
   reconcile,
   type Reconciliation,
 } from "./status-controller";
+import { pushEndpointUrl } from "./heartbeat";
+import {
+  AGGREGATE_CHECK_TYPE_IDS,
+  checkTypeKind,
+  UNSCHEDULED_CHECK_TYPE_IDS,
+} from "./types/catalog";
+import { newPushToken } from "./types/specs/push";
 import type { Verdict } from "./types/conditions";
+import { isScheduledKind } from "./types/contract";
 import { monitorColumnsFor } from "./types/persist";
 import { requireSpec } from "./types/specs";
 
@@ -31,70 +51,115 @@ export interface MonitorListItem extends Monitor {
   avgResponseMs: number | null;
 }
 
-/**
- * Observations that actually measured something.
- *
- * An `indeterminate` check is Vigil saying "I could not tell" — a ping
- * monitor on a worker without CAP_NET_RAW, or a check type this build
- * no longer has. Those rows are stored `ok = false` (there is no third
- * boolean), so counting them as downtime publishes a red 0% strip for
- * an operator configuration problem, which is precisely the false
- * outage `docs/UPGRADE.md` promises never happens. They belong in
- * neither the numerator nor the denominator.
- *
- * `is distinct from`, never `<>`: migration 0010 leaves `verdict` NULL
- * on every pre-1.10 row, and `<>` is NULL for those — which would drop
- * the entire pre-upgrade history out of the denominator.
- */
-const MEASURED = sql`${monitorChecks.verdict} is distinct from 'indeterminate'`;
-
 export async function listMonitors(
   db: DbClient,
   organizationId: string,
 ): Promise<MonitorListItem[]> {
-  const stats = db.$with("stats").as(
-    db
-      .select({
-        monitorId: monitorChecks.monitorId,
-        uptime24hPct: sql<number>`
-          round(
-            count(*) filter (where ${monitorChecks.ok} and ${MEASURED}) * 100.0
-            / nullif(count(*) filter (where ${MEASURED}), 0),
-            2
-          )
-        `.as("uptime_24h_pct"),
-        avgResponseMs: sql<number>`
-          round(avg(${monitorChecks.responseTimeMs}) filter (where ${monitorChecks.ok}))
-        `.as("avg_response_ms"),
-      })
-      .from(monitorChecks)
-      .where(gte(monitorChecks.checkedAt, sql`now() - interval '24 hours'`))
-      .groupBy(monitorChecks.monitorId),
-  );
-
   const rows = await db
-    .with(stats)
-    .select({
-      monitor: monitors,
-      uptime24hPct: stats.uptime24hPct,
-      avgResponseMs: stats.avgResponseMs,
-    })
+    .select()
     .from(monitors)
-    .leftJoin(stats, eq(stats.monitorId, monitors.id))
     .where(eq(monitors.organizationId, organizationId))
     .orderBy(asc(monitors.createdAt));
+  if (rows.length === 0) return [];
 
-  return rows.map(({ monitor, uptime24hPct, avgResponseMs }) => ({
+  const ids = rows.map((monitor) => monitor.id);
+  const now = new Date();
+  const uptime = await uptimeByMonitor(db, ids, hoursAgo(now, 24), now);
+
+  // Response time stays a plain mean of the samples that measured one.
+  // It is not duration-weighted and should not be: weighting a latency
+  // average by how long each sample stood for answers a question nobody
+  // asked, and the honest version of "typical response time" is a
+  // percentile, which is its own change.
+  const latency = await db
+    .select({
+      monitorId: monitorChecks.monitorId,
+      avgResponseMs: sql<
+        number | null
+      >`round(avg(${monitorChecks.responseTimeMs}) filter (where ${monitorChecks.ok}))`,
+    })
+    .from(monitorChecks)
+    .where(
+      and(
+        inArray(monitorChecks.monitorId, ids),
+        gte(monitorChecks.checkedAt, sql`now() - interval '24 hours'`),
+      ),
+    )
+    .groupBy(monitorChecks.monitorId);
+  const latencyById = new Map(
+    latency.map((row) => [row.monitorId, row.avgResponseMs]),
+  );
+
+  return rows.map((monitor) => ({
     ...monitor,
-    uptime24hPct: uptime24hPct === null ? null : Number(uptime24hPct),
-    avgResponseMs: avgResponseMs === null ? null : Number(avgResponseMs),
+    uptime24hPct: uptime.get(monitor.id)?.uptimePct ?? null,
+    avgResponseMs:
+      latencyById.get(monitor.id) === null ||
+      latencyById.get(monitor.id) === undefined
+        ? null
+        : Number(latencyById.get(monitor.id)),
   }));
+}
+
+function hoursAgo(now: Date, hours: number): Date {
+  return new Date(now.getTime() - hours * 3_600_000);
+}
+
+/**
+ * Duration-weighted uptime for a set of monitors over one window.
+ *
+ * Sums the segments `uptimeSegments` emits: total for the denominator,
+ * `filter (where ok)` for the numerator. Monitors with no covered time
+ * are absent from the map, which callers render as "no data" rather than
+ * as 0%.
+ */
+export async function uptimeByMonitor(
+  db: DbClient,
+  monitorIds: readonly string[],
+  windowStart: Date,
+  windowEnd: Date,
+): Promise<Map<string, UptimeResult>> {
+  if (monitorIds.length === 0) return new Map();
+  const segments = uptimeSegments(monitorIds, windowStart, windowEnd);
+  const { rows } = await db.execute<{
+    monitor_id: string;
+    up_ms: string | null;
+    covered_ms: string | null;
+  }>(sql`
+    select
+      monitor_id,
+      sum(duration_ms) filter (where ok) as up_ms,
+      sum(duration_ms) as covered_ms
+    from (${segments}) seg
+    group by monitor_id
+  `);
+
+  const windowMs = Math.max(0, windowEnd.getTime() - windowStart.getTime());
+  const result = new Map<string, UptimeResult>();
+  for (const row of rows) {
+    const coveredMs = Number(row.covered_ms ?? 0);
+    const upMs = Number(row.up_ms ?? 0);
+    result.set(row.monitor_id, {
+      coveredMs,
+      upMs,
+      uncoveredMs: windowMs - coveredMs,
+      uptimePct: coveredMs === 0 ? null : round2((upMs / coveredMs) * 100),
+    });
+  }
+  return result;
 }
 
 export interface UptimeWindow {
   label: "24h" | "7d" | "30d";
   uptimePct: number | null;
   avgResponseMs: number | null;
+  /**
+   * How much of the window an observation actually vouched for. A 100%
+   * headline over 40% coverage is a different statement from one over
+   * full coverage, and the detail page says so rather than letting the
+   * reader assume.
+   */
+  coveragePct: number;
 }
 
 export interface MonitorDetail {
@@ -109,27 +174,25 @@ export async function getMonitorDetail(
   monitorId: string,
 ): Promise<MonitorDetail> {
   const monitor = await findMonitorOrThrow(db, organizationId, monitorId);
+  const now = new Date();
 
   const [aggregate] = await db
     .select({
-      ok24h: sql<number>`count(*) filter (where ${okWithin("24 hours")})`,
-      total24h: sql<number>`count(*) filter (where ${within("24 hours")})`,
       avg24h: sql<
         number | null
       >`round(avg(${monitorChecks.responseTimeMs}) filter (where ${okWithin("24 hours")}))`,
-      ok7d: sql<number>`count(*) filter (where ${okWithin("7 days")})`,
-      total7d: sql<number>`count(*) filter (where ${within("7 days")})`,
       avg7d: sql<
         number | null
       >`round(avg(${monitorChecks.responseTimeMs}) filter (where ${okWithin("7 days")}))`,
-      ok30d: sql<number>`count(*) filter (where ${okWithin("30 days")})`,
-      total30d: sql<number>`count(*) filter (where ${within("30 days")})`,
       avg30d: sql<
         number | null
       >`round(avg(${monitorChecks.responseTimeMs}) filter (where ${okWithin("30 days")}))`,
     })
     .from(monitorChecks)
-    .where(eq(monitorChecks.monitorId, monitorId));
+    // Bounded, unlike the pre-1.13 version: the widest window is 30 days,
+    // so scanning the monitor's whole retained history was work thrown
+    // away every page load.
+    .where(and(eq(monitorChecks.monitorId, monitorId), within("30 days")));
 
   const recentChecks = await db.query.monitorChecks.findMany({
     where: eq(monitorChecks.monitorId, monitorId),
@@ -137,11 +200,31 @@ export async function getMonitorDetail(
     limit: 60,
   });
 
-  const windows: UptimeWindow[] = [
-    window("24h", aggregate?.ok24h, aggregate?.total24h, aggregate?.avg24h),
-    window("7d", aggregate?.ok7d, aggregate?.total7d, aggregate?.avg7d),
-    window("30d", aggregate?.ok30d, aggregate?.total30d, aggregate?.avg30d),
+  const spans: { label: UptimeWindow["label"]; hours: number }[] = [
+    { label: "24h", hours: 24 },
+    { label: "7d", hours: 24 * 7 },
+    { label: "30d", hours: 24 * 30 },
   ];
+  const averages = {
+    "24h": aggregate?.avg24h,
+    "7d": aggregate?.avg7d,
+    "30d": aggregate?.avg30d,
+  };
+
+  const windows: UptimeWindow[] = [];
+  for (const span of spans) {
+    const start = hoursAgo(now, span.hours);
+    const measured = await uptimeByMonitor(db, [monitorId], start, now);
+    const result = measured.get(monitorId);
+    const windowMs = now.getTime() - start.getTime();
+    const avg = averages[span.label];
+    windows.push({
+      label: span.label,
+      uptimePct: result?.uptimePct ?? null,
+      avgResponseMs: avg === null || avg === undefined ? null : Number(avg),
+      coveragePct: result ? round2((result.coveredMs / windowMs) * 100) : 0,
+    });
+  }
 
   return { monitor, windows, recentChecks };
 }
@@ -156,21 +239,80 @@ function okWithin(interval: string) {
   return sql`${within(interval)} and ${monitorChecks.ok}`;
 }
 
-function window(
-  label: UptimeWindow["label"],
-  ok: number | undefined,
-  total: number | undefined,
-  avg: number | null | undefined,
-): UptimeWindow {
-  const totalCount = Number(total ?? 0);
-  return {
-    label,
-    uptimePct:
-      totalCount === 0
-        ? null
-        : Math.round((Number(ok ?? 0) / totalCount) * 10_000) / 100,
-    avgResponseMs: avg === null || avg === undefined ? null : Number(avg),
-  };
+/**
+ * Refuses a group membership that could not mean anything.
+ *
+ * Four rules, and the first two are the ones that matter. Membership
+ * crosses no tenant: a monitor joining another organization's group
+ * would publish its status inside that group's rollup, on that
+ * organization's status page. And a monitor cannot be inside itself, at
+ * any distance — a cycle makes `refreshGroups` walk forever and makes
+ * "what is this group's state" a question with no answer.
+ *
+ * Checked here rather than by a database constraint because Postgres
+ * cannot express "no cycles in this self-reference" without a trigger,
+ * and a trigger would be a second place the rule lives.
+ */
+async function assertParent(
+  db: DbClient,
+  organizationId: string,
+  monitorId: string | null,
+  parentId: string,
+): Promise<void> {
+  if (parentId === monitorId) {
+    throw new ConflictError("A monitor cannot be a member of itself.");
+  }
+
+  const parent = await db.query.monitors.findFirst({
+    where: and(
+      eq(monitors.id, parentId),
+      eq(monitors.organizationId, organizationId),
+    ),
+  });
+  if (!parent) throw new NotFoundError("That group does not exist.");
+  if (checkTypeKind(parent.checkType) !== "aggregate") {
+    throw new ConflictError(
+      `"${parent.name}" is not a group, so it cannot have members.`,
+    );
+  }
+
+  // Walk to the root. `monitorId` is null on create, in which case
+  // there is nothing to meet, but the walk still bounds a chain that a
+  // restored backup could have left cyclic.
+  let cursor: string | null = parent.parentId;
+  for (let step = 0; cursor !== null && step < MAX_GROUP_NESTING; step += 1) {
+    if (cursor === monitorId) {
+      throw new ConflictError(
+        "That would put this group inside one of its own members.",
+      );
+    }
+    const next: { parentId: string | null } | undefined =
+      await db.query.monitors.findFirst({
+        where: eq(monitors.id, cursor),
+        columns: { parentId: true },
+      });
+    cursor = next?.parentId ?? null;
+  }
+}
+
+/** How deeply groups may nest. Matches the bound `outcome.ts` walks with. */
+const MAX_GROUP_NESTING = 8;
+
+/**
+ * When a freshly created monitor is first due.
+ *
+ * Immediately for the kinds the scheduler owns: a monitor nobody has
+ * checked has nothing to schedule around, and waiting one interval to
+ * find out the URL was wrong is the worst possible first impression.
+ *
+ * Null for the kinds it does not. A group's state is derived when a
+ * member reports and a manual one's when a person says so, and leaving
+ * a due timestamp on either would put a row in front of the scheduler
+ * on every tick, forever, for it to decide again that there is nothing
+ * to do.
+ */
+function initialEvaluationAt(checkType: string): Date | null {
+  return isScheduledKind(checkTypeKind(checkType)) ? new Date() : null;
 }
 
 export async function createMonitor(
@@ -180,6 +322,9 @@ export async function createMonitor(
 ): Promise<Monitor> {
   const spec = requireSpec(input.checkType);
   return db.transaction(async (tx) => {
+    if (input.parentId) {
+      await assertParent(tx, actor.organizationId, null, input.parentId);
+    }
     const [monitor] = await tx
       .insert(monitors)
       .values({
@@ -188,14 +333,12 @@ export async function createMonitor(
         name: input.name,
         checkType: input.checkType,
         url: input.url,
+        parentId: input.parentId ?? null,
         intervalSeconds: input.intervalSeconds,
         timeoutMs: input.timeoutMs,
         degradedThresholdMs: input.degradedThresholdMs,
         failureWindowSeconds: input.failureWindowSeconds,
-        // Due immediately: a monitor nobody has checked has nothing to
-        // schedule around, and waiting one interval to find out the URL
-        // was wrong is the worst possible first impression.
-        nextEvaluationAt: new Date(),
+        nextEvaluationAt: initialEvaluationAt(input.checkType),
         ...monitorColumnsFor(spec, input),
       })
       .returning();
@@ -231,22 +374,56 @@ export async function updateMonitor(
     // type switch can leave the previous type's settings behind.
     const checkType = input.checkType ?? existing.checkType;
     const spec = requireSpec(checkType);
-    const columns = monitorColumnsFor(spec, {
-      port: input.port === undefined ? existing.port : input.port,
-      method: input.method ?? existing.method,
-      expectedStatusCode:
-        input.expectedStatusCode === undefined
-          ? existing.expectedStatusCode
-          : input.expectedStatusCode,
-      bodyKeyword:
-        input.bodyKeyword === undefined
-          ? existing.bodyKeyword
-          : input.bodyKeyword,
-      keywordAbsent: input.keywordAbsent ?? existing.keywordAbsent,
-      tlsCheck: input.tlsCheck ?? existing.tlsCheck,
-      tlsWarnDays: input.tlsWarnDays ?? existing.tlsWarnDays,
-      config: input.config === undefined ? existing.config : input.config,
-    });
+
+    if (input.parentId) {
+      await assertParent(tx, actor.organizationId, monitorId, input.parentId);
+    }
+
+    // Turning a group into something else would leave its members
+    // pointing at a monitor that no longer aggregates anything: they
+    // would keep their membership, the group would stop deriving, and
+    // nothing anywhere would say why. Refusing names the fix — empty it
+    // first — instead of silently unpicking someone's structure.
+    if (
+      checkTypeKind(existing.checkType) === "aggregate" &&
+      checkTypeKind(checkType) !== "aggregate"
+    ) {
+      const [members] = await tx
+        .select({ count: sql<number>`count(*)::int` })
+        .from(monitors)
+        .where(eq(monitors.parentId, monitorId));
+      if ((members?.count ?? 0) > 0) {
+        throw new ConflictError(
+          `This group still has ${members?.count} member${members?.count === 1 ? "" : "s"}. Move them out before changing its type.`,
+        );
+      }
+    }
+
+    const columns = monitorColumnsFor(
+      spec,
+      {
+        port: input.port === undefined ? existing.port : input.port,
+        method: input.method ?? existing.method,
+        expectedStatusCode:
+          input.expectedStatusCode === undefined
+            ? existing.expectedStatusCode
+            : input.expectedStatusCode,
+        bodyKeyword:
+          input.bodyKeyword === undefined
+            ? existing.bodyKeyword
+            : input.bodyKeyword,
+        keywordAbsent: input.keywordAbsent ?? existing.keywordAbsent,
+        tlsCheck: input.tlsCheck ?? existing.tlsCheck,
+        tlsWarnDays: input.tlsWarnDays ?? existing.tlsWarnDays,
+        // The patch itself, not a value resolved against the row. The
+        // flat columns above are all-or-nothing settings the form always
+        // sends, so resolving them here is right; the config blob can
+        // hold a credential the form was never given, so it is merged
+        // field by field against what is stored.
+        config: input.config,
+      },
+      { checkType: existing.checkType, config: existing.config },
+    );
 
     const [updated] = await tx
       .update(monitors)
@@ -266,6 +443,15 @@ export async function updateMonitor(
         ...(input.intervalSeconds !== undefined &&
         input.intervalSeconds !== existing.intervalSeconds
           ? { nextEvaluationAt: new Date() }
+          : {}),
+        // A type switch can move a monitor onto or off the scheduler.
+        // Off, and a stale due timestamp would keep offering it to every
+        // tick; on, and the null one it was left with reads as "never
+        // evaluated", which `findDueMonitors` already treats as due —
+        // stated anyway, so the column says what is true rather than
+        // relying on two rules agreeing.
+        ...(checkType !== existing.checkType
+          ? { nextEvaluationAt: initialEvaluationAt(checkType) }
           : {}),
         // DELIBERATELY ABSENT: `firstFailureAt` is not reset when
         // `failureWindowSeconds` changes. It looks like an oversight and
@@ -306,7 +492,11 @@ export async function setMonitorPaused(
   paused: boolean,
 ): Promise<Monitor> {
   return db.transaction(async (tx) => {
-    await findMonitorOrThrow(tx, actor.organizationId, monitorId);
+    const existing = await findMonitorOrThrow(
+      tx,
+      actor.organizationId,
+      monitorId,
+    );
 
     const [updated] = await tx
       .update(monitors)
@@ -340,7 +530,11 @@ export async function setMonitorPaused(
         consecutiveFailures: 0,
         currentStatus: "unknown",
         firstFailureAt: null,
-        nextEvaluationAt: new Date(),
+        // Not `new Date()` unconditionally: a group or a manual monitor
+        // that is resumed still has nothing for the scheduler to do, and
+        // handing it a due timestamp would put it in front of every tick
+        // from then on.
+        nextEvaluationAt: initialEvaluationAt(existing.checkType),
       })
       .where(eq(monitors.id, monitorId))
       .returning();
@@ -357,12 +551,20 @@ export async function setMonitorPaused(
   });
 }
 
+/**
+ * Deletes a monitor and reports the group it was in, if any.
+ *
+ * The caller needs that id: the group's state was derived from a member
+ * that no longer exists, and nothing else will ever tell it. Deleting a
+ * *group* releases its members instead of taking them with it — see the
+ * `ON DELETE SET NULL` on `monitors.parent_id`.
+ */
 export async function deleteMonitor(
   db: DbClient,
   actor: Actor,
   monitorId: string,
-): Promise<void> {
-  await db.transaction(async (tx) => {
+): Promise<{ releasedGroupId: string | null }> {
+  return db.transaction(async (tx) => {
     const monitor = await findMonitorOrThrow(
       tx,
       actor.organizationId,
@@ -378,7 +580,107 @@ export async function deleteMonitor(
       targetId: monitorId,
       metadata: { name: monitor.name, url: monitor.url },
     });
+    return { releasedGroupId: monitor.parentId };
   });
+}
+
+/**
+ * Every group in an organization, for the membership picker.
+ *
+ * `excludeId` keeps a group out of its own list. Putting a group inside
+ * itself is refused by `assertParent` anyway, but offering the option
+ * and then rejecting it is a worse form to fill in than one that never
+ * offered it.
+ */
+export async function listGroups(
+  db: DbClient,
+  organizationId: string,
+  excludeId?: string,
+): Promise<{ id: string; name: string }[]> {
+  const rows = await db
+    .select({ id: monitors.id, name: monitors.name })
+    .from(monitors)
+    .where(
+      and(
+        eq(monitors.organizationId, organizationId),
+        inArray(monitors.checkType, [...AGGREGATE_CHECK_TYPE_IDS]),
+      ),
+    )
+    .orderBy(asc(monitors.name));
+  return excludeId === undefined
+    ? rows
+    : rows.filter((row) => row.id !== excludeId);
+}
+
+/** The push endpoint of one monitor, for an operator who may edit it. */
+export async function pushEndpointFor(
+  db: DbClient,
+  actor: Actor,
+  monitorId: string,
+): Promise<string> {
+  const monitor = await findMonitorOrThrow(db, actor.organizationId, monitorId);
+  return pushEndpointUrl(pushTokenOf(monitor));
+}
+
+/**
+ * Issues a new token for a push monitor.
+ *
+ * Destructive by design, and the only honest response to "the token
+ * leaked": whatever holds the old one stops being able to speak for
+ * this monitor the moment this returns. The audit entry records that it
+ * happened without recording the value.
+ */
+export async function regeneratePushToken(
+  db: DbClient,
+  actor: Actor,
+  monitorId: string,
+): Promise<string> {
+  return db.transaction(async (tx) => {
+    const monitor = await findMonitorOrThrow(
+      tx,
+      actor.organizationId,
+      monitorId,
+    );
+    if (checkTypeKind(monitor.checkType) !== "passive") {
+      throw new ConflictError("This monitor has no push endpoint.");
+    }
+
+    const token = newPushToken();
+    const config = requireSpec(monitor.checkType).storedSchema.parse({
+      ...(typeof monitor.config === "object" && monitor.config !== null
+        ? monitor.config
+        : {}),
+      token,
+    });
+
+    await tx.update(monitors).set({ config }).where(eq(monitors.id, monitorId));
+
+    await writeAudit(tx, {
+      organizationId: actor.organizationId,
+      actorId: actor.userId,
+      action: "monitor.push_token_regenerated",
+      targetType: "monitor",
+      targetId: monitorId,
+      metadata: { name: monitor.name },
+    });
+    return pushEndpointUrl(token);
+  });
+}
+
+function pushTokenOf(monitor: Monitor): string {
+  const config = monitor.config;
+  const token =
+    typeof config === "object" && config !== null && "token" in config
+      ? (config as { token?: unknown }).token
+      : undefined;
+  if (typeof token !== "string" || token.length === 0) {
+    // Only reachable for a monitor whose type is not push, or whose
+    // config predates the token — both are operator-visible mistakes
+    // rather than states to paper over with a generated value nobody
+    // stored.
+    throw new ConflictError("This monitor has no push endpoint.");
+  }
+  return token;
 }
 
 export interface RecordedCheck {
@@ -556,15 +858,23 @@ export async function recordCheckOutcome(
           firstFailureAt,
           currentStatus: reconciliation.status,
           lastCheckedAt: now,
-          nextEvaluationAt: nextEvaluationAt(
-            {
-              intervalSeconds: monitor.intervalSeconds,
-              // The status just derived, not the stale one on the row.
-              currentStatus: reconciliation.status,
-            },
-            recent,
-            now,
-          ),
+          // A kind the scheduler does not own gets no next evaluation.
+          // The adaptive policy is about when to *ask* again, and for a
+          // derived or declared state there is nobody to ask — the next
+          // observation happens when a member reports or a person says
+          // so, and a timestamp here would only offer the row to every
+          // tick for the scheduler to reject again.
+          nextEvaluationAt: isScheduledKind(checkTypeKind(monitor.checkType))
+            ? nextEvaluationAt(
+                {
+                  intervalSeconds: monitor.intervalSeconds,
+                  // The status just derived, not the stale one on the row.
+                  currentStatus: reconciliation.status,
+                },
+                recent,
+                now,
+              )
+            : null,
           // Only overwrite when this check actually measured the cert.
           ...(outcome.tlsDaysRemaining === undefined
             ? {}
@@ -659,6 +969,15 @@ const TICK_GRACE_SECONDS = 30;
  *
  * Most-overdue first, so a batch `limit` can never starve a monitor:
  * anything skipped this tick sorts even earlier on the next one.
+ *
+ * The kind filter is the other half of "a group is never scheduled".
+ * A group has nothing to measure and a manual monitor has nothing to
+ * ask, so selecting either would spend a queue slot and a worker to
+ * write an observation identical to the last one. Stated as "not one of
+ * these" rather than "one of the scheduled ones" on purpose: a monitor
+ * whose type this build no longer has must keep being evaluated, and
+ * keep reporting that it cannot be, instead of quietly falling off the
+ * scheduler and looking healthy.
  */
 export async function findDueMonitors(
   db: DbClient,
@@ -667,6 +986,9 @@ export async function findDueMonitors(
   return db.query.monitors.findMany({
     where: and(
       eq(monitors.paused, false),
+      UNSCHEDULED_CHECK_TYPE_IDS.length === 0
+        ? undefined
+        : notInArray(monitors.checkType, [...UNSCHEDULED_CHECK_TYPE_IDS]),
       or(
         isNull(monitors.nextEvaluationAt),
         sql`${monitors.nextEvaluationAt} - make_interval(secs => ${TICK_GRACE_SECONDS}) <= now()`,

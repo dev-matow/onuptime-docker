@@ -34,9 +34,6 @@ export const metadata: Metadata = { title: "Monitors — Vigil" };
 export default async function MonitorsPage() {
   const ctx = await requireOrgContext();
   const monitors = await listMonitors(db, ctx.organizationId);
-  // Empty in the free edition: the escalation picker it feeds is
-  // commercial, and the component ignores an empty list.
-  let policies: { id: string; name: string }[] = [];
 
   const canCreate = hasPermission(ctx.role, { monitor: ["create"] });
   const canUpdate = hasPermission(ctx.role, { monitor: ["update"] });

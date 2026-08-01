@@ -1,6 +1,7 @@
+import { EgressBlockedError, egressFetch } from "../../egress";
 import type { ProbeContext, ProbeResult } from "../contract";
 import type { JsonQueryConfig } from "../specs/json-query";
-import { elapsedSince, refusesPrivate } from "./guard";
+import { elapsedSince, monitorEgress } from "./guard";
 
 /**
  * Fetch a JSON endpoint, read one value out of the body and compare it
@@ -10,6 +11,13 @@ import { elapsedSince, refusesPrivate } from "./guard";
  * evidence. A status code says the server is answering; `{"status":"ok",
  * "db":{"connected":true}}` says the thing behind it is actually working,
  * which is the question a health endpoint was published to answer.
+ *
+ * It is also the type with the most to lose from an unvalidated
+ * redirect. This is the only probe that *persists* part of a response
+ * body, so a chain that ended somewhere private did not merely reach an
+ * internal service — it wrote 200 characters of what that service said
+ * into `actualValue`, where the monitor detail page shows it. Every hop
+ * goes through the egress guard for that reason.
  */
 
 /**
@@ -26,27 +34,25 @@ const MAX_VALUE_CHARS = 200;
 export async function jsonQueryProbe(
   ctx: ProbeContext<JsonQueryConfig>,
 ): Promise<ProbeResult> {
-  let hostname: string;
-  try {
-    ({ hostname } = new URL(ctx.target));
-  } catch {
-    return blank("Invalid URL");
-  }
-
-  const guard = await refusesPrivate(hostname, ctx.allowPrivateTargets);
-  if (guard) return blank(guard);
+  // Checked here so the probe reports it in its own words: `egressFetch`
+  // parses the target too, but a malformed one would surface as a raw
+  // `TypeError` in the transport branch below.
+  if (!URL.canParse(ctx.target)) return blank("Invalid URL");
 
   const startedAt = performance.now();
   try {
-    const response = await ctx.fetchImpl(ctx.target, {
-      method: "GET",
-      redirect: "follow",
-      signal: AbortSignal.timeout(ctx.timeoutMs),
-      headers: {
-        accept: "application/json",
-        "user-agent": "vigil-monitor/1.0 (+https://github.com)",
+    const { response } = await egressFetch(
+      ctx.target,
+      {
+        method: "GET",
+        signal: AbortSignal.timeout(ctx.timeoutMs),
+        headers: {
+          accept: "application/json",
+          "user-agent": "vigil-monitor/1.0 (+https://github.com)",
+        },
       },
-    });
+      monitorEgress(ctx),
+    );
 
     // Read inside the try, uncaught: a body that stops arriving mid-read
     // is a transport failure, and swallowing it would hand the parser an
@@ -112,6 +118,9 @@ export async function jsonQueryProbe(
       error: null,
     };
   } catch (error) {
+    // A policy refusal is not a measurement: nothing was sent, so there
+    // is no response time to report and no fact to store.
+    if (error instanceof EgressBlockedError) return blank(error.message);
     const responseTimeMs = elapsedSince(startedAt);
     if (error instanceof DOMException && error.name === "TimeoutError") {
       return {

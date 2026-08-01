@@ -1,3 +1,19 @@
+# Vigil Core's CI, published as .github/workflows/ci.yml by the edition
+# gate that produces this repository.
+#
+# It is a separate file from the commercial workflow because that one runs
+# two jobs against scripts the mirror does not contain — the edition gate
+# itself and the public-fact check. Mirroring it verbatim would hand every
+# Core user a permanently red build for a script they cannot even read,
+# which is worse than no signal at all.
+#
+# NOT HERE, AND DELIBERATELY: the Playwright suite. Its golden path
+# creates a second organization to prove two status pages never share a
+# cache entry, and Core refuses a second organization by design — the one
+# edition difference stripping cannot express. Running it here would fail
+# on correct behaviour. Restoring it means marking that one test
+# `@edition:ee-start` / `-end` in `e2e/smoke.spec.ts` upstream, after
+# which this file gets its `e2e` job back unchanged.
 name: CI
 
 on:
@@ -54,59 +70,6 @@ jobs:
         run: npm run build
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/vigil_test
-
-  e2e:
-    name: Playwright e2e
-    runs-on: ubuntu-latest
-    needs: checks
-    services:
-      postgres:
-        image: postgres:18
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: vigil
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-
-    env:
-      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/vigil
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 26
-          cache: npm
-
-      - run: npm ci
-
-      - name: Migrate database
-        run: npm run db:migrate
-
-      - name: Build
-        run: npm run build
-
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
-
-      - name: Run e2e tests
-        run: npx playwright test
-        env:
-          E2E_WEB_COMMAND: npm run start
-          CI: "true"
-
-      - uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: playwright-report
-          path: playwright-report/
-          retention-days: 7
 
   docker:
     name: Docker images build

@@ -22,7 +22,11 @@ import { elapsedSince, refusesPrivate } from "./guard";
 export async function tlsExpiryProbe(
   ctx: ProbeContext<TlsExpiryConfig>,
 ): Promise<ProbeResult> {
-  const guard = await refusesPrivate(ctx.target, ctx.allowPrivateTargets);
+  const guard = await refusesPrivate(
+    ctx.target,
+    ctx.allowPrivateTargets,
+    ctx.lookup,
+  );
   if (guard) {
     return { facts: {}, responseTimeMs: null, statusCode: null, error: guard };
   }

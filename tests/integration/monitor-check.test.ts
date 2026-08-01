@@ -11,6 +11,8 @@ import { runMonitorCheck } from "@/worker/jobs/monitor-check";
 
 import { createTestOrg, db, type TestActor } from "../helpers";
 
+import { publicLookup } from "../probe-lookup";
+
 const MONITOR_URL = "https://vigil-tests.example.com/health";
 
 function monitorInput(
@@ -53,6 +55,7 @@ describe("claimIncidentNotification", () => {
     await runMonitorCheck(monitor.id, {
       fetchImpl: (async () =>
         new Response("", { status: 503 })) as typeof fetch,
+      lookup: publicLookup,
       allowPrivateTargets: true,
     });
     const incident = await openIncidentFor(monitor.id);

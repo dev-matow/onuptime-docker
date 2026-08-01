@@ -111,6 +111,69 @@ ${button(input.confirmUrl, "Confirm subscription")}`,
   };
 }
 
+/**
+ * The reset link, sent by better-auth's `sendResetPassword` hook.
+ *
+ * The hook is the only place the token is ever held, which is why this
+ * takes a finished URL rather than a token: nothing else in the product
+ * should be in a position to build one.
+ */
+export function renderPasswordResetEmail(input: {
+  resetUrl: string;
+  expiresInMinutes: number;
+}): RenderedEmail {
+  const expiry = `${input.expiresInMinutes} ${input.expiresInMinutes === 1 ? "minute" : "minutes"}`;
+  return {
+    subject: "Reset your Vigil password",
+    text: [
+      "Someone asked to reset the password for this address on Vigil.",
+      `Set a new password: ${input.resetUrl}`,
+      `The link works once and expires in ${expiry}.`,
+      "If that wasn't you, ignore this email. Your password has not changed and nobody can change it without this link.",
+    ].join("\n\n"),
+    html: shell(
+      `<div style="font-size:18px;font-weight:600;margin-bottom:8px">Reset your password</div>
+<p style="font-size:14px;line-height:1.6;color:#3f3f46;margin:0 0 20px">Someone asked to reset the password for this address. The link works once and expires in ${escapeHtml(expiry)}.</p>
+${button(input.resetUrl, "Set a new password")}`,
+      "#18181b",
+      "If that wasn't you, ignore this email. Your password has not changed and nobody can change it without this link.",
+    ),
+  };
+}
+
+/**
+ * Sent when a reset is requested for an address that has no account.
+ *
+ * It exists so that the *request* behaves identically either way. Skipping
+ * the send for an unknown address is what turns a delivery failure into an
+ * account oracle: the moment the mail provider breaks, a known address
+ * returns an error and an unknown one returns success, and an attacker
+ * reads the difference. One address, one send attempt, one outcome — in
+ * both branches — and there is nothing to read.
+ *
+ * It also answers the question the reader actually has, which is why the
+ * link they were waiting for never arrived.
+ */
+export function renderPasswordResetNoAccountEmail(input: {
+  appUrl: string;
+}): RenderedEmail {
+  return {
+    subject: "Reset your Vigil password",
+    text: [
+      "Someone asked to reset the password for this address on Vigil, but no account uses it.",
+      `If you have an account, it is registered under a different address: ${input.appUrl}`,
+      "If that wasn't you, ignore this email. Nothing was created and nothing was changed.",
+    ].join("\n\n"),
+    html: shell(
+      `<div style="font-size:18px;font-weight:600;margin-bottom:8px">No account uses this address</div>
+<p style="font-size:14px;line-height:1.6;color:#3f3f46;margin:0 0 20px">Someone asked to reset a Vigil password for this address, but no account is registered to it. If you have one, it is under a different address.</p>
+${button(input.appUrl, "Go to Vigil")}`,
+      "#18181b",
+      "If that wasn't you, ignore this email. Nothing was created and nothing was changed.",
+    ),
+  };
+}
+
 const SUBSCRIBER_ACCENT = {
   opened: "#e5484d",
   updated: "#f5a623",

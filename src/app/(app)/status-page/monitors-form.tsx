@@ -82,7 +82,7 @@ export function StatusPageMonitorsForm({
           return (
             <li key={monitor.id} className="flex items-center gap-3">
               <Checkbox
-                id={`component-${monitor.id}`}
+                id={`component-${statusPageId}-${monitor.id}`}
                 checked={Boolean(row)}
                 onCheckedChange={(checked) =>
                   toggle(monitor.id, checked === true)
@@ -90,7 +90,7 @@ export function StatusPageMonitorsForm({
                 disabled={!canEdit}
               />
               <Label
-                htmlFor={`component-${monitor.id}`}
+                htmlFor={`component-${statusPageId}-${monitor.id}`}
                 className="w-40 truncate"
               >
                 {monitor.name}

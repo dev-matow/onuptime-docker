@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import { mayCreateOrganization } from "@/lib/editions";
@@ -50,5 +52,37 @@ describe("mayCreateOrganization", () => {
         }),
       ).toBe(false);
     }
+  });
+});
+
+/**
+ * Read as text, in both editions, because the difference lives in a
+ * comment marker rather than in a value. Core is single-organization
+ * because `strip-ee` deletes one line; write that line without its
+ * marker — a reformat, a refactor, an autofix — and Core ships holding
+ * as many client organizations as the paid edition, with a green suite,
+ * a green build and no visible symptom until a stranger notices their
+ * data beside someone else's.
+ *
+ * Edition-neutral on purpose: in Core the raise is simply absent, so
+ * these assertions hold there too, and the file needs no marker of its
+ * own to survive the strip.
+ */
+describe("the multi-organization default", () => {
+  const source = readFileSync(
+    new URL("../../src/lib/editions.ts", import.meta.url),
+    "utf8",
+  );
+
+  it("starts false, so the stripped edition is the restricted one", () => {
+    expect(source).toMatch(/^let multiOrg = false;$/m);
+  });
+
+  it("raises the flag only on a line strip-ee will delete", () => {
+    const raises = source
+      .split("\n")
+      .filter((line) => /\bmultiOrg\s*=\s*true\b/.test(line));
+    for (const line of raises)
+      expect(line.trimEnd().endsWith("// @edition:ee")).toBe(true);
   });
 });

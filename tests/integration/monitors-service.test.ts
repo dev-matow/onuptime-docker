@@ -638,12 +638,18 @@ describe("uptime excludes observations that measured nothing", () => {
     // the entire pre-upgrade history out of the denominator.
     const actor = await createTestOrg();
     const monitor = await createMonitor(db, actor, monitorInput());
-    const { monitor: checked } = await recordCheckOutcome(
-      db,
-      monitor,
-      okResult(),
-    );
-    await recordCheckOutcome(db, checked, failResult());
+    // Placed on an explicit timeline: uptime is duration-weighted, so
+    // two rows written microseconds apart say nothing about a ratio.
+    // Twenty minutes up, then twenty minutes down, inside the horizon
+    // of a 60s monitor's cadence is not possible — so the samples are
+    // spaced at the monitor's interval and the split is 50/50 by count
+    // *and* by duration.
+    await seedTimeline(monitor.id, [
+      { minutesAgo: 4, ok: true },
+      { minutesAgo: 3, ok: true },
+      { minutesAgo: 2, ok: false },
+      { minutesAgo: 1, ok: false },
+    ]);
     await db
       .update(monitorChecks)
       .set({ verdict: null })
@@ -654,26 +660,76 @@ describe("uptime excludes observations that measured nothing", () => {
   });
 });
 
+/**
+ * Writes checks at controlled timestamps.
+ *
+ * Uptime is duration-weighted, so a test that calls `recordCheckOutcome`
+ * four times in a row is asserting against whatever sub-millisecond gaps
+ * the event loop happened to produce. Placing the samples on a stated
+ * timeline is what makes the expected ratio a fact rather than a
+ * coincidence.
+ */
+async function seedTimeline(
+  monitorId: string,
+  points: { minutesAgo: number; ok: boolean }[],
+  responseTimeMs = 100,
+): Promise<void> {
+  const now = Date.now();
+  await db.insert(monitorChecks).values(
+    points.map((p) => ({
+      monitorId,
+      checkedAt: new Date(now - p.minutesAgo * 60_000),
+      ok: p.ok,
+      responseTimeMs: p.ok ? responseTimeMs : null,
+      verdict: p.ok ? "up" : "down",
+    })),
+  );
+}
+
 describe("listMonitors", () => {
-  it("computes uptime24hPct and avgResponseMs from recent checks", async () => {
+  it("computes uptime24hPct by duration and avgResponseMs from recent checks", async () => {
     const actor = await createTestOrg();
     const monitor = await createMonitor(db, actor, monitorInput());
 
-    let current = monitor;
-    for (let i = 0; i < 3; i++) {
-      ({ monitor: current } = await recordCheckOutcome(
-        db,
-        current,
-        okResult(100),
-      ));
-    }
-    await recordCheckOutcome(db, current, failResult());
+    // Three minutes up, one minute down: 75% — the same number the old
+    // count-based version produced here, but for the right reason. The
+    // difference only shows when the spacing is uneven, which is what
+    // the next case covers.
+    await seedTimeline(monitor.id, [
+      { minutesAgo: 4, ok: true },
+      { minutesAgo: 3, ok: true },
+      { minutesAgo: 2, ok: true },
+      { minutesAgo: 1, ok: false },
+    ]);
 
     const list = await listMonitors(db, actor.organizationId);
     expect(list).toHaveLength(1);
     expect(list[0]?.id).toBe(monitor.id);
     expect(list[0]?.uptime24hPct).toBe(75);
     expect(list[0]?.avgResponseMs).toBe(100);
+  });
+
+  it("does not let a burst of samples outweigh the time it covers", async () => {
+    // The defect this replaced: the scheduler probes a suspicious
+    // monitor up to 16x as often, so a short blip produced a pile of
+    // rows and a count-based ratio read it as a long outage.
+    //
+    // Ten minutes of history. One minute of it is down, sampled every
+    // five seconds; the other nine are up, sampled every minute. By row
+    // count that is 12/21 = 57% up. By duration it is 90%.
+    const actor = await createTestOrg();
+    const monitor = await createMonitor(db, actor, monitorInput());
+
+    const points: { minutesAgo: number; ok: boolean }[] = [];
+    for (let m = 10; m > 1; m--) points.push({ minutesAgo: m, ok: true });
+    for (let s = 0; s < 12; s++) {
+      points.push({ minutesAgo: 1 - s / 12, ok: false });
+    }
+    await seedTimeline(monitor.id, points);
+
+    const list = await listMonitors(db, actor.organizationId);
+    expect(list[0]?.uptime24hPct).toBeGreaterThan(88);
+    expect(list[0]?.uptime24hPct).toBeLessThan(92);
   });
 
   it("returns null stats for a monitor with no checks", async () => {

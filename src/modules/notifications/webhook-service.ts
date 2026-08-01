@@ -8,6 +8,8 @@ import { webhookEndpoints } from "@/db/schema";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { writeAudit } from "@/modules/audit";
+import { EgressBlockedError } from "@/modules/monitors/egress";
+import { isForbiddenEgressUrl } from "@/modules/monitors/net";
 import type { Incident } from "@/modules/incidents/service";
 
 import {
@@ -57,6 +59,17 @@ export async function updateWebhook(
   actor: Actor,
   input: { url: string; enabled: boolean; regenerateSecret?: boolean },
 ): Promise<WebhookEndpointConfig> {
+  // Refused at save time as well as at delivery. Delivery is the only
+  // check that can be authoritative — the URL is a hostname and DNS
+  // belongs to whoever owns it — but an operator who pastes a metadata
+  // URL deserves to be told now rather than to save something that
+  // silently never fires.
+  if (isForbiddenEgressUrl(input.url)) {
+    throw new EgressBlockedError(
+      "This host cannot be used as a webhook endpoint.",
+    );
+  }
+
   return db.transaction(async (tx) => {
     const endpoint = await getOrCreateWebhook(tx, actor.organizationId);
     const [updated] = await tx
@@ -147,6 +160,7 @@ export async function sendIncidentWebhook(
   const result = await deliverWebhook(
     { url: endpoint.url, secret: endpoint.secret },
     payload,
+    { channel: "webhook" },
   );
   if (result.delivered) {
     logger.debug(
@@ -178,6 +192,6 @@ export async function sendTestWebhook(
   return deliverWebhook(
     { url: endpoint.url, secret: endpoint.secret },
     payload,
-    { attempts: 1 },
+    { attempts: 1, channel: "webhook" },
   );
 }

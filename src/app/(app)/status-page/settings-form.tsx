@@ -48,6 +48,14 @@ export function StatusPageSettingsForm({
   const [visibility, setVisibility] = useState<Visibility>(defaults.visibility);
   const [pending, setPending] = useState(false);
 
+  // One organization owns many status pages and the settings page renders
+  // this form once per page, so a fixed `id` is not unique in the
+  // document. `htmlFor` resolves to the FIRST element with the id, which
+  // means the second page's "Published" label toggles the first page's
+  // switch — an operator publishes a page they never opened. Every id
+  // here is therefore scoped to the page it belongs to.
+  const field = (name: string) => `status-page-${statusPageId}-${name}`;
+
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -76,9 +84,9 @@ export function StatusPageSettingsForm({
     <form onSubmit={handleSubmit}>
       <FieldGroup>
         <Field>
-          <FieldLabel htmlFor="status-page-name">Page name</FieldLabel>
+          <FieldLabel htmlFor={field("name")}>Page name</FieldLabel>
           <Input
-            id="status-page-name"
+            id={field("name")}
             name="name"
             defaultValue={defaults.name}
             disabled={!canEdit}
@@ -86,9 +94,9 @@ export function StatusPageSettingsForm({
           />
         </Field>
         <Field>
-          <FieldLabel htmlFor="status-page-slug">Slug</FieldLabel>
+          <FieldLabel htmlFor={field("slug")}>Slug</FieldLabel>
           <Input
-            id="status-page-slug"
+            id={field("slug")}
             name="slug"
             defaultValue={defaults.slug}
             pattern="[a-z0-9]+(-[a-z0-9]+)*"
@@ -101,44 +109,44 @@ export function StatusPageSettingsForm({
         </Field>
         <Field orientation="horizontal">
           <Switch
-            id="status-page-published"
+            id={field("published")}
             checked={published}
             onCheckedChange={setPublished}
             disabled={!canEdit}
-            aria-describedby="status-page-published-hint"
+            aria-describedby={field("published-hint")}
           />
           <div>
-            <FieldLabel htmlFor="status-page-published">Published</FieldLabel>
-            <FieldDescription id="status-page-published-hint">
+            <FieldLabel htmlFor={field("published")}>Published</FieldLabel>
+            <FieldDescription id={field("published-hint")}>
               Unpublished pages return 404 to visitors.
             </FieldDescription>
           </div>
         </Field>
         <Field orientation="horizontal">
           <Switch
-            id="status-page-branding"
+            id={field("branding")}
             checked={showBranding}
             onCheckedChange={setShowBranding}
             disabled={!canEdit}
-            aria-describedby="status-page-branding-hint"
+            aria-describedby={field("branding-hint")}
           />
           <div>
-            <FieldLabel htmlFor="status-page-branding">
+            <FieldLabel htmlFor={field("branding")}>
               Show &ldquo;Powered by Vigil&rdquo;
             </FieldLabel>
-            <FieldDescription id="status-page-branding-hint">
+            <FieldDescription id={field("branding-hint")}>
               Turn it off for a white-label page. Free in both editions.
             </FieldDescription>
           </div>
         </Field>
         <Field>
-          <FieldLabel htmlFor="status-page-visibility">Visibility</FieldLabel>
+          <FieldLabel htmlFor={field("visibility")}>Visibility</FieldLabel>
           <Select
             value={visibility}
             onValueChange={(value) => setVisibility(value as Visibility)}
             disabled={!canEdit}
           >
-            <SelectTrigger id="status-page-visibility" className="w-full">
+            <SelectTrigger id={field("visibility")} className="w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -154,11 +162,9 @@ export function StatusPageSettingsForm({
         </Field>
         {visibility === "password" && (
           <Field>
-            <FieldLabel htmlFor="status-page-password">
-              Shared password
-            </FieldLabel>
+            <FieldLabel htmlFor={field("password")}>Shared password</FieldLabel>
             <Input
-              id="status-page-password"
+              id={field("password")}
               name="password"
               type="password"
               autoComplete="new-password"

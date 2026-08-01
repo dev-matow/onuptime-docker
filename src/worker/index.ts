@@ -5,9 +5,15 @@ import { PgBoss } from "pg-boss";
 import { db } from "@/db";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
+import {
+  HighFrequencyPlane,
+  highFrequencyClaims,
+} from "@/modules/monitors/highfreq";
 import { findDueMonitors } from "@/modules/monitors/service";
 
+import { runHighFrequencyRollupJob } from "./jobs/high-frequency";
 import { runMonitorCheck } from "./jobs/monitor-check";
+import { runNotificationDelivery } from "./jobs/notification-delivery";
 import { pruneOldChecks } from "./jobs/retention";
 import {
   QUEUES,
@@ -70,15 +76,32 @@ async function main() {
     retryLimit: 2,
     expireInSeconds: 120,
   });
+  await boss.createQueue(QUEUES.notificationDelivery, { policy: "singleton" });
+  // Created, not only scheduled. pg-boss enforces a foreign key from
+  // `schedule` to `queue`, so a cron for a queue nobody declared takes
+  // the whole worker down at startup — on a fresh database, which is
+  // exactly where nobody is watching the logs.
+  await boss.createQueue(QUEUES.highFrequencyRollup, { policy: "singleton" });
   await boss.createQueue(QUEUES.retention);
 
   await boss.work(QUEUES.monitorTick, async () => {
     const due = await findDueMonitors(db);
     if (due.length === 0) return;
 
-    log.debug({ count: due.length }, "enqueueing due monitor checks");
+    // Monitors a live high-frequency lease already covers are left
+    // alone: two planes probing one target is a doubled request rate
+    // the operator never asked for, and two observations of the same
+    // instant in `monitor_checks`. The test is on the lease and not on
+    // the flag, so a monitor whose worker died falls back to this
+    // cadence rather than to none — degrading from 500ms to 2s is a
+    // service level; degrading to silence is an outage nobody sees.
+    const claimed = await highFrequencyClaims();
+    const queued = due.filter((monitor) => !claimed(monitor));
+    if (queued.length === 0) return;
+
+    log.debug({ count: queued.length }, "enqueueing due monitor checks");
     await Promise.all(
-      due.map((monitor) =>
+      queued.map((monitor) =>
         boss.send(
           QUEUES.monitorCheck,
           { monitorId: monitor.id } satisfies MonitorCheckJob,
@@ -111,23 +134,56 @@ async function main() {
   );
 
 
+  await boss.work(QUEUES.notificationDelivery, async () => {
+    const result = await runNotificationDelivery(db);
+    // Silent when there was nothing to do: this fires every minute, and
+    // a log line per idle tick buries the ones that matter.
+    if (result.claimed > 0) log.info(result, "notification delivery tick");
+  });
+
   await boss.work(QUEUES.retention, async () => {
     await pruneOldChecks();
+  });
+
+  await boss.work(QUEUES.highFrequencyRollup, async () => {
+    await runHighFrequencyRollupJob();
   });
 
   // Cron minimum granularity is one minute; monitor intervals are
   // multiples of 60s, so every due monitor is picked up on time.
   await boss.schedule(QUEUES.monitorTick, "* * * * *");
+  // Every minute, like the monitor tick. Backoff lives in the row's
+  // `next_attempt_at`, not in the schedule, so a tighter cron would only
+  // add empty wake-ups.
+  await boss.schedule(QUEUES.notificationDelivery, "* * * * *");
   await boss.schedule(QUEUES.retention, "0 3 * * *");
+  await boss.schedule(QUEUES.highFrequencyRollup, "* * * * *");
 
   // Fire an immediate tick so a fresh deployment doesn't idle for the
   // first minute; the singleton policy dedupes against the cron.
   await boss.send(QUEUES.monitorTick, {});
+  // A message queued just before the last shutdown should not wait a
+  // minute for its first attempt.
+  await boss.send(QUEUES.notificationDelivery, {});
+
+  // The high-frequency plane. Started unconditionally and idle by
+  // default: with no monitor enabled it holds its shard leases and
+  // reloads an empty set, which is one indexed query every two seconds.
+  // Gating it behind an environment variable would mean an operator can
+  // enable high frequency in the UI on a deployment where nothing is
+  // running to honour it — a setting that saves and then does nothing is
+  // worse than a setting that is absent.
+  const highFrequency = new HighFrequencyPlane({ boss });
+  await highFrequency.start();
 
   log.info("worker started");
 
   const shutdown = async (signal: string) => {
     log.info({ signal }, "shutting down");
+    // Stopped before pg-boss, because stopping it releases the shard
+    // leases and flushes the sample buffer, and both of those want a
+    // working database connection.
+    await highFrequency.stop();
     await boss.stop({ graceful: true, timeout: 15_000 });
     process.exit(0);
   };

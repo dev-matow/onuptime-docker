@@ -4,9 +4,11 @@ import {
   CHECK_TYPE_DESCRIPTORS,
   describeCheckType,
   findDescriptor,
+  UNSCHEDULED_CHECK_TYPE_IDS,
 } from "@/modules/monitors/types/catalog";
 import { redactTargetCredentials } from "@/modules/monitors/spec";
 import { connectionErrorMessage } from "@/modules/monitors/types/probes/guard";
+import { isScheduledKind } from "@/modules/monitors/types/contract";
 import { CHECK_TYPES } from "@/modules/monitors/types/registry";
 import { CHECK_TYPE_SPECS } from "@/modules/monitors/types/specs";
 
@@ -35,10 +37,56 @@ describe("check type registry conformance", () => {
     expect(type.descriptor.id).toBe(id);
   });
 
-  it.each(entries)("%s: has a probe and assertions", (_id, type) => {
-    expect(typeof type.probe).toBe("function");
-    expect(Array.isArray(type.assertions)).toBe(true);
-  });
+  it.each(entries)(
+    "%s: carries exactly the one evaluation function its kind names",
+    (_id, type) => {
+      // The rule the kinds exist to enforce, checked from both sides.
+      // A group with a probe is a transport somebody wrote believing it
+      // would run; a push type without `observe` is a monitor that can
+      // never say anything. Both used to be expressible, because the
+      // contract had one mandatory `probe` and three types that could
+      // not honestly implement it.
+      const functions = {
+        active: "probe",
+        passive: "observe",
+        aggregate: "derive",
+        manual: "declare",
+      } as const;
+      const expected = functions[type.descriptor.kind];
+      const carried = Object.values(functions).filter(
+        (name) =>
+          typeof (type as unknown as Record<string, unknown>)[name] ===
+          "function",
+      );
+      expect(carried).toEqual([expected]);
+      expect(Array.isArray(type.assertions)).toBe(true);
+    },
+  );
+
+  it.each(entries)(
+    "%s: is only offered to the scheduler when its kind is scheduled",
+    (id, type) => {
+      // `findDueMonitors` filters on this list. A type that fell out of
+      // it by accident would be enqueued forever and evaluated into an
+      // observation nobody asked for; one that fell into it by accident
+      // would silently stop being checked.
+      expect(UNSCHEDULED_CHECK_TYPE_IDS.includes(id)).toBe(
+        !isScheduledKind(type.descriptor.kind),
+      );
+    },
+  );
+
+  it.each(entries)(
+    "%s: only claims to support recovery if something can re-probe it",
+    (_id, type) => {
+      // Recovery verifies a fix by probing again. A kind with no
+      // transport has nothing to verify with, so claiming support would
+      // schedule a verification that can only ever time out.
+      if (type.descriptor.kind !== "active") {
+        expect(type.descriptor.supportsRecovery).toBe(false);
+      }
+    },
+  );
 
   it.each(entries)(
     "%s: every assertion reads a fact the type declares",
@@ -85,6 +133,7 @@ describe("check type registry conformance", () => {
         url: "example.com",
         port: type.descriptor.port?.default ?? null,
         method: "GET",
+        intervalSeconds: 60,
         timeoutMs: 10_000,
         degradedThresholdMs: 3_000,
         expectedStatusCode: null,
@@ -117,6 +166,7 @@ describe("check type registry conformance", () => {
             url: "example.com",
             port: null,
             method: "GET",
+            intervalSeconds: 60,
             timeoutMs: 10_000,
             degradedThresholdMs: 3_000,
             expectedStatusCode: null,

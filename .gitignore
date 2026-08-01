@@ -53,3 +53,13 @@ next-env.d.ts
 # explicitly so machine-level "lib/" ignore templates can never hide it.
 !/src/lib/
 docker-compose.override.yml
+
+# Raw benchmark output. A chosen run is copied into the evidence pack;
+# ad-hoc runs are noise, and a stale one is worse than none.
+bench-results/
+
+# Release evidence is committed, whatever a developer's global ignore
+# says. A `*.log` in ~/.gitignore_global silently swallowed these once,
+# and evidence that exists only on the machine that produced it is not
+# evidence.
+!docs/evidence/*.log

@@ -1,0 +1,24 @@
+=== UPGRADE: a real v1.12.0 install, populated, then migrated ===
+date: 2026-08-01T20:24:21Z
+from 2b0177a (v1.12.0) to d35436b
+[⣷] applying migrations...[2K[1G[✓] migrations applied successfully!migrations at 1.12.0: 15
+tables at 1.12.0:     24
+--- operator data seeded into the 1.12.0 database ---
+  two live automatic incidents on one monitor, which 1.12.0 permitted
+--- UPGRADE: npm run db:migrate ---
+[⣷] applying migrations...[2K[1G[✓] migrations applied successfully!--- verification ---
+migrations now: 19
+tables now:     29
+monitors preserved: 2
+redis secret preserved: pre-upgrade-secret
+paused state preserved: t
+observations preserved: 1
+incident: 33333333-3333-3333-3333-333333333333=investigating
+incident: 44444444-4444-4444-4444-444444444444=resolved
+closure explained: Closed during the 1.13.0 upgrade: this was a duplicate automatic incident for the same monitor, crea
+new invariant: incidents_one_active_per_monitor
+outbox table: ok, rows=0
+hf plane table: ok, rows=0
+still exactly one active automatic incident per monitor: 1
+--- re-running migrate is a no-op ---
+[⣷] applying migrations...[2K[1G[✓] migrations applied successfully!migrations after re-run: 19

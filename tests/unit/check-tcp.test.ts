@@ -1,3 +1,4 @@
+// @covers-type: tcp
 import net from "node:net";
 
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -80,6 +81,7 @@ describe("performCheck dispatch", () => {
         url: "127.0.0.1",
         port: server.port,
         method: "GET",
+        intervalSeconds: 60,
         timeoutMs: 2000,
         degradedThresholdMs: 3000,
         expectedStatusCode: null,
@@ -99,6 +101,7 @@ describe("performCheck dispatch", () => {
         url: "https://example.com/health",
         port: null,
         method: "GET",
+        intervalSeconds: 60,
         timeoutMs: 2000,
         degradedThresholdMs: 3000,
         expectedStatusCode: null,

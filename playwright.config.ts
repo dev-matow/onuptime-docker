@@ -26,7 +26,14 @@ export default defineConfig({
           // on any other port could never be reused, so Playwright
           // would start a second one and then test the first.
           url: process.env.E2E_BASE_URL ?? "http://localhost:3000",
-          reuseExistingServer: true,
+          // Never in CI, and never for a release run. Reuse is a
+          // convenience for a developer who already has `npm run dev`
+          // up; anywhere else it means the suite silently tests
+          // whatever happens to hold the port — a stale build, another
+          // branch, another database — and still reports green. That
+          // happened during this release: a leftover dev server on
+          // :3000 answered a run whose own server was on :3210.
+          reuseExistingServer: !process.env.CI,
           timeout: 120_000,
         },
       }),

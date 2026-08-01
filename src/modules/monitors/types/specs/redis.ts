@@ -49,6 +49,7 @@ export const redisSpec: CheckTypeSpec<RedisConfig> = {
   descriptor: redisDescriptor,
   configSchema: redisConfigSchema,
   storedSchema: redisStoredSchema,
+  secretFields: ["password"],
   targetSchema: monitorHostnameSchema,
   assertions: [answersPong, latencyAssertion<RedisConfig>("Answered")],
   fromRow(row: MonitorRowView): RedisConfig {

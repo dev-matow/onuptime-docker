@@ -20,7 +20,7 @@ export { FORBIDDEN_HOSTNAMES, METADATA_IP, monitorUrlSchema };
  * baseline they actually want.
  */
 /**
- * Two seconds, because two seconds is what the scheduler delivers.
+ * Two seconds, because two seconds is what this scheduler delivers.
  *
  * Measured rather than assumed: a monitor asking for a 1-second baseline
  * is checked every 2002ms at the median, and adding ten monitors on the
@@ -30,8 +30,12 @@ export { FORBIDDEN_HOSTNAMES, METADATA_IP, monitorUrlSchema };
  *
  * It was 10, which meant a number an operator could type and not
  * receive. Anything below 2 would be the same defect in the other
- * direction; going under it is a scheduler change, not a validation
- * change.
+ * direction — and note that the fix, when it came, was not to lower this
+ * number. Sub-second checks live on a different data plane
+ * (`highfreq/`), with its own column, its own scheduler and its own
+ * measured floor, precisely because the wall was never this constant.
+ * Lowering it would have accepted a cadence nothing delivers, which is
+ * the exact defect it was raised to 2 to fix.
  */
 export const MIN_INTERVAL_SECONDS = 2;
 export const MAX_INTERVAL_SECONDS = 86_400;
@@ -55,6 +59,18 @@ const monitorFields = {
   checkType: z.string().trim().min(1).max(64).default("http"),
   /** URL for http; a host or domain for every other type. Refined below. */
   url: z.string().trim().min(1).max(2048),
+  /**
+   * The group this monitor belongs to, or null for none.
+   *
+   * A monitor-level field rather than a type's form section, because
+   * membership is not a property of the check type: an HTTP monitor, a
+   * heartbeat and a manual statement can all sit in the same group, and
+   * that is the point of having one. Whether the id names a real group
+   * in the same organization — and does not close a cycle — is a
+   * question only the database can answer, so it is asked in
+   * `service.ts` rather than here.
+   */
+  parentId: z.uuid().nullish(),
   /** Required by the types that declare a port; ignored by the rest. */
   port: z.number().int().min(1).max(65535).nullish(),
   method: z.enum(["GET", "HEAD"]).default("GET"),

@@ -25,7 +25,7 @@ src/
 │   ├── (auth)/   #   sign-in / sign-up
 │   ├── (app)/    #   dashboard shell (sidebar); actions.ts per area
 │   ├── status/   #   public, ISR-cached status pages
-│   └── api/      #   Better Auth handler + demo login
+│   └── api/      #   Better Auth handler, demo login, push heartbeats
 ├── modules/      # Domain logic. No framework imports. The real product.
 ├── worker/       # pg-boss process: tick fan-out, checks, retention.
 ├── db/           # Drizzle client + schema (one file per context).

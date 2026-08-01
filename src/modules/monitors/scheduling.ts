@@ -16,16 +16,24 @@ import type { Verdict } from "./types/conditions";
  */
 
 /**
- * A clamp, not a promise, and deliberately below anything deliverable.
+ * A clamp, not a promise, and deliberately below anything this plane
+ * delivers.
  *
  * The policy may ask for sooner than this — a suspicious monitor on the
  * 2s minimum asks for 125ms — and what that request means in practice is
  * "as soon as the queue will have me", which is pg-boss's poll at about
- * 2000ms measured. So this number is unreachable by construction and
- * always has been. It exists so that lowering the settable minimum or
- * raising SUSPICION_DIVISOR later cannot produce a nonsense cadence.
- * Nothing about the product should ever be described in terms of it,
- * and it is not the floor: MIN_INTERVAL_SECONDS is.
+ * 2000ms measured. So this number is unreachable by construction on this
+ * plane and always has been. It exists so that lowering the settable
+ * minimum or raising SUSPICION_DIVISOR later cannot produce a nonsense
+ * cadence. Nothing about the product should ever be described in terms
+ * of it, and it is not the floor: MIN_INTERVAL_SECONDS is.
+ *
+ * That it happens to equal the high-frequency plane's floor is a
+ * coincidence and not a connection. `highfreq/` does not read this
+ * constant, does not go through `nextEvaluationAt`, and does not use
+ * this scheduler at all — it has its own monotonic timer and its own
+ * measured floor. If one of the two numbers moves, the other does not
+ * follow it.
  */
 export const MIN_EVALUATION_MS = 500;
 

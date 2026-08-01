@@ -1,0 +1,203 @@
+
+=== format:check ===
+npm notice run vigil@1.13.0 format:check
+npm notice run prettier --check .
+Checking formatting...
+[warn] .github/social-preview.html
+[warn] COMMERCIAL.md
+[warn] landing/app.js
+[warn] landing/blog.html
+[warn] landing/cloud.html
+[warn] landing/demo/_next/static/chunks/0s1eq3paqpf93.css
+[warn] landing/demo/_next/static/chunks/0tggjwwvsj83b.css
+[warn] landing/demo/_next/static/chunks/3ukmm8xt1gg50.css
+[warn] landing/demo/_next/static/chunks/42825l17pz13i.css
+[warn] landing/demo/index.html
+[warn] landing/fonts/fonts.css
+[warn] landing/google4e3fb1a222fa8ba2.html
+[warn] landing/license.html
+[warn] landing/privacy.html
+[warn] landing/statuspage-alternative.html
+[warn] landing/uptimerobot-alternative.html
+[warn] landing/vercel.json
+[warn] launch/product-hunt.md
+[warn] src/app/(app)/settings/escalation/actions.ts
+[warn] src/app/(app)/settings/escalation/page.tsx
+[warn] src/app/(app)/settings/escalation/policy-manager.tsx
+[warn] src/app/status/[slug]/actions.ts
+[warn] src/app/status/[slug]/subscribe-form.tsx
+[warn] src/modules/notifications/channels.ts
+[warn] tests/integration/oncall-service.test.ts
+[warn] Code style issues found in 25 files. Run Prettier with --write to fix.
+format:check                 EXIT=1
+
+=== lint ===
+npm notice run vigil@1.13.0 lint
+npm notice run eslint .
+
+/home/s8kur/Claude/VibeCoding/vigil/tests/probe-lookup.ts
+  16:3  warning  '_hostname' is defined but never used  @typescript-eslint/no-unused-vars
+  23:3  warning  '_hostname' is defined but never used  @typescript-eslint/no-unused-vars
+
+✖ 2 problems (0 errors, 2 warnings)
+
+lint                         EXIT=0
+
+=== typecheck ===
+npm notice run vigil@1.13.0 typecheck
+npm notice run next typegen && tsc --noEmit
+Generating route types...
+✓ Types generated successfully
+typecheck                    EXIT=0
+
+=== facts:check ===
+npm notice run vigil@1.13.0 facts:check
+npm notice run node scripts/public-facts.mjs --check
+The plugin "vite-tsconfig-paths" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.
+public-facts: 34 surface(s) agree
+facts:check                  EXIT=0
+
+=== dod:check ===
+npm notice run vigil@1.13.0 dod:check
+npm notice run node scripts/dod-matrix.mjs --check
+npm notice run vigil@1.13.0 npx
+npm notice run 'tsx' -e 
+npm notice run     import { CHECK_TYPE_SPECS } from "@/modules/monitors/types/specs";
+npm notice run     const out = {};
+npm notice run     for (const [id, spec] of Object.entries(CHECK_TYPE_SPECS)) {
+npm notice run       out[id] = {
+npm notice run         kind: spec.descriptor.kind ?? "active",
+npm notice run         secretFields: [...(spec.secretFields ?? [])],
+npm notice run         facts: spec.descriptor.facts.map((f) => f.key),
+npm notice run         assertions: spec.assertions.map((a) => a.id),
+npm notice run         requiresCapability: spec.descriptor.requiresCapability ?? null,
+npm notice run       };
+npm notice run     }
+npm notice run     process.stdout.write("@@" + JSON.stringify(out) + "@@");
+dod: 40 types, no gaps
+dod:check                    EXIT=0
+
+=== kuma:check ===
+npm notice run vigil@1.13.0 kuma:check
+npm notice run node scripts/kuma-matrix.mjs --check
+npm notice run vigil@1.13.0 npx
+npm notice run 'tsx' -e 
+npm notice run     import { FIELD_MATRIX, TYPE_MATRIX, NOTABLE_DROPS } from "@/modules/importers/kuma/mapping";
+npm notice run     import { KUMA_PIN } from "@/modules/importers/kuma/pinned";
+npm notice run     process.stdout.write("@@" + JSON.stringify({
+npm notice run       pin: KUMA_PIN,
+npm notice run       types: TYPE_MATRIX,
+npm notice run       fields: FIELD_MATRIX,
+npm notice run       drops: NOTABLE_DROPS,
+npm notice run     }) + "@@");
+kuma: 31/31 types mapped, 111 columns classified, pinned to 2.4.0
+kuma:check                   EXIT=0
+
+=== bench:check ===
+npm notice run vigil@1.13.0 bench:check
+npm notice run node scripts/bench-check.mjs
+bench: 4 artefacts (N=1, N=10, N=100, N=1000) complete, and the published table quotes them exactly
+bench:check                  EXIT=0
+
+=== schema-check ===
+npm notice run vigil@1.13.0 npx
+npm notice run 'drizzle-kit' check
+No config path provided, using default 'drizzle.config.ts'
+Reading config file '/home/s8kur/Claude/VibeCoding/vigil/drizzle.config.ts'
+Everything's fine 🐶🔥
+schema-check                 EXIT=0
+
+=== vitest ===
+npm notice run vigil@1.13.0 npx
+npm notice run 'vitest' run
+The plugin "vite-tsconfig-paths" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.
+
+ RUN  v4.1.9 /home/s8kur/Claude/VibeCoding/vigil
+
+{"level":50,"time":1785615764000,"outcome":"retryable","err":"provider returned 503","msg":"password reset email was not sent"}
+{"level":50,"time":1785615764110,"outcome":"permanent","err":"recipient rejected","msg":"password reset email was not sent"}
+{"level":50,"time":1785615764125,"outcome":"permanent","err":"recipient rejected","msg":"password reset email was not sent"}
+
+ Test Files  88 passed (88)
+      Tests  2344 passed (2344)
+   Start at  23:22:39
+   Duration  19.79s (transform 8.71s, setup 1.79s, import 77.64s, tests 65.21s, environment 15ms)
+
+vitest                       EXIT=0
+
+=== build ===
+npm notice run vigil@1.13.0 build
+npm notice run next build
+▲ Next.js 16.2.10 (Turbopack)
+- Environments: .env.local, .env.production, .env
+- Experiments (use with caution):
+  · serverActions
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 8.4s
+  Running TypeScript ...
+  Finished TypeScript in 16.7s ...
+  Collecting page data using 11 workers ...
+  Generating static pages using 11 workers (0/20) ...
+  Generating static pages using 11 workers (5/20) 
+  Generating static pages using 11 workers (10/20) 
+  Generating static pages using 11 workers (15/20) 
+✓ Generating static pages using 11 workers (20/20) in 457ms
+  Finalizing page optimization ...
+
+Route (app)
+┌ ƒ /
+├ ○ /_not-found
+├ ƒ /api/auth/[...all]
+├ ƒ /api/demo
+├ ƒ /api/health
+├ ƒ /api/push/[token]
+├ ƒ /dashboard
+├ ○ /forgot-password
+├ ○ /icon.svg
+├ ƒ /incidents
+├ ƒ /incidents/[id]
+├ ƒ /invitations/[id]
+├ ƒ /monitors
+├ ƒ /monitors/[id]
+├ ƒ /onboarding
+├ ○ /reset-password
+├ ƒ /settings
+├ ƒ /settings/audit
+├ ƒ /settings/escalation
+├ ƒ /settings/import
+├ ƒ /settings/members
+├ ƒ /settings/notifications
+├ ○ /sign-in
+├ ○ /sign-up
+├ ƒ /status-page
+├ ƒ /status/[slug]
+├ ƒ /status/[slug]/confirm
+└ ƒ /status/[slug]/unsubscribe
+
+
+ƒ Proxy (Middleware)
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+
+build EXIT=0
+npm notice run vigil@1.13.0 npx
+npm notice run 'drizzle-kit' migrate
+No config path provided, using default 'drizzle.config.ts'
+Reading config file '/home/s8kur/Claude/VibeCoding/vigil/drizzle.config.ts'
+Using 'pg' driver for database querying
+[⣷] applying migrations...[2K[1G[⣯] applying migrations...[2K[1G[✓] migrations applied successfully!
+=== e2e ===
+e2e EXIT=0
+  ✓  7 [chromium] › e2e/smoke.spec.ts:227:7 › Vigil golden path › publishes the status page and serves it publicly (1.1s)
+  ✓  8 [chromium] › e2e/smoke.spec.ts:278:7 › Vigil golden path › serves a second organization's status page, not the first's (1.8s)
+
+  8 passed (15.8s)
+
+core-gate                    EXIT=0
+docker-web                   EXIT=0
+docker-worker                EXIT=0
+fresh-install                EXIT=0  docs/evidence/fresh-install.log
+upgrade v1.12.0->HEAD        EXIT=0  docs/evidence/upgrade.log
+backup+restore               EXIT=0  docs/evidence/backup-restore.log

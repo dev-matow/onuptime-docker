@@ -1,0 +1,70 @@
+#!/bin/sh
+# A stand-in for the `tailscale` CLI.
+#
+# The tailnet probe's only interface is a subprocess, so its fixture is a
+# real executable: the test puts this directory on PATH, the probe spawns
+# it through the same `execFile` it uses in production, and what comes
+# back is a real exit status and real bytes on stdout and stderr. Nothing
+# in `node:child_process` is stubbed, which is the point — the parsing,
+# the argv, the LC_ALL and the ENOENT path are all exercised for real.
+#
+# Every line below is copied from what the real CLI prints. Drift here
+# is the one thing that would make these tests lie, so a Tailscale
+# release that changes its wording should be reflected in this file.
+#
+# VIGIL_TEST_TAILSCALE_MODE  which answer to give
+# VIGIL_TEST_TAILSCALE_ARGV  file to record argv in, one argument per line
+
+if [ -n "$VIGIL_TEST_TAILSCALE_ARGV" ]; then
+  : > "$VIGIL_TEST_TAILSCALE_ARGV"
+  for argument in "$@"; do
+    printf '%s\n' "$argument" >> "$VIGIL_TEST_TAILSCALE_ARGV"
+  done
+fi
+
+case "${VIGIL_TEST_TAILSCALE_MODE:-direct}" in
+  direct)
+    echo "pong from db-1 (100.101.102.103) via 203.0.113.7:41641 in 12ms"
+    ;;
+  derp)
+    echo "pong from db-1 (100.101.102.103) via DERP(fra) in 87ms"
+    ;;
+  slow)
+    echo "pong from db-1 (100.101.102.103) via 203.0.113.7:41641 in 4210ms"
+    ;;
+  retry)
+    # The first packet is lost while the path is renegotiated; the
+    # second answers. The CLI prints a line per attempt.
+    echo "no reply from 100.101.102.103 after 5s"
+    echo "pong from db-1 (100.101.102.103) via 203.0.113.7:41641 in 31ms"
+    ;;
+  no-peer)
+    echo 'ping "nope": no matching peer' >&2
+    exit 1
+    ;;
+  no-reply)
+    echo "no reply from 100.101.102.103 after 5s"
+    exit 1
+    ;;
+  logged-out)
+    echo "Logged out." >&2
+    echo "Log in at: https://login.tailscale.com/a/0123456789ab" >&2
+    exit 1
+    ;;
+  stopped)
+    echo "Tailscale is stopped." >&2
+    exit 1
+    ;;
+  no-daemon)
+    echo "failed to connect to local tailscaled; is Tailscale running?" >&2
+    exit 1
+    ;;
+  denied)
+    echo "dial unix /var/run/tailscale/tailscaled.sock: connect: permission denied" >&2
+    exit 1
+    ;;
+  *)
+    echo "something no released version has ever printed" >&2
+    exit 1
+    ;;
+esac

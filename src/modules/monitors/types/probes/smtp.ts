@@ -44,7 +44,11 @@ const MAX_REPLY_LENGTH = 64 * 1024;
 export async function smtpProbe(
   ctx: ProbeContext<SmtpConfig>,
 ): Promise<ProbeResult> {
-  const guard = await refusesPrivate(ctx.target, ctx.allowPrivateTargets);
+  const guard = await refusesPrivate(
+    ctx.target,
+    ctx.allowPrivateTargets,
+    ctx.lookup,
+  );
   if (guard) {
     return { facts: {}, responseTimeMs: null, statusCode: null, error: guard };
   }

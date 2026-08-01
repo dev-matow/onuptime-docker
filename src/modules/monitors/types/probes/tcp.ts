@@ -11,7 +11,11 @@ import { elapsedSince, refusesPrivate, connectionErrorMessage } from "./guard";
 export async function tcpProbe(
   ctx: ProbeContext<TcpConfig>,
 ): Promise<ProbeResult> {
-  const guard = await refusesPrivate(ctx.target, ctx.allowPrivateTargets);
+  const guard = await refusesPrivate(
+    ctx.target,
+    ctx.allowPrivateTargets,
+    ctx.lookup,
+  );
   if (guard) {
     return { facts: {}, responseTimeMs: null, statusCode: null, error: guard };
   }

@@ -42,6 +42,8 @@ import {
 } from "@/modules/monitors/service";
 import { describeMonitorTarget } from "@/modules/monitors/spec";
 import { describeCheckType } from "@/modules/monitors/types/catalog";
+import { redactConfig } from "@/modules/monitors/types/config";
+import { requireSpec } from "@/modules/monitors/types/specs";
 
 import { MonitorDetailActions } from "./monitor-detail-actions";
 import { ResponseTimeChart } from "./response-time-chart";
@@ -78,9 +80,6 @@ export default async function MonitorDetailPage(
   const canUpdate = hasPermission(ctx.role, { monitor: ["update"] });
   const canDelete = hasPermission(ctx.role, { monitor: ["delete"] });
 
-  // Empty / null in the free edition — see the monitors list page.
-  let policies: { id: string; name: string }[] = [];
-  let assignedPolicyId: string | null = null;
 
   return (
     <div className="flex flex-col gap-6">
@@ -156,6 +155,7 @@ export default async function MonitorDetailPage(
             name: monitor.name,
             checkType: monitor.checkType,
             url: monitor.url,
+            parentId: monitor.parentId,
             port: monitor.port,
             method: monitor.method,
             intervalSeconds: monitor.intervalSeconds,
@@ -167,7 +167,16 @@ export default async function MonitorDetailPage(
             tlsCheck: monitor.tlsCheck,
             tlsWarnDays: monitor.tlsWarnDays,
             failureWindowSeconds: monitor.failureWindowSeconds,
-            config: (monitor.config as Record<string, unknown> | null) ?? null,
+            // Masked, not raw. This object crosses into a client
+            // component, which means it lands in the page source of
+            // anyone who can open the monitor — including a viewer-role
+            // member who cannot edit it. The form sends the mask back
+            // untouched when the operator does not retype the secret.
+            config:
+              (redactConfig(
+                requireSpec(monitor.checkType),
+                monitor.config,
+              ) as Record<string, unknown> | null) ?? null,
             paused: monitor.paused,
           }}
           canUpdate={canUpdate}
@@ -190,6 +199,19 @@ export default async function MonitorDetailPage(
                   ? "No successful checks"
                   : `avg response ${formatDuration(window.avgResponseMs)}`}
               </p>
+              {/*
+                Uptime is a ratio of the time an observation vouched for,
+                not of the whole window. 100% over a third of the window
+                is a different claim from 100% over all of it, and a
+                reader who is not told cannot tell them apart. Shown only
+                when there is a real gap, so the ordinary case stays
+                quiet.
+              */}
+              {window.coveragePct < 95 && (
+                <p className="text-muted-foreground text-xs">
+                  measured {Math.round(window.coveragePct)}% of the window
+                </p>
+              )}
             </CardContent>
           </Card>
         ))}

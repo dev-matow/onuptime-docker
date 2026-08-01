@@ -1,19 +1,24 @@
 import { env } from "@/lib/env";
 
+import { EgressBlockedError, egressFetch } from "../../egress";
 import type { ProbeContext, ProbeResult } from "../contract";
 import type { DomainExpiryConfig } from "../specs/domain-expiry";
-import { elapsedSince } from "./guard";
+import { elapsedSince, monitorEgress } from "./guard";
 
 /**
  * Domain registration expiry over RDAP.
  *
  * RDAP is WHOIS with a JSON schema and a TLS transport (RFC 9083), so
- * this needs nothing but `fetch` — no WHOIS client, no port 43, no new
- * dependency. The bootstrap host redirects to whichever registry is
- * authoritative for the TLD, which is why redirects are followed here.
- * (The `redirect: "manual"` rule applies to webhook delivery, where a
- * redirect would move a signed request to an unintended host. Nothing
- * is signed or sent here — this is a read.)
+ * this needs nothing but an HTTP client — no WHOIS client, no port 43,
+ * no new dependency. The bootstrap host redirects to whichever registry
+ * is authoritative for the TLD, so this check follows redirects by
+ * design; that is the one thing it cannot work without.
+ *
+ * Which is exactly why it goes through the egress loop rather than
+ * `redirect: "follow"`. `RDAP_BASE_URL` is operator-configurable and
+ * the chain after it is chosen by a third party, so "follow whatever
+ * rdap.org says" was an unauthenticated redirect into an unvalidated
+ * host on a timer. Each hop is now classified before it is issued.
  */
 const MAX_RDAP_BYTES = 512 * 1024;
 
@@ -39,18 +44,29 @@ export async function domainExpiryProbe(
   const startedAt = performance.now();
 
   let response: Response;
+  let finalUrl: string;
   try {
-    response = await ctx.fetchImpl(url, {
-      method: "GET",
-      redirect: "follow",
-      signal: AbortSignal.timeout(ctx.timeoutMs),
-      headers: {
-        accept: "application/rdap+json, application/json",
-        "user-agent": "vigil-monitor/1.0 (+https://github.com)",
+    ({ response, finalUrl } = await egressFetch(
+      url,
+      {
+        method: "GET",
+        signal: AbortSignal.timeout(ctx.timeoutMs),
+        headers: {
+          accept: "application/rdap+json, application/json",
+          "user-agent": "vigil-monitor/1.0 (+https://github.com)",
+        },
       },
-    });
+      monitorEgress(ctx),
+    ));
   } catch (error) {
     const responseTimeMs = elapsedSince(startedAt);
+    // A refused hop is Vigil failing to find out, not bad news about
+    // the domain — the same bucket as a rate-limited registry, and for
+    // the same reason: judging it `down` pins the monitor red on
+    // evidence nobody has.
+    if (error instanceof EgressBlockedError) {
+      return unavailable(error.message, responseTimeMs);
+    }
     if (error instanceof DOMException && error.name === "TimeoutError") {
       return unavailable(
         `RDAP lookup timed out after ${ctx.timeoutMs}ms`,
@@ -81,7 +97,7 @@ export async function domainExpiryProbe(
   // registry and that registry disclaimed the domain. The same host
   // means nobody was ever asked.
   if (response.status === 404) {
-    return answeredByRegistry(response, url)
+    return answeredByRegistry(finalUrl)
       ? transportFailure(
           "The registry has no record of this domain",
           responseTimeMs,
@@ -226,10 +242,11 @@ async function readCapped(response: Response, maxBytes: number) {
 /**
  * Whether an authoritative registry answered, rather than the bootstrap.
  *
- * `response.url` carries the final URL after redirects; a `Response`
- * constructed by hand (tests, some polyfills) leaves it empty, so fall
- * back to the request URL — which is the bootstrap, i.e. the
- * conservative answer.
+ * `finalUrl` is where the last validated hop was issued — the egress
+ * loop's own record of the chain, which is more trustworthy here than
+ * `Response.url`: a `Response` constructed by hand (tests, some
+ * polyfills) leaves that empty, and the loop falls back to the request
+ * URL, which is the bootstrap, i.e. the conservative answer.
  *
  * Known trade-off: an operator who points `RDAP_BASE_URL` straight at a
  * registry instead of a bootstrap gets same-host on a genuine NXDOMAIN
@@ -238,9 +255,9 @@ async function readCapped(response: Response, maxBytes: number) {
  * check has to fail in — and `README.md` says the variable wants a
  * bootstrap service.
  */
-function answeredByRegistry(response: Response, requestUrl: string): boolean {
+function answeredByRegistry(finalUrl: string): boolean {
   try {
-    const finalHost = new URL(response.url || requestUrl).host;
+    const finalHost = new URL(finalUrl).host;
     const bootstrapHost = new URL(env.RDAP_BASE_URL).host;
     return finalHost !== bootstrapHost;
   } catch {

@@ -33,6 +33,23 @@ test.describe("Vigil golden path", () => {
     await page.close();
   });
 
+  /**
+   * Create a status page from the list at /status-page and wait for the
+   * settings form to appear. Callers must already be on that route.
+   */
+  async function createStatusPage(name: string, slug: string): Promise<void> {
+    await page.getByRole("button", { name: "New status page" }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await dialog.getByLabel("Name", { exact: true }).fill(name);
+    await dialog.getByLabel("Slug", { exact: true }).fill(slug);
+    await dialog.getByRole("button", { name: "Create" }).click();
+    await expect(dialog).toBeHidden({ timeout: 10_000 });
+    await expect(page.getByRole("heading", { level: 2, name })).toBeVisible({
+      timeout: 10_000,
+    });
+  }
+
   test("signs up a new user and lands on onboarding", async () => {
     await page.goto("/sign-up");
 
@@ -79,9 +96,10 @@ test.describe("Vigil golden path", () => {
 
   test("creates a monitor of each new check type through the dialog", async () => {
     // The form renders itself from the check type registry, so this
-    // walks the four types added in 1.10.0 to prove the descriptor, the
-    // per-type fields and the action layer agree. A type that validates
-    // in isolation but cannot be filled in is not shipped.
+    // walks the four types added in 1.10.0 and the three kinds added in
+    // 1.13.0 to prove the descriptor, the per-type fields and the action
+    // layer agree. A type that validates in isolation but cannot be
+    // filled in is not shipped.
     const cases = [
       {
         name: "E2E ping",
@@ -106,6 +124,28 @@ test.describe("Vigil golden path", () => {
         type: "Domain expiry",
         label: "Domain",
         target: "expiry-demo.com",
+      },
+      // The three kinds that are not probes. Nothing about filling them
+      // in is special, and that is the assertion: a type whose form
+      // cannot be completed is not shipped, whether or not it dials
+      // anything.
+      {
+        name: "E2E push",
+        type: "Push heartbeat",
+        label: "Job name",
+        target: "nightly-backup",
+      },
+      {
+        name: "E2E group",
+        type: "Group",
+        label: "What this group covers",
+        target: "EU region",
+      },
+      {
+        name: "E2E manual",
+        type: "Manual",
+        label: "What this tracks",
+        target: "Stripe payments",
       },
     ];
 
@@ -187,8 +227,15 @@ test.describe("Vigil golden path", () => {
   test("publishes the status page and serves it publicly", async () => {
     await page.goto("/status-page");
 
-    // The status page slug defaults to the organization slug; read it
-    // from the form so the public URL never drifts from reality.
+    // An organization owns as many status pages as it likes and starts
+    // with none, so the first act here is creating one. It is named after
+    // the organization and slugged with the org slug purely so the rest
+    // of this test can talk about a URL it knows.
+    await createStatusPage(`${orgName} status`, orgSlug);
+
+    // Read the slug back off the settings form: the public URL the next
+    // step visits has to be the one the product actually serves, not the
+    // one this test typed.
     await expect(page.getByLabel("Slug")).toHaveValue(orgSlug);
 
     const publishSwitch = page.getByRole("switch", { name: "Published" });
@@ -207,6 +254,8 @@ test.describe("Vigil golden path", () => {
     });
 
     await page.goto(`/status/${orgSlug}`);
+    // The public page is titled with the STATUS PAGE's name, not the
+    // organization's — one organization can serve several audiences.
     await expect(
       page.getByRole("heading", { level: 1, name: `${orgName} status` }),
     ).toBeVisible({ timeout: 10_000 });
@@ -243,6 +292,7 @@ test.describe("Vigil golden path", () => {
     await expect(dialog).toBeHidden({ timeout: 10_000 });
 
     await page.goto("/status-page");
+    await createStatusPage(`${org2Name} status`, org2Slug);
     const publishSwitch = page.getByRole("switch", { name: "Published" });
     await publishSwitch.click();
     await expect(publishSwitch).toBeChecked();

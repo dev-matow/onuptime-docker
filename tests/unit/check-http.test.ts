@@ -1,10 +1,15 @@
-import { describe, expect, it, vi } from "vitest";
+// @covers-type: http
+import http from "node:http";
+
+import { afterAll, describe, expect, it, vi } from "vitest";
 
 import {
   evaluateKeyword,
   performHttpCheck,
   type CheckTarget,
 } from "@/modules/monitors/check";
+
+import { publicLookup } from "../probe-lookup";
 
 const baseTarget: CheckTarget = {
   url: "https://example.com/health",
@@ -14,9 +19,41 @@ const baseTarget: CheckTarget = {
   expectedStatusCode: null,
 };
 
-// allowPrivateTargets skips the real dns.lookup so these tests stay
-// fully offline; the guard itself is covered separately below using
-// "localhost", which resolves via the hosts file without network.
+// The egress guard resolves every target, including under
+// allowPrivateTargets — that flag widens private space, it does not
+// switch the guard off. `example.com` therefore gets a real lookup;
+// either answer is fine, because a public address is allowed and a name
+// that does not resolve is left to the transport (which is injected
+// here). The guard's refusals are covered below with "localhost",
+// which resolves via the hosts file without a network.
+
+interface TestServer {
+  port: number;
+  hosts: (string | undefined)[];
+  close: () => Promise<void>;
+}
+
+const servers: TestServer[] = [];
+afterAll(async () => {
+  await Promise.all(servers.splice(0).map((server) => server.close()));
+});
+
+async function openServer(handler: http.RequestListener): Promise<TestServer> {
+  const hosts: (string | undefined)[] = [];
+  const server = http.createServer((request, response) => {
+    hosts.push(request.headers.host);
+    handler(request, response);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  const entry: TestServer = {
+    port: typeof address === "object" && address ? address.port : 0,
+    hosts,
+    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+  };
+  servers.push(entry);
+  return entry;
+}
 
 describe("performHttpCheck", () => {
   it("reports a successful 200 response with a measured response time", async () => {
@@ -25,6 +62,7 @@ describe("performHttpCheck", () => {
     const outcome = await performHttpCheck(baseTarget, {
       allowPrivateTargets: true,
       fetchImpl,
+      lookup: publicLookup,
     });
 
     expect(outcome).toMatchObject({
@@ -35,9 +73,13 @@ describe("performHttpCheck", () => {
     });
     expect(typeof outcome.responseTimeMs).toBe("number");
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+    // Manual, not "follow": an automatically followed redirect is a
+    // second request the guard never saw. The hop loop in
+    // modules/monitors/egress.ts follows them, one validated hop at a
+    // time — see the redirect-hop tests below.
     expect(fetchImpl).toHaveBeenCalledWith(
       baseTarget.url,
-      expect.objectContaining({ method: "GET", redirect: "follow" }),
+      expect.objectContaining({ method: "GET", redirect: "manual" }),
     );
   });
 
@@ -47,6 +89,7 @@ describe("performHttpCheck", () => {
     const outcome = await performHttpCheck(baseTarget, {
       allowPrivateTargets: true,
       fetchImpl,
+      lookup: publicLookup,
     });
 
     expect(outcome).toMatchObject({
@@ -66,6 +109,7 @@ describe("performHttpCheck", () => {
     const outcome = await performHttpCheck(baseTarget, {
       allowPrivateTargets: true,
       fetchImpl,
+      lookup: publicLookup,
     });
 
     expect(outcome).toMatchObject({
@@ -88,6 +132,7 @@ describe("performHttpCheck", () => {
     const outcome = await performHttpCheck(baseTarget, {
       allowPrivateTargets: true,
       fetchImpl,
+      lookup: publicLookup,
     });
 
     expect(outcome).toMatchObject({
@@ -150,6 +195,7 @@ describe("performHttpCheck", () => {
       await performHttpCheck(baseTarget, {
         allowPrivateTargets: true,
         fetchImpl,
+        lookup: publicLookup,
       });
       expect(body.getReader).not.toHaveBeenCalled();
     });
@@ -226,6 +272,103 @@ describe("performHttpCheck", () => {
         error: null,
       });
       expect(fetchImpl).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("redirect hops", () => {
+    const redirect = (location: string) =>
+      new Response(null, { status: 302, headers: { location } });
+
+    it("refuses a redirect into loopback and never issues that request", async () => {
+      // The hole `redirect: "follow"` left open: the guard passed on
+      // `example.com`, and the transport then made a second request to
+      // wherever the 302 pointed — with nobody looking at it.
+      const fetchImpl = vi.fn(async () => redirect("http://localhost:1/admin"));
+
+      const outcome = await performHttpCheck(baseTarget, { fetchImpl });
+
+      expect(outcome).toEqual({
+        ok: false,
+        degraded: false,
+        statusCode: null,
+        responseTimeMs: null,
+        error: "Target resolves to a private address",
+      });
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    });
+
+    it("refuses a redirect to the cloud metadata address", async () => {
+      const fetchImpl = vi.fn(async () =>
+        redirect("http://169.254.169.254/latest/meta-data/iam/"),
+      );
+
+      const outcome = await performHttpCheck(baseTarget, {
+        // Even with private space allowed. Metadata is the floor.
+        allowPrivateTargets: true,
+        fetchImpl,
+        lookup: publicLookup,
+      });
+
+      expect(outcome.error).toBe("Target resolves to a cloud metadata address");
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    });
+
+    it("follows a validated redirect and judges the status it ends on", async () => {
+      const fetchImpl = vi
+        .fn()
+        .mockResolvedValueOnce(redirect("https://example.com/moved"))
+        .mockResolvedValueOnce(new Response("ok", { status: 200 }));
+
+      const outcome = await performHttpCheck(baseTarget, {
+        allowPrivateTargets: true,
+        fetchImpl,
+        lookup: publicLookup,
+      });
+
+      expect(outcome).toMatchObject({ ok: true, statusCode: 200 });
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      expect(fetchImpl.mock.calls[1]?.[0]).toBe("https://example.com/moved");
+    });
+
+    it("measures a real endpoint over the pinned transport", async () => {
+      // Every other test here injects a transport, so none of them
+      // would notice if the shipped one stopped working. This one
+      // drives the whole path — guard, pinned connection, judgment —
+      // over a real socket, which is what production does.
+      const server = await openServer((_request, response) => {
+        response.writeHead(200, { "content-type": "text/plain" });
+        response.end("all healthy here");
+      });
+
+      const outcome = await performHttpCheck(
+        {
+          ...baseTarget,
+          url: `http://127.0.0.1:${server.port}/health`,
+          bodyKeyword: "healthy",
+        },
+        { allowPrivateTargets: true },
+      );
+
+      expect(outcome).toMatchObject({ ok: true, statusCode: 200, error: null });
+      expect(typeof outcome.responseTimeMs).toBe("number");
+      expect(server.hosts).toEqual([`127.0.0.1:${server.port}`]);
+    });
+
+    it("asks the transport for manual redirects on every hop", async () => {
+      const fetchImpl = vi
+        .fn()
+        .mockResolvedValueOnce(redirect("https://example.com/moved"))
+        .mockResolvedValueOnce(new Response("ok", { status: 200 }));
+
+      await performHttpCheck(baseTarget, {
+        allowPrivateTargets: true,
+        fetchImpl,
+        lookup: publicLookup,
+      });
+
+      for (const call of fetchImpl.mock.calls) {
+        expect((call[1] as RequestInit).redirect).toBe("manual");
+      }
     });
   });
 });

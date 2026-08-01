@@ -18,6 +18,17 @@ const nextConfig: NextConfig = {
   // builds; disabling it in development too keeps every screen clean.
   // To bring it back locally: devIndicators: { position: "bottom-right" }
   devIndicators: false,
+  experimental: {
+    serverActions: {
+      // The Uptime Kuma importer uploads a `kuma.db` through a server
+      // action, and the default limit is 1MB. Set above the importer's
+      // own 64MB ceiling on purpose: the framework rejecting the body
+      // produces an error with no advice in it, where the action's
+      // check produces a sentence that says what to do about a database
+      // full of heartbeat history.
+      bodySizeLimit: "80mb",
+    },
+  },
   async headers() {
     return [{ source: "/(.*)", headers: securityHeaders }];
   },

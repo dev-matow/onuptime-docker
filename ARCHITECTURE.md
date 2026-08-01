@@ -6,10 +6,18 @@ For setup and product docs, see the [README](README.md).
 ## 1. System overview
 
 Vigil is an uptime-monitoring and incident-management platform: organizations
-create monitors of any of six types — HTTP(S), TCP port, ping, DNS record,
-TLS-certificate expiry, domain expiry — a background worker probes them on an
+create monitors of any of forty check types — HTTP(S), TCP port, ping, DNS
+record, TLS-certificate expiry, domain expiry, PostgreSQL, MySQL/MariaDB,
+MongoDB, Redis, Docker, MQTT, SMTP, JSON query, a real browser engine, and
+twenty-two more spanning messaging, directory, mail and infrastructure
+protocols, plus push heartbeats, groups and manual status — a background worker
+probes
+them on an
 adapting schedule, failures open incidents automatically, and a public status
-page keeps customers informed. AI (Anthropic API) drafts postmortems and public updates from
+page keeps customers informed. Three of the types are not probes at all: a
+push heartbeat whose silence is what gets measured, a group derived from
+other monitors' states, and a manual status an operator sets by hand
+(`docs/MONITOR-KINDS.md`). AI (Anthropic API) drafts postmortems and public updates from
 incident timelines.
 
 The deployment shape is deliberately small — **two processes and one
@@ -71,7 +79,7 @@ is contained.
 ```
 src/
 ├── app/            # Next.js routes: thin — auth guard, parse, call service
-│   ├── (auth)/     #   sign-in / sign-up
+│   ├── (auth)/     #   sign-in / sign-up / password reset
 │   ├── (app)/      #   authenticated dashboard (sidebar shell)
 │   ├── status/     #   public status pages (no auth, ISR-cached)
 │   └── api/auth/   #   Better Auth handler
@@ -420,7 +428,13 @@ confirmation email can't be weaponised.
 service (drizzle migrations), the standalone Next.js image, and the worker
 image. CI (GitHub Actions) runs lint → typecheck → unit+integration tests
 against a Postgres service → build, then Playwright e2e against a production
-build, then builds both Docker images.
+build, then builds both Docker images. Two more jobs guard the things a
+green suite cannot see: `core-gate` strips the commercial code and proves
+what is left still builds, migrates onto an empty database and serves
+(`scripts/edition-gate.sh`), and `public-facts` fails if a number this
+project publishes disagrees with the repository it describes
+(`scripts/public-facts.mjs`). Both must be required in branch protection —
+a job that is allowed to fail is a job that is not a gate.
 
 The worker image runs TypeScript via `tsx` rather than a bundling step —
 a documented trade-off: a slightly larger image in exchange for zero build

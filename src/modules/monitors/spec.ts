@@ -22,6 +22,7 @@ export function toCheckSpec(monitor: Monitor): CheckSpec {
     url: monitor.url,
     port: monitor.port,
     method: monitor.method,
+    intervalSeconds: monitor.intervalSeconds,
     timeoutMs: monitor.timeoutMs,
     degradedThresholdMs: monitor.degradedThresholdMs,
     expectedStatusCode: monitor.expectedStatusCode,

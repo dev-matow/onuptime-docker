@@ -50,6 +50,7 @@ const sent: EmailMessage[] = [];
 setEmailTransport({
   async send(message) {
     sent.push(message);
+    return { status: "delivered", providerMessageId: null } as const;
   },
 });
 beforeEach(() => {
@@ -59,6 +60,7 @@ afterAll(() => {
   setEmailTransport({
     async send() {
       /* no-op: drop mail once this file's suites finish */
+      return { status: "delivered", providerMessageId: null } as const;
     },
   });
 });

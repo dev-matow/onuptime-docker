@@ -1,0 +1,139 @@
+
+[1m── build Core tree in /home/s8kur/Claude/VibeCoding/.vigil-gate-utbZNU ─────────────────────────────[0m
+strip-ee: removed 25 commercial file(s)
+  - src/app/(app)/monitors/[id]/recovery-card.tsx
+  - src/app/(app)/settings/escalation/actions.ts
+  - src/app/(app)/settings/escalation/page.tsx
+  - src/app/(app)/settings/escalation/policy-manager.tsx
+  - src/app/(app)/settings/escalation/schedule-manager.tsx
+  - src/components/org-switcher.tsx
+  - src/db/schema/oncall.ts
+  - src/db/schema/recovery.ts
+  - src/modules/notifications/channels.ts
+  - src/modules/oncall/rotation.ts
+  - src/modules/oncall/service.ts
+  - src/modules/recovery/engine.ts
+  - src/modules/recovery/schemas.ts
+  - src/modules/recovery/service.ts
+  - src/worker/ee-incident-handler.ts
+  - src/worker/jobs/escalation.ts
+  - src/worker/jobs/recovery.ts
+  - tests/integration/escalation-flow.test.ts
+  - tests/integration/oncall-service.test.ts
+  - tests/integration/recovery-alerting.test.ts
+  - tests/integration/recovery-flow.test.ts
+  - tests/integration/recovery-service.test.ts
+  - tests/unit/oncall-rotation.test.ts
+  - tests/unit/public-facts.test.ts
+  - tests/unit/recovery-engine.test.ts
+strip-ee: dropped 835 marked line(s)
+  ~ drizzle/0002_first_slayback.sql (51)
+  ~ drizzle/0003_nifty_luminals.sql (3)
+  ~ drizzle/0007_little_stardust.sql (73)
+  ~ drizzle/0010_sharp_vampiro.sql (24)
+  ~ drizzle/0011_repoint_orphaned_escalation_steps.sql (23)
+  ~ drizzle/0012_ordinary_randall.sql (35)
+  ~ scripts/seed-demo.ts (265)
+  ~ src/app/(app)/monitors/[id]/monitor-detail-actions.tsx (3)
+  ~ src/app/(app)/monitors/[id]/page.tsx (142)
+  ~ src/app/(app)/monitors/actions.ts (79)
+  ~ src/app/(app)/monitors/create-monitor-dialog.tsx (8)
+  ~ src/app/(app)/monitors/edit-monitor-dialog.tsx (3)
+  ~ src/app/(app)/monitors/monitor-form.tsx (43)
+  ~ src/app/(app)/monitors/page.tsx (14)
+  ~ src/components/app-sidebar.tsx (4)
+  ~ src/db/schema/index.ts (2)
+  ~ src/lib/editions.ts (1)
+  ~ src/modules/monitors/schemas.ts (1)
+  ~ src/worker/index.ts (51)
+  ~ src/worker/jobs/retention.ts (10)
+built 496 files
+
+[1m── export to /tmp/claude-1000/-home-s8kur-Claude-VibeCoding/659b8c14-2df9-4bc6-b47f-ebd702f4d8e3/scratchpad/core-final ─────────────────────────────[0m
+exported before dependencies or build output existed
+
+[1m── lint ─────────────────────────────[0m
+npm notice run vigil-core@1.13.0 lint
+npm notice run eslint .
+
+/home/s8kur/Claude/VibeCoding/.vigil-gate-utbZNU/src/components/app-sidebar.tsx
+  38:3  warning  'organizationName' is defined but never used  @typescript-eslint/no-unused-vars
+  39:3  warning  'role' is defined but never used              @typescript-eslint/no-unused-vars
+
+/home/s8kur/Claude/VibeCoding/.vigil-gate-utbZNU/src/worker/index.ts
+  20:8  warning  'EscalationStepJob' is defined but never used    @typescript-eslint/no-unused-vars
+  22:8  warning  'RecoveryEscalateJob' is defined but never used  @typescript-eslint/no-unused-vars
+  23:8  warning  'RecoveryExecuteJob' is defined but never used   @typescript-eslint/no-unused-vars
+  24:8  warning  'RecoveryVerifyJob' is defined but never used    @typescript-eslint/no-unused-vars
+
+/home/s8kur/Claude/VibeCoding/.vigil-gate-utbZNU/src/worker/jobs/retention.ts
+  10:7  warning  'STALE_ATTEMPT_HOURS' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+/home/s8kur/Claude/VibeCoding/.vigil-gate-utbZNU/tests/probe-lookup.ts
+  16:3  warning  '_hostname' is defined but never used  @typescript-eslint/no-unused-vars
+  23:3  warning  '_hostname' is defined but never used  @typescript-eslint/no-unused-vars
+
+✖ 9 problems (0 errors, 9 warnings)
+
+
+[1m── typecheck ─────────────────────────────[0m
+npm notice run vigil-core@1.13.0 typecheck
+npm notice run next typegen && tsc --noEmit
+Generating route types...
+✓ Types generated successfully
+
+[1m── test ─────────────────────────────[0m
+npm notice run vigil-core@1.13.0 npx
+npm notice run 'vitest' run
+The plugin "vite-tsconfig-paths" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.
+
+ RUN  v4.1.9 /home/s8kur/Claude/VibeCoding/.vigil-gate-utbZNU
+
+{"level":50,"time":1785615976022,"outcome":"retryable","err":"provider returned 503","msg":"password reset email was not sent"}
+{"level":50,"time":1785615976137,"outcome":"permanent","err":"recipient rejected","msg":"password reset email was not sent"}
+{"level":50,"time":1785615976145,"outcome":"permanent","err":"recipient rejected","msg":"password reset email was not sent"}
+
+ Test Files  80 passed (80)
+      Tests  2241 passed (2241)
+   Start at  23:26:11
+   Duration  19.11s (transform 6.33s, setup 1.10s, import 58.44s, tests 49.12s, environment 11ms)
+
+
+[1m── build ─────────────────────────────[0m
+├ ƒ /incidents
+├ ƒ /incidents/[id]
+├ ƒ /invitations/[id]
+├ ƒ /monitors
+├ ƒ /monitors/[id]
+├ ƒ /onboarding
+├ ○ /reset-password
+├ ƒ /settings
+├ ƒ /settings/audit
+├ ƒ /settings/import
+├ ƒ /settings/members
+├ ƒ /settings/notifications
+├ ○ /sign-in
+├ ○ /sign-up
+├ ƒ /status-page
+├ ƒ /status/[slug]
+├ ƒ /status/[slug]/confirm
+└ ƒ /status/[slug]/unsubscribe
+
+
+ƒ Proxy (Middleware)
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+
+
+[1m── migrate-from-empty-db ─────────────────────────────[0m
+npm notice run vigil-core@1.13.0 db:migrate
+npm notice run drizzle-kit migrate
+No config path provided, using default 'drizzle.config.ts'
+Reading config file '/home/s8kur/Claude/VibeCoding/.vigil-gate-utbZNU/drizzle.config.ts'
+Using 'pg' driver for database querying
+[⣷] applying migrations...[2K[1G[✓] migrations applied successfully!
+[1m── smoke-test ─────────────────────────────[0m
+
+[32m✓ GATE GREEN[0m  Core strips, lints, typechecks, tests,
+  builds, migrates onto an empty database and serves. (d35436b_4058423)

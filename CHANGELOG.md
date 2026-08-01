@@ -6,6 +6,62 @@ free edition; entries for commercial-only features live in the other
 repository, because they are not in this one and listing them here would
 describe software you do not have.
 
+## 1.13.0 — 2026-08-01
+
+Trust, and a migration path off Uptime Kuma. Everything below is in
+Core: the check types, the importer, the uptime change and the
+half-second plane are not commercial features.
+
+### Added
+
+- **Twenty-six check types, 14 → 40**: SSH, FTP, IMAP, LDAP, NTP,
+  Memcached, Elasticsearch, UDP, gRPC, Kafka, RabbitMQ, SQL Server,
+  Oracle, RADIUS, SNMP, WebSocket, Steam, GameDig, Tailscale, Globalping,
+  systemd services, a real-browser check and SIP — plus `push`, `group`
+  and `manual`, three monitors that dial nothing. A push heartbeat
+  endpoint, groups that derive their state from members, and a status an
+  operator sets by hand.
+- **Import from Uptime Kuma 2.4.0.** Upload your `kuma.db`, review what
+  will happen, confirm. All 31 of Kuma's selectable monitor types map,
+  and every one of its 111 monitor columns is classified — nothing
+  leaves Kuma without a line in the report saying what became of it.
+- **Half-second checks**, on a data plane of their own so they cannot
+  starve the ordinary scheduler or write a row per probe forever. 500 ms
+  is a check interval, not a detection time; the measured limits are
+  published rather than rounded up.
+- **A durable outbox for notifications**: the decision to alert is
+  written in the same transaction as the state change that caused it, so
+  a crash between deciding and sending delivers late instead of never.
+- **Export and import monitors** as JSON with credentials masked,
+  **password reset**, and **backup/restore scripts** that refuse to
+  restore over a database that already has tables.
+
+### Changed
+
+- **Uptime is weighted by duration, not by how many rows agree.** Two
+  monitors watching the same outage at different intervals now report
+  the same uptime. Time nobody measured is excluded rather than counted
+  as up. **Your published percentages will move.**
+- **Postgres enforces one active incident per monitor** instead of a
+  read followed by a write. The migration reconciles duplicates an older
+  install already has, keeping the oldest and closing the rest with the
+  reason on their timeline.
+- **One module decides every outbound request**, revalidating each
+  redirect hop and pinning the socket to the address it checked.
+- **An edit that never mentions a setting no longer clears it.**
+
+### Fixed
+
+- `tls-expiry` returned nothing for self-signed and already-expired
+  certificates — the cases it exists to catch — because the handshake
+  was validated before the certificate could be read.
+- A monitor created by the importer could reach a private address that
+  the create form would have refused.
+- The worker could not start on a fresh database.
+- A monitor enrolled in the half-second plane could be starved forever.
+- On an account with more than one status page, the second page's
+  settings controls drove the first page's.
+
 ## 1.12.0 — 2026-07-28
 
 ### Added

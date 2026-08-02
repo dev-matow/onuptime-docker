@@ -1,7 +1,7 @@
 # Vigil Core
 
 **Self-hosted uptime monitoring, incidents and status pages.** Two
-processes and one Postgres — no Redis, no queue broker, no agents to
+processes and one Postgres: no Redis, no queue broker, no agents to
 install.
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
@@ -23,30 +23,30 @@ install.
   And three that dial nothing: push heartbeats, groups derived from other
   monitors, and a status an operator sets by hand. Adding one is five
   files and no dispatch to edit. Everything but PostgreSQL speaks the
-  wire protocol directly, so **not one of them added a dependency** —
+  wire protocol directly, so **not one of them added a dependency**:
   twenty-six types arrived since 1.12.0 and `package.json` is unchanged.
-- **Assertions** — expected status, response-time thresholds, body
+- **Assertions**: expected status, response-time thresholds, body
   contains or does not contain a keyword, DNS record values, days left
   on a certificate. A 200 that serves an error page is caught.
 - **Scheduling that adapts.** The interval you set is a baseline: a
   suspicious monitor is probed harder and a steady one backs off. The
   minimum is two seconds on the ordinary scheduler, or 500 ms for
   HTTP, JSON and TCP monitors on the high-frequency plane.
-- **Incidents** — opened and resolved by the check loop, with a failure
+- **Incidents**: opened and resolved by the check loop, with a failure
   window measured in seconds rather than a count of checks. Severity, a
   lifecycle, an append-only timeline, internal-only notes and a
   markdown postmortem.
-- **Status pages** — as many as you like, each with its own URL,
+- **Status pages**: as many as you like, each with its own URL,
   components, 90-day uptime bars and incident history. Public, private
   or password-protected, with double-opt-in email subscribers.
-- **Team and roles** — owner, admin, responder, viewer. Viewers are
+- **Team and roles**: owner, admin, responder, viewer. Viewers are
   read-only at the server boundary, not by hiding a button.
-- **Audit trail** — every mutation recorded with actor, target and
+- **Audit trail**: every mutation recorded with actor, target and
   metadata, and a page to read it on.
-- **Alerts** — email plus HMAC-signed webhooks that auto-format for
+- **Alerts**: email plus HMAC-signed webhooks that auto-format for
   Slack and Discord.
 
-No licence key, no telemetry, no expiry, and no cap on monitors, users,
+No license key, no telemetry, no expiry, and no cap on monitors, users,
 organizations' members or retention.
 
 ## Quick start
@@ -61,7 +61,7 @@ docker compose up -d
 Then open http://localhost:3000. [QUICK_START.md](QUICK_START.md) has the
 bare-metal path and the first-monitor walkthrough.
 
-## Honest limitations
+## Limitations
 
 Worth knowing before you deploy:
 
@@ -69,7 +69,7 @@ Worth knowing before you deploy:
   host_ could not reach it. The failure window filters blips, but this is
   not multi-region confirmation and never claims to be. Run Vigil outside
   the blast radius of what it watches.
-- **Four notification channels** — email, webhook, and the Slack and
+- **Four notification channels**: email, webhook, and the Slack and
   Discord formats of that webhook. Uptime Kuma 2.4.0 ships 94 notification
   providers. This is the gap that is still real: if you page through
   PagerDuty, Opsgenie, Telegram or any of the other ninety, Kuma routes
@@ -89,9 +89,9 @@ Worth knowing before you deploy:
 Vigil Core is not maintained by hand. It is generated from the
 commercial edition's tree by deleting every file and statement marked
 `@edition:ee`. That same script runs in a required job on every push and
-pull request there — it strips the tree, then lints, typechecks, tests,
+pull request there: it strips the tree, then lints, typechecks, tests,
 builds, migrates onto an empty Postgres and serves HTTP from what is
-left — so Core cannot quietly fall behind. If it did, the build would be
+left, so Core cannot quietly fall behind. If it did, the build would be
 red before the release existed.
 
 Both editions are cut from the same commit and carry the same version
@@ -103,7 +103,7 @@ a pull request always has somewhere to land.
 
 ## Contributing
 
-[CONTRIBUTING.md](CONTRIBUTING.md) — there is no CLA and no copyright
+[CONTRIBUTING.md](CONTRIBUTING.md): there is no CLA and no copyright
 assignment, and it says plainly what Apache-2.0 lets the maintainer do
 with your contribution. Security issues go privately to
 [SECURITY.md](SECURITY.md), not to the issue tracker.
@@ -125,13 +125,13 @@ Core does not have, none of which Uptime Kuma has either:
   you choose, with a quorum deciding the verdict. Vigil ships the agent
   and hosts nothing.
 
-Everything else — every check type, the scheduler, the ledger, the audit
-page, subscribers, password-protected pages — is here, free, and stays
+Everything else (every check type, the scheduler, the ledger, the audit
+page, subscribers, password-protected pages) is here, free, and stays
 here. [What we commit to, in writing](https://vigil-uptime.com/commitments.html).
 
 ## License
 
 [Apache-2.0](LICENSE). Run it, modify it, keep your changes private, run
 it for clients, sell it. There is no copyleft obligation. Vigil Core was
-AGPL-3.0 through 1.0.1; copies obtained under that licence remain
+AGPL-3.0 through 1.0.1; copies obtained under that license remain
 available under it.

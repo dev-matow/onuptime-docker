@@ -1,7 +1,18 @@
 name: vigil
 
+# The three long-running services restart; `migrate` deliberately does
+# not, because it is a one-shot job and `on-failure` would loop it
+# against a database it cannot migrate. A monitoring tool that stays down
+# after a crash or a host reboot is worse than no monitoring at all: it
+# is a green dashboard nobody is updating, and the silence reads as
+# health. The probe agents have carried this since 1.14.0; the services
+# they report to had not.
+x-service-restart: &restart
+  restart: unless-stopped
+
 services:
   postgres:
+    <<: *restart
     # Postgres 18+ required: the schema uses the native uuidv7() function.
     image: postgres:18-alpine
     environment:
@@ -31,6 +42,7 @@ services:
         condition: service_healthy
 
   app:
+    <<: *restart
     build:
       context: .
       target: web
@@ -69,6 +81,7 @@ services:
         condition: service_completed_successfully
 
   worker:
+    <<: *restart
     build:
       context: .
       target: worker

@@ -850,6 +850,63 @@ describe("the pinned transport", () => {
     expect(response.headers.get("content-encoding")).toBeNull();
   });
 
+  it("survives a HEAD whose headers claim an encoding and carry no body", async () => {
+    // The crash this exists for: Cloudflare answers HEAD with
+    // `content-encoding: br` and zero bytes, because the header
+    // describes the GET it is standing in for. The transport built a
+    // BrotliDecompress for it anyway, piped an empty message into it,
+    // and `pipe()` does not forward errors — so the decoder hit EOF at
+    // byte zero, emitted `Z_BUF_ERROR` on an EventEmitter nobody was
+    // listening to, and took the worker process down with it. No
+    // restart policy on that container, so monitoring simply stopped.
+    //
+    // One seeded monitor in `scripts/seed-demo.ts` is exactly this
+    // request, which means it reproduced on every fresh install within
+    // two minutes.
+    const server = await startServer((_request, response) => {
+      response.writeHead(200, {
+        "content-encoding": "br",
+        "content-type": "text/html",
+      });
+      response.end();
+    });
+
+    const { response } = await egressFetch(
+      `http://pinned.test:${server.port}/`,
+      { method: "HEAD" },
+      { policy: ALLOW_PRIVATE, lookup: lookupOf("127.0.0.1") },
+    );
+
+    expect(response.status).toBe(200);
+    // Long enough for an unhandled 'error' event to have been raised on
+    // a later tick, which is how this one killed the process.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+
+  it("reports a truncated compressed body instead of crashing", async () => {
+    // The same decoder, reached the other way: a server that announces
+    // gzip and then hangs up mid-stream. The read must fail. The
+    // process must not.
+    const gzipped = await promisify(zlib.gzip)('{"status":"healthy"}');
+    const server = await startServer((_request, response) => {
+      // Headers and a partial body first, flushed, so the client has a
+      // response in hand. Hanging up in the same tick would fail the
+      // request itself and prove nothing about the decoder.
+      response.writeHead(200, { "content-encoding": "gzip" });
+      response.write(gzipped.subarray(0, 10), () =>
+        setTimeout(() => response.destroy(), 20),
+      );
+    });
+
+    const { response } = await egressFetch(
+      `http://pinned.test:${server.port}/health`,
+      {},
+      { policy: ALLOW_PRIVATE, lookup: lookupOf("127.0.0.1") },
+    );
+    await expect(response.text()).rejects.toThrow();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+
   it("sends a POST body with its content length", async () => {
     const server = await startServer((_request, response) => {
       response.writeHead(200);

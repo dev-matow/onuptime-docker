@@ -70,7 +70,7 @@ The request performs exactly one write: the monitor's row in
 `monitor_heartbeats`. It does not judge, open incidents, resolve them,
 write to the ledger or send anything.
 
-That is not an optimisation. The endpoint is unauthenticated by
+That is not an optimization. The endpoint is unauthenticated by
 construction, possession of the token is the whole of the
 authentication, and every consequence attached to it becomes something
 a leaked token can make Vigil do to its own operators. The observation is

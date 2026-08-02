@@ -100,7 +100,7 @@ coverage gaps that were never gaps in evidence.
 ## Paused monitors
 
 A paused monitor writes no checks, so a paused stretch produces exactly
-one thing: uncovered time. That is the honest answer. Vigil has no
+one thing: uncovered time. Vigil has no
 evidence about a period it was told not to look at, and it needs no
 pause-history table to say it.
 

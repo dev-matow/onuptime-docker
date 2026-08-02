@@ -558,22 +558,44 @@ function webResponse(
   const status = message.statusCode ?? 502;
   const headers = responseHeaders(message.headers);
 
+  // 204/205/304 may not carry a body at all, and a HEAD response has
+  // none to carry. `new Response` throws on the first three rather than
+  // ignoring them.
+  const bodyless =
+    method === "HEAD" || status === 204 || status === 205 || status === 304;
+
   let stream: Readable = message;
   const encoding = (message.headers["content-encoding"] ?? "").toLowerCase();
-  const decompressor = decompressorFor(encoding);
+  // Decode only what has bytes. A HEAD's `content-encoding` describes
+  // the GET it stands in for, not the zero bytes it actually sent, and
+  // Cloudflare among others sends exactly that. Building a decoder for
+  // it fed EOF to brotli at byte zero, which is a `Z_BUF_ERROR` — and
+  // `pipe()` does not forward errors, so it surfaced as an unhandled
+  // 'error' event and killed the process. `fetch` does not decompress a
+  // bodyless response either, so skipping it is also the compatible
+  // answer, and the encoding header stays because no decoding happened.
+  const decompressor = bodyless ? null : decompressorFor(encoding);
   if (decompressor) {
+    // Errors reach the caller through the web stream `Readable.toWeb`
+    // wraps this in, and a rejected `text()` is what a truncated body
+    // should be. This listener is the safety net for a decoder that
+    // errors after the reader is gone: still not a crash, still not a
+    // silent wrong answer, because nobody is reading by then.
+    decompressor.on("error", () => undefined);
     stream = message.pipe(decompressor);
+    // `pipe()` forwards bytes and nothing else. A server that hangs up
+    // mid-body errors `message`, the decoder never hears about it, and
+    // the read waits for an end that is not coming — a check job that
+    // hangs rather than reporting a failure. Destroying the decoder with
+    // the cause makes the reader reject, which is what a truncated body
+    // is.
+    message.on("error", (error) => decompressor.destroy(error));
     // The body is no longer encoded and no longer that length; leaving
     // the headers on would describe a body that is not there.
     headers.delete("content-encoding");
     headers.delete("content-length");
   }
 
-  // 204/205/304 may not carry a body at all, and a HEAD response has
-  // none to carry. `new Response` throws on the first three rather than
-  // ignoring them.
-  const bodyless =
-    method === "HEAD" || status === 204 || status === 205 || status === 304;
   if (bodyless) stream.resume();
 
   const response = new Response(

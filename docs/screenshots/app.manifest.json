@@ -1,0 +1,80 @@
+{
+  "_": "Written by scripts/capture-screenshots.ts. Verified by scripts/probe-shots-check.mjs.",
+  "capturedAt": "2026-08-02",
+  "sourceCommit": "c4a0e18c329f3fd414e89fdc794e40fcf8eed2e1",
+  "base": "http://localhost:3002",
+  "shots": [
+    {
+      "file": "branding.png",
+      "scenario": "branding",
+      "command": null,
+      "shows": "Status-page settings, including the white-label branding toggle",
+      "viewport": "1440x900",
+      "bytes": 69549,
+      "sha256": "3a1774920296f265673ed4dbceb1fd7e7ad9ae86614cf30eff220d1f6ed275b6"
+    },
+    {
+      "file": "dashboard.png",
+      "scenario": "dashboard",
+      "command": null,
+      "shows": "The dashboard: monitor states, open incidents and the setup checklist on seeded data",
+      "viewport": "1440x900",
+      "bytes": 81906,
+      "sha256": "0fbdb988894f3da4ac1c3f06feaaa5219af45f4c31a213f57d826f04132fb5bc"
+    },
+    {
+      "file": "incident-detail.png",
+      "scenario": "incident-detail",
+      "command": null,
+      "shows": "An open incident: severity, lifecycle, and the append-only timeline",
+      "viewport": "1440x900",
+      "bytes": 111097,
+      "sha256": "a98c9152c6e7742724e07d50221ada0129dbeb0f4673a81e74df23cf0bf81a46"
+    },
+    {
+      "file": "kuma-import.png",
+      "scenario": "kuma-import",
+      "command": null,
+      "shows": "The Uptime Kuma importer: upload a kuma.db, read the dry-run report, then apply",
+      "viewport": "1440x900",
+      "bytes": 63249,
+      "sha256": "a371499b78041e3b8f78784d53c8160825a6101e2f53aa612fad778f8f70335e"
+    },
+    {
+      "file": "monitor-detail.png",
+      "scenario": "monitor-detail",
+      "command": null,
+      "shows": "A monitor's detail page: response-time chart, recent checks and configuration",
+      "viewport": "1440x900",
+      "bytes": 75450,
+      "sha256": "148773aaef84cce6eabf840406385d79c70e15d81528b2c3290978f3818ee29d"
+    },
+    {
+      "file": "monitor-types.png",
+      "scenario": "monitor-types",
+      "command": null,
+      "shows": "The check-type selector on the create-monitor form, one entry per registered type",
+      "viewport": "1440x900",
+      "bytes": 160870,
+      "sha256": "f2e245574d95280a1c6ad6f0e87761ca1b64618519ec58be28ec64b7b9bf6124"
+    },
+    {
+      "file": "roles.png",
+      "scenario": "roles",
+      "command": null,
+      "shows": "The team page: owner, admin, responder and viewer on separate accounts",
+      "viewport": "1440x900",
+      "bytes": 49505,
+      "sha256": "408c36a68b83f690f2ac68ee8c6c76944167b63c254dd7404baa30210e669f55"
+    },
+    {
+      "file": "status-page.png",
+      "scenario": "status-page",
+      "command": null,
+      "shows": "The public status page: components, 90-day uptime bars and incident history",
+      "viewport": "1440x900",
+      "bytes": 63349,
+      "sha256": "d9b78463c22aff16fb3de626d50b7d2d211ae30aaf6f154d238c289141aaf653"
+    }
+  ]
+}

@@ -43,7 +43,7 @@ npm run worker:dev          # terminal 2, background checks
 ## Verify the install
 
 ```bash
-npm run typecheck && npm run lint && npm test   # 2752 tests, ~5s
+npm run typecheck && npm run lint && npm test   # 2743 tests, ~5s
 ```
 
 ## Turn on automatic recovery (optional, ~5 minutes)
@@ -63,15 +63,20 @@ agents you run. Watch a quorum decide on this machine before deploying
 one anywhere:
 
 ```bash
-npm run demo:probes    # mints three labelled probes, a monitor and a policy
-# paste the three tokens into .env, then
-docker compose -f docker-compose.yml -f docker-compose.probes.yml up -d
-npx tsx scripts/probe-demo.ts watch
+./scripts/probe-demo.sh up    # builds, mints, enrols, waits for a decision
 ```
 
-Stop the target and one incident opens, not three. Disconnect one probe
-and the monitor goes degraded with the dissenter named. Stop two and the
-verdict is `insufficient quorum`, which pages nobody.
+Then one word each:
+
+```bash
+./scripts/probe-demo.sh outage      # target down -> 3 of 3 agree, one incident
+./scripts/probe-demo.sh partition   # one probe's route cut -> degraded, nobody paged
+./scripts/probe-demo.sh silence     # two probes stopped -> no conclusion, no incident
+./scripts/probe-demo.sh restore     # back to green
+```
+
+The third is the one to watch. The target is healthy the whole time, and
+a fleet that went quiet must never read as an outage.
 
 Three agents on one host share a kernel and a route, so this proves the
 machinery and nothing about reachability. Remote rounds need an interval

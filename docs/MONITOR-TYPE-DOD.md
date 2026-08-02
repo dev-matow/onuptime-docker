@@ -9,9 +9,9 @@ conformance test does not prove it. A hand-written table proves less
 still: it records what someone believed on the day they typed it. So
 every cell below is answered by looking at the code.
 
-**What a "yes" means, and what it does not.** It means the artefact
+**What a "yes" means, and what it does not.** It means the artifact
 exists: the file is there, the type appears in that suite, the test
-stands up a real server. It does not mean the artefact is good. This
+stands up a real server. It does not mean the artifact is good. This
 matrix can prove absence; it cannot prove quality. Reviewers still
 review.
 

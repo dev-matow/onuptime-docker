@@ -11,7 +11,7 @@ npm run db:migrate
 ```
 
 Migrations are ordered SQL and always additive within a major version.
-Take a backup first anyway — `pg_dump -Fc` costs seconds and the one
+Take a backup first anyway: `pg_dump -Fc` costs seconds and the one
 time you need it is the one time you skipped it.
 
 ## 1.13.0 → 1.14.0
@@ -51,7 +51,7 @@ commit now and share one migration lineage, which is the whole reason
 ## Rolling back
 
 A release you have already migrated cannot be rolled back by checking
-out the old tag — the schema has moved. Restore the dump you took:
+out the old tag; the schema has moved. Restore the dump you took:
 
 ```bash
 pg_restore --clean --if-exists -d "$DATABASE_URL" vigil-1.0.x-backup.dump
@@ -65,5 +65,5 @@ everybody out and invalidates every unsubscribe link you have mailed.
 
 Core and the commercial edition always carry the same version, because
 they are cut from the same commit. If Core's version ever trails, the
-pipeline that produces it is broken — that is a bug worth reporting, and
+pipeline that produces it is broken; that is a bug worth reporting, and
 it is visible from outside without trusting anybody's word for it.

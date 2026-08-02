@@ -1,23 +1,84 @@
 import "dotenv/config";
 
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { and, eq, ne } from "drizzle-orm";
 
-import { chromium } from "@playwright/test";
+import { chromium, type Locator, type Page } from "@playwright/test";
 
 import { db } from "@/db";
 import { incidents, monitors, organization } from "@/db/schema";
 import { DEMO_ORG, DEMO_PASSWORD, DEMO_USERS } from "@/lib/demo";
 
 /**
- * Captures the four marketing screenshots (1440×900) used by the README
- * and the landing page. Requires a running app (`npm run dev` or a
- * production build) seeded with `npm run db:seed`.
+ * Every application screenshot the README, the docs and the landing page
+ * publish, captured from a running build seeded with the demo data.
  *
- *   npm run screenshots
+ *   npm run db:seed && npm run demo:agency && npm run demo:probes-seed
+ *   npm run screenshots        # against a production build on :3000
+ *
+ * Writes `docs/screenshots/app.manifest.json` beside the files, in the
+ * same shape as `probes.manifest.json`: sha256, byte size, viewport and
+ * the commit the capture ran at. `npm run shots:check` reads both back.
+ *
+ * The remote-probe captures (fleet, policy editor, the four quorum
+ * outcomes) are NOT here: they need real agents and a controlled
+ * partition, which is `scripts/capture-probe-screenshots.ts` against
+ * `./scripts/probe-demo.sh up`.
  */
 
 const BASE = process.env.APP_URL ?? "http://localhost:3000";
 const OUT = "docs/screenshots";
+const MANIFEST = join(OUT, "app.manifest.json");
+const VIEWPORT = { width: 1440, height: 900 };
+
+interface Shot {
+  file: string;
+  scenario: string;
+  command: string | null;
+  shows: string;
+  viewport: string;
+  bytes: number;
+  sha256: string;
+}
+
+const shots: Shot[] = [];
+
+function sha256(path: string): string {
+  return createHash("sha256").update(readFileSync(path)).digest("hex");
+}
+
+function headCommit(): string {
+  // The gate's exported tree is not a git repository, so a capture run
+  // inside it names its source commit explicitly.
+  if (process.env.VIGIL_SOURCE_COMMIT) return process.env.VIGIL_SOURCE_COMMIT;
+  return execFileSync("git", ["rev-parse", "HEAD"], {
+    encoding: "utf8",
+  }).trim();
+}
+
+async function capture(
+  target: Locator | Page,
+  file: string,
+  shows: string,
+): Promise<void> {
+  const path = join(OUT, file);
+  await target.screenshot({ path });
+  shots.push({
+    file,
+    scenario: file.replace(/\.png$/, ""),
+    command: null,
+    shows,
+    viewport: `${VIEWPORT.width}x${VIEWPORT.height}`,
+    bytes: readFileSync(path).byteLength,
+    sha256: sha256(path),
+  });
+  console.log(`captured ${file}`);
+}
+
 
 async function resolveIds() {
   const org = await db.query.organization.findFirst({
@@ -26,13 +87,17 @@ async function resolveIds() {
   });
   if (!org) throw new Error("Demo org not found, run `npm run db:seed` first.");
 
-  const gateway = await db.query.monitors.findFirst({
-    where: and(
-      eq(monitors.organizationId, org.id),
-      eq(monitors.name, "API Gateway"),
-    ),
-    columns: { id: true },
-  });
+  const byName = async (name: string) =>
+    db.query.monitors.findFirst({
+      where: and(
+        eq(monitors.organizationId, org.id),
+        eq(monitors.name, name),
+      ),
+      columns: { id: true },
+    });
+
+  const gateway = await byName("API Gateway");
+  const auth = await byName("Auth Service");
   const ongoing = await db.query.incidents.findFirst({
     where: and(
       eq(incidents.organizationId, org.id),
@@ -40,42 +105,123 @@ async function resolveIds() {
     ),
     columns: { id: true },
   });
-  if (!gateway || !ongoing) {
+  if (!gateway || !auth || !ongoing) {
     throw new Error("Demo data incomplete, re-run `npm run db:seed`.");
   }
-  return { monitorId: gateway.id, incidentId: ongoing.id };
+  return {
+    monitorId: gateway.id,
+    recoveryMonitorId: auth.id,
+    incidentId: ongoing.id,
+  };
 }
 
-async function main() {
-  const { monitorId, incidentId } = await resolveIds();
-
-  const browser = await chromium.launch();
-  const page = await browser.newPage({
-    viewport: { width: 1440, height: 900 },
-  });
-
+async function signIn(page: Page) {
   await page.goto(`${BASE}/sign-in`);
   await page.getByLabel("Email").fill(DEMO_USERS.owner.email);
   await page.getByLabel("Password").fill(DEMO_PASSWORD);
   await page.getByRole("button", { name: "Sign in" }).click();
   await page.waitForURL("**/dashboard", { timeout: 20_000 });
+}
 
-  const shots: [string, string][] = [
-    ["/dashboard", "dashboard.png"],
-    [`/monitors/${monitorId}`, "monitor-detail.png"],
-    [`/incidents/${incidentId}`, "incident-detail.png"],
-    [`/status/${DEMO_ORG.slug}`, "status-page.png"],
-  ];
+async function fullPage(
+  page: Page,
+  path: string,
+  file: string,
+  shows: string,
+): Promise<void> {
+  await page.goto(`${BASE}${path}`);
+  await page.waitForSelector("h1", { timeout: 20_000 });
+  await page.waitForTimeout(900);
+  await capture(page, file, shows);
+}
 
-  for (const [path, file] of shots) {
-    await page.goto(`${BASE}${path}`);
-    await page.waitForSelector("h1", { timeout: 20_000 });
-    await page.waitForTimeout(900);
-    await page.screenshot({ path: `${OUT}/${file}` });
-    console.log(`captured ${file}`);
-  }
+async function main() {
+  const ids = await resolveIds();
+
+  const browser = await chromium.launch();
+  const page = await browser.newPage({ viewport: VIEWPORT });
+  await signIn(page);
+
+  await fullPage(
+    page,
+    "/dashboard",
+    "dashboard.png",
+    "The dashboard: monitor states, open incidents and the setup checklist on seeded data",
+  );
+  await fullPage(
+    page,
+    `/monitors/${ids.monitorId}`,
+    "monitor-detail.png",
+    "A monitor's detail page: response-time chart, recent checks and configuration",
+  );
+  await fullPage(
+    page,
+    `/incidents/${ids.incidentId}`,
+    "incident-detail.png",
+    "An open incident: severity, lifecycle, and the append-only timeline",
+  );
+  await fullPage(
+    page,
+    `/status/${DEMO_ORG.slug}`,
+    "status-page.png",
+    "The public status page: components, 90-day uptime bars and incident history",
+  );
+
+
+  // The check-type selector, open, on the create-monitor dialog. The
+  // point of the picture is the breadth of the list, so the capture is
+  // the viewport with the listbox open rather than a crop of the dialog
+  // (Radix renders the open listbox in a portal outside it).
+  await page.goto(`${BASE}/monitors`);
+  await page.getByRole("button", { name: "Create monitor" }).click();
+  await page.getByRole("combobox").first().click();
+  await page.waitForSelector('[role="listbox"]', { timeout: 10_000 });
+  await page.waitForTimeout(400);
+  await capture(
+    page,
+    "monitor-types.png",
+    "The check-type selector on the create-monitor form, one entry per registered type",
+  );
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+
+  await fullPage(
+    page,
+    "/settings/import",
+    "kuma-import.png",
+    "The Uptime Kuma importer: upload a kuma.db, read the dry-run report, then apply",
+  );
+  await fullPage(
+    page,
+    "/settings/members",
+    "roles.png",
+    "The team page: owner, admin, responder and viewer on separate accounts",
+  );
+  await fullPage(
+    page,
+    "/status-page",
+    "branding.png",
+    "Status-page settings, including the white-label branding toggle",
+  );
+
 
   await browser.close();
+
+  writeFileSync(
+    MANIFEST,
+    JSON.stringify(
+      {
+        _: "Written by scripts/capture-screenshots.ts. Verified by scripts/probe-shots-check.mjs.",
+        capturedAt: new Date().toISOString().slice(0, 10),
+        sourceCommit: headCommit(),
+        base: BASE,
+        shots: shots.sort((a, b) => a.file.localeCompare(b.file)),
+      },
+      null,
+      2,
+    ) + "\n",
+  );
+  console.log(`wrote ${MANIFEST} (${shots.length} shots)`);
   process.exit(0);
 }
 

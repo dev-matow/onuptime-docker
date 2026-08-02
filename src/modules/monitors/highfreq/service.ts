@@ -84,7 +84,7 @@ export async function setHighFrequency(
     // move the monitor onto a plane with worse restart behaviour for no
     // gain the operator could observe.
     throw new AppError(
-      `Intervals above ${HF_MAX_INTERVAL_MS}ms are handled by the ordinary scheduler — set "Check interval" instead.`,
+      `Intervals above ${HF_MAX_INTERVAL_MS}ms are handled by the ordinary scheduler, set "Check interval" instead.`,
     );
   }
 

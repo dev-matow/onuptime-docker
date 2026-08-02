@@ -9,7 +9,7 @@ import { InviteMemberDialog } from "./invite-member-dialog";
 import { InvitationsList } from "./invitations-list";
 import { MembersTable } from "./members-table";
 
-export const metadata: Metadata = { title: "Members — Vigil" };
+export const metadata: Metadata = { title: "Members · Vigil" };
 
 export default async function MembersPage() {
   const ctx = await requireOrgContext();

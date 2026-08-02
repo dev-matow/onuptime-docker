@@ -14,6 +14,13 @@ Migrations are ordered SQL and always additive within a major version.
 Take a backup first anyway — `pg_dump -Fc` costs seconds and the one
 time you need it is the one time you skipped it.
 
+## 1.13.0 → 1.14.0
+
+Nothing to do beyond the four commands above. The commercial edition
+added remote probe agents in this release; Core did not, so the one
+migration it carries creates no table Core has and changes no row Core
+holds.
+
 ## 1.0.x → 1.11.0 has no in-place path
 
 **Read this if you installed Core before 28 July 2026.**

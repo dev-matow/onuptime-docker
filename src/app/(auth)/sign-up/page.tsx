@@ -11,7 +11,7 @@ import {
 
 import { SignUpForm } from "./sign-up-form";
 
-export const metadata: Metadata = { title: "Sign up — Vigil" };
+export const metadata: Metadata = { title: "Sign up · Vigil" };
 
 export default function SignUpPage() {
   return (

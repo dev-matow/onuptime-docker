@@ -73,7 +73,7 @@ export function StatusControls({
       toast.error(result.error);
       return;
     }
-    toast.success("Acknowledged — escalation stopped.");
+    toast.success("Acknowledged, escalation stopped.");
     router.refresh();
   }
 
@@ -153,7 +153,7 @@ export function StatusControls({
               (acknowledged ? (
                 <p className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400">
                   <BellSlashIcon aria-hidden className="size-3.5" />
-                  Acknowledged — escalation stopped
+                  Acknowledged, escalation stopped
                 </p>
               ) : (
                 <Button
@@ -221,7 +221,7 @@ export function StatusControls({
             </DialogTitle>
             <DialogDescription>
               {resolving
-                ? "Resolving is final — the timeline closes and a regression gets a new incident."
+                ? "Resolving is final, the timeline closes and a regression gets a new incident."
                 : "Explain the change; the message lands on the incident timeline."}
             </DialogDescription>
           </DialogHeader>

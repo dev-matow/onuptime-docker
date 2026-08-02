@@ -68,7 +68,7 @@ export function StatusPageMonitorsForm({
   if (monitors.length === 0) {
     return (
       <p className="text-muted-foreground text-sm">
-        Create a monitor first — components on the status page mirror your
+        Create a monitor first, components on the status page mirror your
         monitors.
       </p>
     );

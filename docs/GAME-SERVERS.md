@@ -1,8 +1,8 @@
 # Game servers: the `steam` and `gamedig` check types
 
 Two check types watch game servers, both over UDP, both by speaking the
-wire protocol directly. This page says exactly what they can see, and —
-more usefully — exactly what they cannot.
+wire protocol directly. This page says exactly what they can see, and,
+more usefully. Exactly what they cannot.
 
 | Type      | Asks                             | Default port | Settings     |
 | --------- | -------------------------------- | ------------ | ------------ |
@@ -17,7 +17,7 @@ reason, and an import from it needs both names to land somewhere.
 
 ---
 
-## `steam` — A2S_INFO
+## `steam`: A2S_INFO
 
 One query, twenty-five bytes, and the reply a player's server browser
 reads. Vigil sends it, parses it and records:
@@ -37,7 +37,7 @@ reads. Vigil sends it, parses it and records:
 **What it judges.** Two things, and only two:
 
 - **down** when something answers on the port and it is not an A2S_INFO
-  reply. Silence is a transport failure instead — see below.
+  reply. Silence is a transport failure instead, see below.
 - **degraded** when the round trip is slower than the monitor's degraded
   threshold.
 
@@ -51,8 +51,8 @@ and a monitor that pages when the server does the thing it exists to do
 is a monitor people turn off.
 
 **The challenge.** Since December 2020 a Source server answers an
-unchallenged A2S_INFO with a four-byte token and expects it echoed back
-— the fix for an amplification attack that used game servers as
+unchallenged A2S_INFO with a four-byte token and expects it echoed back,
+the fix for an amplification attack that used game servers as
 reflectors. Vigil does the round trip automatically and includes it in
 the measured response time, because a player's client pays for it too.
 Older GoldSrc servers answer the first query outright; both work, and
@@ -61,7 +61,7 @@ date rather than of its health.
 
 ---
 
-## `gamedig` — three protocols, not three hundred games
+## `gamedig`: three protocols, not three hundred games
 
 The id is `gamedig` because that is what Uptime Kuma calls this monitor
 and what an import carries across. **It is not the GameDig library.**
@@ -77,8 +77,8 @@ three of those protocols and does not have the table.
 | `minecraft` | GameSpy4 query | 25565             | Minecraft Java Edition, with `enable-query=true`                                               |
 | `quake3`    | `getstatus`    | 27960             | id Tech 3 and its descendants: Quake III, Call of Duty ≤4, Wolfenstein: ET, OpenArena, Xonotic |
 
-Facts are the four every protocol can answer — `answered`,
-`serverName`, `map`, `players`, `maxPlayers` — plus `responseTimeMs`.
+Facts are the four every protocol can answer. `answered`,
+`serverName`, `map`, `players`, `maxPlayers`: plus `responseTimeMs`.
 The assertions are the same two `steam` makes.
 
 ### Why the library was not taken as a dependency
@@ -99,9 +99,9 @@ The assertions are the same two `steam` makes.
 A game whose server speaks something else cannot be watched with this
 type. Named explicitly, because "gamedig" implies otherwise:
 
-- **Minecraft Bedrock** (RakNet unconnected ping) — not supported.
+- **Minecraft Bedrock** (RakNet unconnected ping): not supported.
   Bedrock and Java are different protocols on different ports.
-- **Minecraft's TCP server-list ping** — not used. Vigil asks the UDP
+- **Minecraft's TCP server-list ping**: not used. Vigil asks the UDP
   query port, which the server only opens when `enable-query=true` is
   set in `server.properties`. A server without it is healthy and
   completely silent, and Vigil will report a transport failure every
@@ -109,7 +109,7 @@ type. Named explicitly, because "gamedig" implies otherwise:
   monitor instead.
 - **GameSpy 1/2/3** (Unreal, UT2004, Battlefield 1942, older ARMA),
   **Ventrilo**, **TeamSpeak 2/3**, **Mumble**, **Nadeo/Trackmania**,
-  **SA-MP**, **Terraria**, **Frostbite RCON**, **Discord** — not
+  **SA-MP**, **Terraria**, **Frostbite RCON**, **Discord**: not
   supported.
 - Anything else GameDig's table names and these three protocols do not
   cover.
@@ -142,8 +142,8 @@ be wrong for two thirds of the servers this watches.
 - **One retransmit.** UDP is allowed to lose datagrams, and a monitor
   that reported the internet's ordinary loss as downtime would be
   useless. Vigil sends the query again half way through the timeout and
-  takes whichever reply arrives first. Both attempts — and, for
-  Minecraft and the A2S challenge, both round trips — share one absolute
+  takes whichever reply arrives first. Both attempts, and, for
+  Minecraft and the A2S challenge, both round trips, share one absolute
   deadline, so a monitor never spends more than its timeout.
 - **Silence is a transport failure, not a failed assertion.** "No reply
   within 5000ms" is Vigil saying it could not measure. A datagram that
@@ -151,21 +151,21 @@ be wrong for two thirds of the servers this watches.
   that port and it is not the server you meant, which is nearly always
   the wrong port or the wrong protocol, and the monitor says so.
 - **A multi-packet A2S reply reports `unknown`, never `down`.** Vigil
-  does not reassemble split replies — that would mean packet ids,
+  does not reassemble split replies, that would mean packet ids,
   ordering and bzip2 payloads on the older engines, for a case A2S_INFO
   does not produce in practice. If it ever happens, the monitor reports
   "not measured" with that sentence, because a limitation of Vigil's
   that read as an outage would be a page at 3am for a server that is
   running perfectly.
-- **No credentials, anywhere.** None of these queries authenticates —
-  that is what makes them usable by a server browser. Neither type
+- **No credentials, anywhere.** None of these queries authenticates.
+  That is what makes them usable by a server browser. Neither type
   stores a secret, so neither has anything to mask in an export, in a
   webhook body or in the edit form.
 - **What is not read.** From an A2S reply, everything after the VAC
   byte: the version string, the extra-data block, and The Ship's extra
   fields. Nothing asserts on them, and a parser that walks them is a
   parser a game nobody here has can break. From a Minecraft reply, the
-  full stat (plugins, player names, version) — the basic stat answers
+  full stat (plugins, player names, version). The basic stat answers
   the question. From a `getstatus` reply, the player names and scores:
   the count is what matters and the names are somebody's chat handle.
 - **Server names are printed as the server chose them,** minus control
@@ -176,7 +176,7 @@ be wrong for two thirds of the servers this watches.
 ## Not yet mapped from Uptime Kuma
 
 `docs/KUMA-IMPORT.md` still records `gamedig` and `steam` as "not
-imported — Vigil has no game-server check type". That is out of date now
+imported. Vigil has no game-server check type". That is out of date now
 in principle, but the importer mapping has not been rewritten: Kuma's
 `game` field is a game id, not a protocol, and turning three hundred ids
 into three protocols is a table this release does not have. Until then,

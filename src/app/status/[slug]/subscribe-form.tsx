@@ -35,7 +35,7 @@ export function SubscribeForm({ slug }: { slug: string }) {
   if (done) {
     return (
       <p className="text-muted-foreground text-sm" role="status">
-        Almost there — check your inbox for a link to confirm your
+        Almost there, check your inbox for a link to confirm your
         subscription.
       </p>
     );

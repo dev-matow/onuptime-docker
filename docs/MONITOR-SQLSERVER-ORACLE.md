@@ -2,8 +2,8 @@
 
 Both of these types speak their database's wire protocol directly, with
 no driver. That is the same trade the MySQL, MongoDB, Redis and MQTT
-checks already make — Vigil ships one database client, for the database
-it cannot avoid — but for these two it also decides how far each check
+checks already make. Vigil ships one database client, for the database
+it cannot avoid, but for these two it also decides how far each check
 can go. This page says exactly how far, because a monitor that watches
 less than you think it does is worse than no monitor at all.
 
@@ -18,7 +18,7 @@ less than you think it does is worse than no monitor at all.
 
 ---
 
-## `sqlserver` — greet, sign in, run a query
+## `sqlserver`: greet, sign in, run a query
 
 The check is three round trips of TDS:
 
@@ -39,7 +39,7 @@ The check is three round trips of TDS:
 ### The limitation: the login is plaintext
 
 TDS obfuscates the password with a fixed nibble swap and an XOR. That is
-not encryption, and it is not meant to be — real secrecy comes from TLS
+not encryption, and it is not meant to be. Real secrecy comes from TLS
 negotiated _inside_ the PRELOGIN exchange, which is a TLS handshake
 tunnelled through TDS packets rather than a flag. Vigil's probe does not
 implement that tunnel, so it asks for `ENCRYPT_NOT_SUP` and requires the
@@ -58,7 +58,7 @@ on the server. Servers that behave this way:
 - **Azure SQL Database and Azure SQL Managed Instance**, always.
 - Any SQL Server with **Force Encryption** turned on in Configuration
   Manager.
-- A server answering `ENCRYPT_OFF` — which despite the name means
+- A server answering `ENCRYPT_OFF`: which despite the name means
   "encrypt the login packet and nothing after it", and needs the same
   handshake.
 
@@ -72,7 +72,7 @@ One login and one trivial query per interval. SQL Server records the
 login in its default audit ("Login succeeded for user…" every check, at
 the default `Failed and successful logins` setting), which at a 60-second
 interval is 1,440 rows a day in the error log. Either turn the audit down
-to failed logins only, or lengthen the interval — the check is not more
+to failed logins only, or lengthen the interval. The check is not more
 useful at 60 seconds than at 300.
 
 The check names itself: `program_name` is `vigil` in
@@ -111,12 +111,12 @@ only inside the file an operator downloads.
 
 ---
 
-## `oracledb` — ask the listener for the service
+## `oracledb`: ask the listener for the service
 
 This check sends one TNS connect request and reads the answer. It does
 **not** sign in and it runs no query, and that is a dependency decision
-rather than an oversight: Oracle's login is O5LOGON — a session-key
-exchange, an AES-encrypted verifier and a data-type negotiation phase —
+rather than an oversight: Oracle's login is O5LOGON, a session-key
+exchange, an AES-encrypted verifier and a data-type negotiation phase,
 and the only practical shortcut is `node-oracledb`, a native addon whose
 thick mode additionally wants Oracle Instant Client installed on the
 host. Neither belongs in a container whose pitch is two processes and a
@@ -130,13 +130,13 @@ has registered the service you named _and_ has a handler free for it. The
 failures that answer `REFUSE` on a port a TCP check finds perfectly
 healthy are the everyday ones:
 
-| Code                  | What it means                                                                            |
-| --------------------- | ---------------------------------------------------------------------------------------- |
-| ORA-12514             | The service is not registered — the instance never came up, or is not the one you named. |
-| ORA-12505             | Same, for a SID rather than a service name.                                              |
-| ORA-12516 / ORA-12520 | The listener has no free handler of the right kind.                                      |
-| ORA-12518             | The listener could not hand the connection off.                                          |
-| ORA-12528             | Every instance is blocking new connections (a database still opening).                   |
+| Code                  | What it means                                                                           |
+| --------------------- | --------------------------------------------------------------------------------------- |
+| ORA-12514             | The service is not registered. The instance never came up, or is not the one you named. |
+| ORA-12505             | Same, for a SID rather than a service name.                                             |
+| ORA-12516 / ORA-12520 | The listener has no free handler of the right kind.                                     |
+| ORA-12518             | The listener could not hand the connection off.                                         |
+| ORA-12528             | Every instance is blocking new connections (a database still opening).                  |
 
 Vigil reports the code _and_ Oracle's own wording for it, and the server
 version the listener volunteers in the refusal, so the incident email
@@ -167,14 +167,14 @@ sent anywhere. Refusing it costs one edit; keeping it would cost a
 credential.
 
 `describeTarget` still strips a `user:password@` if one ever reaches a
-row — the schema could be relaxed by someone who never reads the
+row. The schema could be relaxed by someone who never reads the
 redaction code, and a row can arrive from a build that had a different
 rule.
 
 ### Service names, not SIDs
 
-The path is a **service name**. A SID-only database — no service
-registered, `(SID=ORCL)` in every client's `tnsnames.ora` — cannot be
+The path is a **service name**. A SID-only database, no service
+registered, `(SID=ORCL)` in every client's `tnsnames.ora`. Cannot be
 named here; use the service name the instance registers (by default the
 database name, sometimes with a domain: `ORCL.example.com`). The name is
 restricted to letters, digits, `.`, `_` and `-`, because it is
@@ -205,7 +205,7 @@ it would not be a bad name, it would be a different request.
 - **Import from Uptime Kuma.** Kuma's `sqlserver` and `oracledb`
   monitors both store a full connection string with credentials. The
   SQL Server one maps across whole. The Oracle one cannot keep its
-  credentials — Vigil has nowhere to send them — so a host, port and
+  credentials (Vigil has nowhere to send them) so a host, port and
   service name is what carries.
 - **Verified against a protocol fixture, not against a licensed
   server.** `tests/unit/check-sqlserver.test.ts` and

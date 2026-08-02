@@ -99,7 +99,7 @@ export async function generateMetadata(
   }
   const page = await cachedPublicStatusPage(slug);
   return {
-    title: page ? `${page.name} — status` : "Status page",
+    title: page ? `${page.name}, status` : "Status page",
     description: page
       ? `Live service status and incident history for ${page.organizationName}.`
       : undefined,

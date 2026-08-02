@@ -12,7 +12,7 @@ import {
 
 import { ResetPasswordForm } from "./reset-password-form";
 
-export const metadata: Metadata = { title: "Set a new password — Vigil" };
+export const metadata: Metadata = { title: "Set a new password · Vigil" };
 
 export default function ResetPasswordPage() {
   return (

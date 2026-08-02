@@ -12,7 +12,7 @@ import { env } from "@/lib/env";
 
 import { ForgotPasswordForm } from "./forgot-password-form";
 
-export const metadata: Metadata = { title: "Reset your password — Vigil" };
+export const metadata: Metadata = { title: "Reset your password · Vigil" };
 
 export default function ForgotPasswordPage() {
   // The demo signs every visitor in as the same seeded account, so a
@@ -25,7 +25,7 @@ export default function ForgotPasswordPage() {
         <CardHeader>
           <CardTitle>Password reset is off</CardTitle>
           <CardDescription>
-            This is a shared read-only demo — the accounts are seeded and their
+            This is a shared read-only demo. The accounts are seeded and their
             passwords are published.
           </CardDescription>
         </CardHeader>

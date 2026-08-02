@@ -29,7 +29,7 @@ import { listMonitors } from "@/modules/monitors/service";
 import { CreateMonitorDialog } from "./create-monitor-dialog";
 import { MonitorRowActions } from "./monitor-row-actions";
 
-export const metadata: Metadata = { title: "Monitors — Vigil" };
+export const metadata: Metadata = { title: "Monitors · Vigil" };
 
 export default async function MonitorsPage() {
   const ctx = await requireOrgContext();
@@ -126,7 +126,7 @@ export default async function MonitorsPage() {
                     </TableCell>
                     <TableCell className="text-right font-mono tabular-nums">
                       {monitor.avgResponseMs === null
-                        ? "—"
+                        ? "-"
                         : formatDuration(monitor.avgResponseMs)}
                     </TableCell>
                     <TableCell className="text-muted-foreground text-right font-mono tabular-nums">
@@ -135,7 +135,7 @@ export default async function MonitorsPage() {
                     <TableCell className="text-muted-foreground text-right">
                       {monitor.lastCheckedAt
                         ? formatRelativeTime(monitor.lastCheckedAt)
-                        : "—"}
+                        : "-"}
                     </TableCell>
                     <TableCell className="pr-4 text-right">
                       {(canUpdate || canDelete) && (

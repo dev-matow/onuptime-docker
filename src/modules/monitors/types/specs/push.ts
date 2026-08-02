@@ -70,7 +70,7 @@ export const pushStoredSchema = z.object({
     .trim()
     .regex(
       TOKEN_PATTERN,
-      "A push token is 32–128 characters of letters, digits, hyphen or underscore.",
+      "A push token is 32-128 characters of letters, digits, hyphen or underscore.",
     )
     // A generator, not a constant. A push monitor without a token has no
     // endpoint and can never report in, so "no token" is not a state this

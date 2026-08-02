@@ -14,7 +14,7 @@ import { auditLogs, user } from "@/db/schema";
 import { formatDateTime } from "@/lib/format";
 import { requireOrgContext } from "@/lib/session";
 
-export const metadata: Metadata = { title: "Audit log — Vigil" };
+export const metadata: Metadata = { title: "Audit log · Vigil" };
 
 const MAX_ROWS = 100;
 

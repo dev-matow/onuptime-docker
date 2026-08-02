@@ -18,8 +18,8 @@ verdict is reached, then the incident and notification path. A monitor
 checked every 500 ms notices sooner than one checked every 60 s. It does
 not notice within 500 ms, and nothing here claims it does.
 
-The benchmark measures cadence — how close the achieved interval is to
-the configured one — and refuses to report anything else. Its output
+The benchmark measures cadence, how close the achieved interval is to
+the configured one, and refuses to report anything else. Its output
 carries that refusal in its own `caveats` field.
 
 ## What was measured
@@ -67,8 +67,8 @@ what this scheduler can drive, not as a capacity plan.
 p99 of 508 ms against a 500 ms target, and not one missed slot across
 11,958 checks.
 
-**At 1000 it does not.** It sustains about 1,440 checks per second —
-roughly 720 monitors at a true 500 ms — and past that the cadence
+**At 1000 it does not.** It sustains about 1,440 checks per second,
+roughly 720 monitors at a true 500 ms, and past that the cadence
 stretches rather than the plane failing: p50 stays at 504 ms while p99
 reaches 1527 ms, and 2,157 slots are missed rather than queued. 844 of
 the 1,000 monitors were sampled during the window; the rest were being
@@ -85,7 +85,7 @@ monitors were spread across only 20 distinct targets, so 50 monitors
 shared each host:port and the per-target in-flight cap
 (`HF_MAX_INFLIGHT_PER_TARGET`) was under far more pressure than a real
 deployment of 1,000 monitors would put it. The 1000-monitor figure is
-therefore a floor, not a ceiling — but it is the number that was
+therefore a floor, not a ceiling, but it is the number that was
 measured, and it is the one published until a run with realistic target
 spread replaces it.
 
@@ -98,9 +98,28 @@ Permitted, and supported by the table above:
 
 Not permitted:
 
-- _500 ms detection_ — a different quantity, not measured here.
-- _1,000 monitors at 500 ms_ — measured, and it does not hold.
-- _2× faster than anything_ — no comparative measurement exists.
+- _500 ms detection_, a different quantity, not measured here.
+- _1,000 monitors at 500 ms_. Measured, and it does not hold.
+- _2× faster than anything_, no comparative measurement exists.
+- _500 ms from a remote probe_. See below.
+
+## Remote probes are a different plane, and a different number
+
+Everything on this page is the controller: one process, no network in
+the middle, `modules/monitors/highfreq/`. It is the only thing that runs
+at 500 ms.
+
+A monitor dispatched to remote probe agents runs at **20 seconds or
+slower**, and `setMonitorProbePolicy` refuses to save anything faster. A
+round has to be opened, leased, polled for, measured, reported and
+settled, and below twenty seconds it cannot finish inside its own
+cadence.
+
+The two are not comparable and neither number belongs in the other's
+sentence. Multi-vantage agreement is a **capability**, and its cost is
+measured separately in `docs/evidence/probe-bench/`; half-second cadence
+is a **rate**, measured here. One installation can do both, on different
+monitors. See [REMOTE-PROBES.md](REMOTE-PROBES.md).
 
 ## Reproducing it
 
@@ -134,13 +153,13 @@ the suite had passed over:
 1. **The worker could not start on a fresh database.** The rollup queue
    was scheduled but never created, and pg-boss enforces a foreign key
    from `schedule` to `queue`.
-2. **The benchmark was reading the wrong table** — `monitor_checks`,
+2. **The benchmark was reading the wrong table**: `monitor_checks`,
    which belongs to the pg-boss plane, not `monitor_hf_samples`.
 3. **An enrolled monitor could be starved forever.** Monitors created
    together come due on the same boundary; the fairness caps admitted the
    first N and a stable iteration order handed the same monitors the same
    win every tick. Nine of ten reported a perfect 500 ms cadence and the
-   tenth reported nothing at all — not slow, never probed. Shedding is
+   tenth reported nothing at all, not slow, never probed. Shedding is
    backpressure now: a refused slot retries on the next tick instead of
    forfeiting its whole interval, which also makes it the most overdue
    slot in the next round.

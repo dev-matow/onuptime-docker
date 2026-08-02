@@ -86,7 +86,7 @@ async function receive(formData: FormData): Promise<Upload | string> {
     return "Choose a kuma.db file to import.";
   }
   if (file.size > MAX_UPLOAD_BYTES) {
-    return `That file is ${Math.round(file.size / 1024 / 1024)}MB and the limit here is ${MAX_UPLOAD_BYTES / 1024 / 1024}MB. Most of a large Kuma database is heartbeat history, which does not import — see docs/KUMA-IMPORT.md for the command-line path.`;
+    return `That file is ${Math.round(file.size / 1024 / 1024)}MB and the limit here is ${MAX_UPLOAD_BYTES / 1024 / 1024}MB. Most of a large Kuma database is heartbeat history, which does not import, see docs/KUMA-IMPORT.md for the command-line path.`;
   }
 
   const bytes = Buffer.from(await file.arrayBuffer());
@@ -104,7 +104,7 @@ async function receive(formData: FormData): Promise<Upload | string> {
 /** Anything that is not a SQLite database Kuma wrote, said plainly. */
 function unreadable(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
-  return `That file could not be read as an Uptime Kuma database: ${message}. Copy kuma.db out of your Kuma volume — and if Kuma is still running, checkpoint it first with PRAGMA wal_checkpoint(TRUNCATE), because everything since the last checkpoint lives in the -wal sidecar.`;
+  return `That file could not be read as an Uptime Kuma database: ${message}. Copy kuma.db out of your Kuma volume, and if Kuma is still running, checkpoint it first with PRAGMA wal_checkpoint(TRUNCATE), because everything since the last checkpoint lives in the -wal sidecar.`;
 }
 
 /**

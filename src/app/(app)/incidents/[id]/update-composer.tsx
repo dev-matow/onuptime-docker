@@ -59,7 +59,7 @@ export function UpdateComposer({
       return;
     }
     setMessage(result.data.suggestion);
-    toast.success("Suggestion ready — edit before posting.");
+    toast.success("Suggestion ready, edit before posting.");
   }
 
   return (
@@ -74,7 +74,7 @@ export function UpdateComposer({
               id="incident-update"
               value={message}
               onChange={(event) => setMessage(event.target.value)}
-              placeholder="Share progress with the team — what do you know now?"
+              placeholder="Share progress with the team. What do you know now?"
               maxLength={2000}
               rows={3}
             />

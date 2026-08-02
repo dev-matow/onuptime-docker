@@ -11,8 +11,13 @@ import {
 } from "@/modules/monitors/highfreq";
 import { findDueMonitors } from "@/modules/monitors/service";
 
+
 import { runHighFrequencyRollupJob } from "./jobs/high-frequency";
 import { runMonitorCheck } from "./jobs/monitor-check";
+// A second import from the same module rather than a second specifier on
+// the line above, because the marker acts on whole lines: folded into
+// one import, `workerActorId` survives into Core as an unused binding
+// and Core's own CI reports a warning nobody there can act on.
 import { runNotificationDelivery } from "./jobs/notification-delivery";
 import { pruneOldChecks } from "./jobs/retention";
 import {
@@ -176,6 +181,7 @@ async function main() {
   const highFrequency = new HighFrequencyPlane({ boss });
   await highFrequency.start();
 
+
   log.info("worker started");
 
   const shutdown = async (signal: string) => {
@@ -184,6 +190,8 @@ async function main() {
     // leases and flushes the sample buffer, and both of those want a
     // working database connection.
     await highFrequency.stop();
+    // Stopped before pg-boss too: its final pass closes any round that
+    // became decidable during shutdown, and that pass writes.
     await boss.stop({ graceful: true, timeout: 15_000 });
     process.exit(0);
   };

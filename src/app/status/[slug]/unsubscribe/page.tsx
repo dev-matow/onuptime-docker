@@ -24,7 +24,7 @@ export default async function UnsubscribePage(
     return (
       <SubscriptionResult
         title="Link expired or invalid"
-        message="This unsubscribe link is no longer valid — you may already be unsubscribed."
+        message="This unsubscribe link is no longer valid. You may already be unsubscribed."
         backHref={`/status/${encodeURIComponent(slug)}`}
       />
     );

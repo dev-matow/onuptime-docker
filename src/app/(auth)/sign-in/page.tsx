@@ -14,7 +14,7 @@ import { env } from "@/lib/env";
 
 import { SignInForm } from "./sign-in-form";
 
-export const metadata: Metadata = { title: "Sign in — Vigil" };
+export const metadata: Metadata = { title: "Sign in · Vigil" };
 
 export default function SignInPage() {
   return (

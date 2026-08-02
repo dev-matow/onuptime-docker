@@ -28,7 +28,7 @@ const FEATURES = [
     icon: BroadcastIcon,
     title: "Public status pages",
     description:
-      "Keep customers informed with a clean public page — live component health, 90 days of history, and email subscriptions.",
+      "Keep customers informed with a clean public page, live component health, 90 days of history, and email subscriptions.",
   },
   {
     icon: SparkleIcon,
@@ -73,7 +73,7 @@ export default async function LandingPage() {
           </h1>
           <p className="text-muted-foreground max-w-xl text-lg text-balance">
             Vigil watches your endpoints, opens incidents when they fail, and
-            keeps everyone informed — from the on-call engineer to the customer
+            keeps everyone informed, from the on-call engineer to the customer
             refreshing your status page.
           </p>
           <div className="flex items-center gap-3">
@@ -114,7 +114,7 @@ export default async function LandingPage() {
       </main>
 
       <footer className="text-muted-foreground border-t py-6 text-center text-xs">
-        Vigil — self-hosted incident management.
+        Vigil, self-hosted incident management.
       </footer>
     </div>
   );

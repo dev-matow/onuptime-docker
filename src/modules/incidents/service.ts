@@ -174,7 +174,7 @@ export async function acknowledgeIncident(
     await tx.insert(incidentEvents).values({
       incidentId,
       type: "system",
-      message: "Incident acknowledged — escalation stopped.",
+      message: "Incident acknowledged, escalation stopped.",
       internal: true,
       createdBy: actor.userId,
     });
@@ -205,7 +205,7 @@ export async function changeIncidentStatus(
     if (!canTransition(incident.status, input.status)) {
       throw new ConflictError(
         incident.status === "resolved"
-          ? "Resolved incidents can't change status — open a new incident instead."
+          ? "Resolved incidents can't change status, open a new incident instead."
           : `Can't move from ${incident.status} to ${input.status}.`,
       );
     }
@@ -238,7 +238,7 @@ export async function changeIncidentStatus(
       .returning();
     if (!updated) {
       throw new ConflictError(
-        "Someone else changed this incident while you were looking at it — reload and try again.",
+        "Someone else changed this incident while you were looking at it, reload and try again.",
       );
     }
 
@@ -278,7 +278,7 @@ export async function postIncidentUpdate(
     );
     if (incident.status === "resolved") {
       throw new ConflictError(
-        "This incident is resolved — the timeline is closed.",
+        "This incident is resolved. The timeline is closed.",
       );
     }
 
@@ -522,7 +522,7 @@ export async function resolveMonitorIncidents(
         incidentId: incident.id,
         type: "status_change",
         status: "resolved",
-        message: `${monitor.name} recovered — incident auto-resolved.`,
+        message: `${monitor.name} recovered, incident auto-resolved.`,
         createdBy: null,
       });
 

@@ -60,7 +60,7 @@ const OUTCOME_VARIANT: Record<
 const KIND_LABEL: Record<SourceKind, string> = {
   monitor: "Monitors",
   notification: "Notification providers",
-  "notification-link": "Monitor–notification links",
+  "notification-link": "Monitor-notification links",
   "status-page": "Status pages",
   "status-page-group": "Status page sections",
   "status-page-monitor": "Monitors on a status page",
@@ -133,7 +133,7 @@ function Summary({ report }: { report: ImportReport }) {
         {refused.length > 0 && (
           <>
             {refused.length}{" "}
-            {refused.length === 1 ? "does not come" : "do not come"} across —
+            {refused.length === 1 ? "does not come" : "do not come"} across,
             each is listed below with the rule that refused it.
           </>
         )}
@@ -297,11 +297,11 @@ export function ImportWizard({ canImport }: { canImport: boolean }) {
           <FieldDescription>
             A copy of <code className="font-mono">kuma.db</code> from your Kuma
             volume. It is opened read-only and deleted as soon as it has been
-            read. If Kuma is still running, checkpoint it first —{" "}
+            read. If Kuma is still running, checkpoint it first:{" "}
             <code className="font-mono">
               sqlite3 kuma.db &quot;PRAGMA wal_checkpoint(TRUNCATE);&quot;
-            </code>{" "}
-            — because everything since the last checkpoint lives in the{" "}
+            </code>{" "},
+            because everything since the last checkpoint lives in the{" "}
             <code className="font-mono">-wal</code> sidecar and an upload
             carries one file.
           </FieldDescription>

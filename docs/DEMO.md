@@ -9,7 +9,7 @@ change anything.
 Set `DEMO_MODE=true` on the app process. Then:
 
 - **`GET /api/demo`** signs the visitor in as the seeded read-only
-  viewer (`demo@altitude.demo`) and redirects to the dashboard — this is
+  viewer (`demo@altitude.demo`) and redirects to the dashboard. This is
   the link you put on the landing page.
 - **Every mutation is blocked server-side** at the permission guard:
   monitors, incidents, status page, settings, membership and AI actions
@@ -29,12 +29,37 @@ docker compose run --rm worker npx tsx scripts/seed-demo.ts
 
 Creates the **Altitude Systems** organization: four users (owner /
 admin / responder / viewer, password `vigil-demo-2026`), eleven
-production-style monitors with 90 days of history — covering all six
-check types — one resolved
-incident with a full timeline + postmortem, one ongoing critical
-incident, and a published status page at `/status/altitude`.
+production-style monitors with 90 days of history, http, tcp, ping,
+dns, tls-expiry and domain-expiry, six of the registry's types, one
+resolved incident with a full timeline + postmortem, one ongoing
+critical incident, and a published status page at `/status/altitude`.
 
-The seed is **idempotent** — it wipes and recreates only the demo
+History is written at each monitor's own cadence from the start of the
+last complete calendar month onwards, and three-hourly before that. That
+is not cosmetic: an observation stands for at most three of the
+monitor's intervals, so three-hourly rows for a sixty-second monitor
+describe 1.7% coverage, and every surface that reports coverage says so.
+
+Inside that month sit an outage, an incident somebody acknowledged and
+resolved, and a blip the recovery runtime fixed, the four things a
+monthly client report is supposed to be able to show.
+
+### A report on the demo
+
+Commercial edition only. Client reports are not part of Core, and
+neither is this script.
+
+```bash
+npm run demo:agency
+```
+
+Brands the seeded tenant and generates last month's report, printing the
+figures it arrived at so they can be checked against the seed. Run it
+after `db:seed`: on a demo host too, if you want the Reports page to
+show a real document rather than an empty state. It forces
+`DEMO_MODE=false` for its own run, exactly as the seed does.
+
+The seed is **idempotent**: it wipes and recreates only the demo
 organization and demo users, so it doubles as the reset job.
 
 Monitors intentionally point at highly-available public endpoints
@@ -47,11 +72,11 @@ red, keeping the ongoing incident honest.
 Any scheduler that can run one command:
 
 ```cron
-# 03:00 UTC daily — restore pristine demo data
+# 03:00 UTC daily, restore pristine demo data
 0 3 * * * cd /srv/vigil && docker compose run --rm worker npx tsx scripts/seed-demo.ts >> /var/log/vigil-demo-reset.log 2>&1
 ```
 
-(Systemd timer or your platform's cron equivalent works identically —
+(Systemd timer or your platform's cron equivalent works identically,
 the seed script forces `DEMO_MODE=false` internally for its own run, so
 account creation succeeds even on the demo host.)
 
@@ -60,7 +85,7 @@ account creation succeeds even on the demo host.)
 | Host                  | Env                            | Purpose                                      |
 | --------------------- | ------------------------------ | -------------------------------------------- |
 | `demo.yourdomain.com` | `DEMO_MODE=true`, own Postgres | public demo, nightly reset                   |
-| `yourdomain.com`      | —                              | landing page (`landing/`), links to the demo |
+| `yourdomain.com`      | -                              | landing page (`landing/`), links to the demo |
 
 Keep the demo database separate from anything real; it is wiped on
 every reset.

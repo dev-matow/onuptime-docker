@@ -26,7 +26,7 @@ describe("formatDuration", () => {
 
 describe("formatUptime", () => {
   it("renders a dash for missing data", () => {
-    expect(formatUptime(null)).toBe("—");
+    expect(formatUptime(null)).toBe("-");
   });
 
   it("renders two decimal places", () => {

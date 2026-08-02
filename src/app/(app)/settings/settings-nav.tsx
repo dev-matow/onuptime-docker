@@ -18,8 +18,17 @@ export function SettingsNav() {
   const pathname = usePathname();
 
   return (
-    <nav aria-label="Settings sections" className="border-b">
-      <ul className="-mb-px flex gap-4">
+    // Six tabs do not fit across a phone. Without somewhere to put the
+    // overflow they pushed the whole document wider than the viewport,
+    // so every settings page scrolled sideways and the content moved
+    // out from under the reader. The strip scrolls instead: the tabs
+    // stay on one row, the page does not move, and a tab reached by
+    // keyboard is scrolled into view by the browser.
+    <nav
+      aria-label="Settings sections"
+      className="[scrollbar-width:none] overflow-x-auto border-b [&::-webkit-scrollbar]:hidden"
+    >
+      <ul className="-mb-px flex w-max gap-4">
         {TABS.map((tab) => {
           const active = tab.exact
             ? pathname === tab.href
@@ -30,7 +39,7 @@ export function SettingsNav() {
                 href={tab.href}
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "inline-block border-b-2 px-1 pb-2 text-sm transition-colors",
+                  "inline-block border-b-2 px-1 pb-2 text-sm whitespace-nowrap transition-colors",
                   active
                     ? "border-foreground font-medium"
                     : "text-muted-foreground hover:text-foreground border-transparent",

@@ -295,6 +295,6 @@ export const monitorDomainSchema = z
     (value) => isRegistrableDomain(value) && !isForbiddenEgressHost(value),
     {
       message:
-        "Enter a registrable domain, like example.com or bbc.co.uk — not a subdomain.",
+        "Enter a registrable domain, like example.com or bbc.co.uk, not a subdomain.",
     },
   );

@@ -115,10 +115,31 @@ async function createTeam() {
   return { organizationId, ids };
 }
 
+/**
+ * How often the seed writes a check, and why it is not "whatever looks
+ * like enough".
+ *
+ * An observation stands for at most three of the monitor's configured
+ * intervals (`coverageHorizonMs`), and anything past that is reported as
+ * *unmeasured* rather than as uptime. So a demo that writes a row every
+ * three hours for a 60-second monitor is not a sparser version of the
+ * real thing — it is a monitor with 1.7% coverage, and every surface
+ * that shows coverage says so, correctly and unhelpfully.
+ *
+ * Two and a half intervals is the cheapest cadence that leaves no gap:
+ * comfortably inside the three-interval horizon even after the jitter
+ * below, and 2.5x fewer rows than probing at the interval itself. For a
+ * 60-second monitor over a month that is ~18k rows instead of ~45k.
+ */
+function seedCadenceMs(intervalSeconds: number): number {
+  return intervalSeconds * 2_500;
+}
+
 function checkRowsFor(
   monitorId: string,
   seed: MonitorSeed,
   now: number,
+  denseFrom: number,
 ): (typeof monitorChecks.$inferInsert)[] {
   const rows: (typeof monitorChecks.$inferInsert)[] = [];
   const start = now - 90 * DAY;
@@ -136,11 +157,16 @@ function checkRowsFor(
     });
   };
 
-  // 90 days of history at ~3h resolution, denser over the last 24h.
-  for (let ts = start; ts < now - DAY; ts += 3 * 60 * MIN + rand() * 10 * MIN) {
+  // Older than the reporting window: three-hourly. The 90-day strip
+  // reads it fine and nothing claims full coverage back there.
+  for (let ts = start; ts < denseFrom; ts += 3 * 60 * MIN + rand() * 10 * MIN) {
     push(ts);
   }
-  for (let ts = now - DAY; ts < now; ts += 12 * MIN) {
+  // The reporting window — last complete month through to now — at the
+  // monitor's own cadence, so a report over it is fully covered and the
+  // percentages mean what a client will read them as.
+  const cadence = seedCadenceMs(seed.intervalSeconds);
+  for (let ts = denseFrom; ts < now; ts += cadence * (0.97 + rand() * 0.05)) {
     push(ts);
   }
   return rows;
@@ -152,15 +178,43 @@ async function main() {
   const { organizationId, ids } = await createTeam();
   const now = Date.now();
 
+  // The last complete calendar month in UTC — the period a monthly
+  // client report defaults to. Computed here rather than imported from
+  // `modules/reports`, which is commercial code this seed must not
+  // depend on: what follows is fixture placement, not the report's
+  // definition of a period.
+  const today = new Date(now);
+  const lastMonth = new Date(
+    Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 1, 1),
+  );
+  /** A UTC instant inside the last complete month. Days 1–28 only. */
+  const inLastMonth = (day: number, hour: number, minute = 0) =>
+    Date.UTC(
+      lastMonth.getUTCFullYear(),
+      lastMonth.getUTCMonth(),
+      day,
+      hour,
+      minute,
+    );
+
   const gatewayOutage: [number, number] = [
     now - 6 * DAY - 55 * MIN,
     now - 6 * DAY - 22 * MIN,
   ];
+  // An outage inside the last complete month, so the monthly client
+  // report always has a real one to show rather than a green page that
+  // proves nothing. 47 minutes, at the hour when nobody is watching.
+  const lastMonthOutage: [number, number] = [
+    inLastMonth(12, 3, 14),
+    inLastMonth(12, 4, 1),
+  ];
   const checkoutDownSince = now - 38 * MIN;
   // Two short Auth Service blips the recovery runtime healed quietly.
+  // The second is anchored inside the last complete month so a monthly
+  // report carries recovery evidence and not just an outage.
   const authBlips: { start: number; verifySeconds: number; ms: number }[] = [
     { start: now - 9 * DAY - 47 * MIN, verifySeconds: 41, ms: 152 },
-    { start: now - 31 * DAY - 13 * MIN, verifySeconds: 53, ms: 187 },
+    { start: inLastMonth(19, 22, 6), verifySeconds: 53, ms: 187 },
   ];
 
   const seeds: MonitorSeed[] = [
@@ -170,7 +224,7 @@ async function main() {
       intervalSeconds: 60,
       baseMs: 140,
       publicName: "API",
-      outages: [gatewayOutage],
+      outages: [gatewayOutage, lastMonthOutage],
     },
     {
       name: "Marketing Site",
@@ -240,7 +294,7 @@ async function main() {
       publicName: "DNS",
     },
     {
-      name: "Certificate — altitude-demo.example",
+      name: "TLS certificate for altitude-demo.example",
       url: "altitude-demo.example",
       checkType: "tls-expiry",
       port: 443,
@@ -290,9 +344,9 @@ async function main() {
     if (!row) throw new Error(`monitor insert failed: ${seed.name}`);
     monitorIds[seed.name] = row.id;
 
-    const rows = checkRowsFor(row.id, seed, now);
-    for (let i = 0; i < rows.length; i += 1000) {
-      await db.insert(monitorChecks).values(rows.slice(i, i + 1000));
+    const rows = checkRowsFor(row.id, seed, now, lastMonth.getTime());
+    for (let i = 0; i < rows.length; i += 2000) {
+      await db.insert(monitorChecks).values(rows.slice(i, i + 2000));
     }
   }
 
@@ -318,7 +372,7 @@ async function main() {
         "~33 minutes of degraded API availability. Dashboard and status page remained up; webhook deliveries were delayed but not lost.",
         "",
         "## Timeline",
-        "See the incident timeline — detection was automatic (2 consecutive failed checks), rollback restored service in 26 minutes.",
+        "See the incident timeline. Detection was automatic (2 consecutive failed checks), rollback restored service in 26 minutes.",
         "",
         "## Root cause",
         "The 14:02 deploy halved `upstream_pool_size` via a misread config template. Connections saturated within three minutes under normal load.",
@@ -369,7 +423,7 @@ async function main() {
       type: "status_change",
       status: "monitoring",
       message:
-        "Rollback deployed. Error rate back to baseline — monitoring for regressions.",
+        "Rollback deployed. Error rate back to baseline, monitoring for regressions.",
       createdBy: ids.admin,
       createdAt: new Date(t0 + 24 * MIN),
     },
@@ -381,6 +435,70 @@ async function main() {
         "Stable for 10 minutes across all regions. Resolving; postmortem to follow.",
       createdBy: ids.admin,
       createdAt: new Date(gatewayOutage[1] + 5 * MIN),
+    },
+  ]);
+
+  // --- Last month's incident: acknowledged, then resolved ---------------
+  // The one that makes a monthly report a document rather than a table.
+  // It carries an acknowledgement, which is the only thing MTTA can be
+  // measured from — an incident nobody acked in Vigil leaves that figure
+  // blank, correctly, and a demo where every figure is blank teaches
+  // nothing.
+  const lastMonthOpened = lastMonthOutage[0] + 2 * MIN;
+  const [lastMonthIncident] = await db
+    .insert(incidents)
+    .values({
+      organizationId,
+      title: "API Gateway unreachable from the edge",
+      status: "resolved",
+      severity: "major",
+      source: "monitor",
+      monitorId: monitorIds["API Gateway"],
+      startedAt: new Date(lastMonthOpened),
+      acknowledgedAt: new Date(lastMonthOpened + 11 * MIN),
+      acknowledgedBy: ids.responder,
+      resolvedAt: new Date(lastMonthOutage[1] + 3 * MIN),
+      createdAt: new Date(lastMonthOpened),
+      notifiedAt: new Date(lastMonthOpened),
+      createdBy: null,
+    })
+    .returning({ id: incidents.id });
+  if (!lastMonthIncident) throw new Error("last-month incident insert failed");
+
+  await db.insert(incidentEvents).values([
+    {
+      incidentId: lastMonthIncident.id,
+      type: "created",
+      status: "investigating",
+      message: "API Gateway had been failing for 1 minute and was marked down.",
+      createdBy: null,
+      createdAt: new Date(lastMonthOpened),
+    },
+    {
+      incidentId: lastMonthIncident.id,
+      type: "update",
+      message:
+        "Acknowledged. Gateway health checks failing from every region; upstreams themselves look healthy.",
+      createdBy: ids.responder,
+      createdAt: new Date(lastMonthOpened + 11 * MIN),
+    },
+    {
+      incidentId: lastMonthIncident.id,
+      type: "status_change",
+      status: "identified",
+      message:
+        "The edge load balancer dropped the gateway from its pool after a failed health-check threshold change.",
+      createdBy: ids.responder,
+      createdAt: new Date(lastMonthOpened + 26 * MIN),
+    },
+    {
+      incidentId: lastMonthIncident.id,
+      type: "status_change",
+      status: "resolved",
+      message:
+        "Threshold reverted and the gateway is back in the pool. Traffic normal for 10 minutes.",
+      createdBy: ids.admin,
+      createdAt: new Date(lastMonthOutage[1] + 3 * MIN),
     },
   ]);
 
@@ -426,7 +544,7 @@ async function main() {
       incidentId: ongoing.id,
       type: "system",
       message:
-        "Recovery attempt 1 did not restore Checkout Service — post-recovery verification still failing.",
+        "Recovery attempt 1 did not restore Checkout Service, post-recovery verification still failing.",
       createdBy: null,
       createdAt: new Date(checkoutDownSince + 3 * MIN),
     },
@@ -441,7 +559,7 @@ async function main() {
       incidentId: ongoing.id,
       type: "system",
       message:
-        "Recovery attempt 2 did not restore Checkout Service — post-recovery verification still failing.",
+        "Recovery attempt 2 did not restore Checkout Service, post-recovery verification still failing.",
       createdBy: null,
       createdAt: new Date(checkoutDownSince + 6 * MIN),
     },
@@ -449,7 +567,7 @@ async function main() {
       incidentId: ongoing.id,
       type: "system",
       message:
-        "Automatic recovery exhausted after 2 attempts — waiting for a human.",
+        "Automatic recovery exhausted after 2 attempts, waiting for a human.",
       createdBy: null,
       createdAt: new Date(checkoutDownSince + 6 * MIN),
     },
@@ -457,7 +575,7 @@ async function main() {
       incidentId: ongoing.id,
       type: "update",
       message:
-        "DNS for the checkout upstream stopped resolving after the 17:20 infra change — a restart can't fix a missing CNAME, so recovery correctly stood down. Escalated to the platform team.",
+        "DNS for the checkout upstream stopped resolving after the 17:20 infra change. A restart can't fix a missing CNAME, so recovery correctly stood down. Escalated to the platform team.",
       createdBy: ids.responder,
       createdAt: new Date(checkoutDownSince + 9 * MIN),
     },
@@ -533,7 +651,7 @@ async function main() {
   });
 
   console.log(`
-Demo tenant ready — organization "${DEMO_ORG.name}" (${DEMO_ORG.slug})
+Demo tenant ready, organization "${DEMO_ORG.name}" (${DEMO_ORG.slug})
 
 Sign in with (password: ${DEMO_PASSWORD}):
   owner      ${DEMO_USERS.owner.email}

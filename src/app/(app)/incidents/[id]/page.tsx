@@ -23,7 +23,7 @@ import { StatusControls } from "./status-controls";
 import { IncidentTimeline } from "./timeline";
 import { UpdateComposer } from "./update-composer";
 
-export const metadata: Metadata = { title: "Incident — Vigil" };
+export const metadata: Metadata = { title: "Incident · Vigil" };
 
 export default async function IncidentDetailPage(
   props: PageProps<"/incidents/[id]">,
@@ -181,7 +181,7 @@ export default async function IncidentDetailPage(
                   <dd>
                     {incident.resolvedAt
                       ? formatDateTime(incident.resolvedAt)
-                      : "—"}
+                      : "-"}
                   </dd>
                 </div>
                 <div className="flex items-center justify-between gap-4">

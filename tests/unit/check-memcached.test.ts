@@ -68,6 +68,17 @@ interface FakeMemcachedOptions {
   hangUp?: boolean;
   /** Split every reply across two packets, mid-line. */
   splitReplies?: boolean;
+  /**
+   * Hold every reply back by this many milliseconds.
+   *
+   * The degraded-latency test used to set the threshold to 0.5ms and
+   * trust a loopback round trip to be slower than that. On a quick
+   * runner it is not — the check came back `up` and the suite failed
+   * for a reason that had nothing to do with the code. A server that
+   * really is slow makes the assertion deterministic instead of
+   * hardware-dependent.
+   */
+  replyDelayMs?: number;
 }
 
 interface FakeMemcached {
@@ -117,6 +128,19 @@ async function openMemcached(
     // fixture that tests packet boundaries.
     let queue = Promise.resolve();
     const send = (text: string) => {
+      if (options.replyDelayMs) {
+        const delay = options.replyDelayMs;
+        queue = queue.then(
+          () =>
+            new Promise<void>((resolve) => {
+              setTimeout(() => {
+                socket.write(text);
+                resolve();
+              }, delay);
+            }),
+        );
+        return;
+      }
       if (!options.splitReplies) {
         socket.write(text);
         return;
@@ -480,13 +504,17 @@ describe("what the memcached type asserts", () => {
   });
 
   it("reports a server slower than the threshold as degraded", async () => {
-    const server = await openMemcached();
+    // The server is made slow rather than assumed to be: a 40ms reply
+    // against a 5ms threshold is over it on any machine, where the old
+    // 0.5ms threshold against an ordinary loopback round trip was a bet
+    // on the runner being slow and lost that bet in CI.
+    const server = await openMemcached({ replyDelayMs: 40 });
     const outcome = await check(
-      context(server.port, { config: config({ degradedThresholdMs: 0.5 }) }),
+      context(server.port, { config: config({ degradedThresholdMs: 5 }) }),
     );
 
     expect(outcome.verdict).toBe("degraded");
-    expect(outcome.error).toContain("over the 0.5ms threshold");
+    expect(outcome.error).toContain("over the 5ms threshold");
     expect(outcome.failedAssertions).toEqual(["latency"]);
   });
 });

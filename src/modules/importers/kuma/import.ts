@@ -818,7 +818,7 @@ export function buildMonitorInput(
       const target = sqlserverTarget(row.database_connection_string ?? "");
       if (target === null) {
         refusals.push(
-          "The connection string could not be rewritten as the URL Vigil's SQL Server check takes: it needs a host, a login and — for a named instance — an explicit port, because Vigil does not ask the SQL Browser which port an instance is on.",
+          "The connection string could not be rewritten as the URL Vigil's SQL Server check takes: it needs a host, a login and (for a named instance) an explicit port, because Vigil does not ask the SQL Browser which port an instance is on.",
         );
         base.url = "";
         break;
@@ -907,7 +907,7 @@ export function buildMonitorInput(
         token.length > 0 && pushStoredSchema.safeParse({ token }).success;
       if (token.length > 0 && !usable) {
         notes.push(
-          "The Kuma push token was not carried and a new one was generated: Vigil's tokens are 32–128 characters of letters, digits, hyphen or underscore, and this one is not. Point the job at the new endpoint on the monitor page.",
+          "The Kuma push token was not carried and a new one was generated: Vigil's tokens are 32-128 characters of letters, digits, hyphen or underscore, and this one is not. Point the job at the new endpoint on the monitor page.",
         );
       }
       base.config = usable ? { token } : {};
@@ -1000,7 +1000,7 @@ export function buildMonitorInput(
       base.port = endpoint.port;
       if (brokers.length > 1) {
         notes.push(
-          `${brokers.length - 1} further broker(s) — ${brokers.slice(1).join(", ")} — not carried: ${reasonFor("kafka_producer_brokers")}`,
+          `${brokers.length - 1} further broker(s), ${brokers.slice(1).join(", ")}, not carried: ${reasonFor("kafka_producer_brokers")}`,
         );
       }
       const sasl = parseKafkaSasl(row.kafka_producer_sasl_options);
@@ -1030,7 +1030,7 @@ export function buildMonitorInput(
       base.url = nodes[0] ?? "";
       if (nodes.length > 1) {
         notes.push(
-          `${nodes.length - 1} further node(s) — ${nodes.slice(1).join(", ")} — not carried: ${reasonFor("rabbitmq_nodes")}`,
+          `${nodes.length - 1} further node(s), ${nodes.slice(1).join(", ")}, not carried: ${reasonFor("rabbitmq_nodes")}`,
         );
       }
       base.config = {
@@ -1422,7 +1422,7 @@ export async function importKumaDatabase(
           const message =
             at.length > 0 ? `${at}: ${issue.message}` : issue.message;
           if (!refusals.some((existing) => existing.includes(issue.message))) {
-            refusals.push(`Vigil's monitor rules refuse it — ${message}`);
+            refusals.push(`Vigil's monitor rules refuse it, ${message}`);
           }
         }
       }
@@ -1514,7 +1514,7 @@ export async function importKumaDatabase(
       sourceId: String(notification.id),
       label: notification.name,
       outcome: "unsupported",
-      detail: `A Kuma "${notification.provider ?? "unknown"}" provider. Vigil routes alerts through an organisation-wide webhook endpoint and its escalation policies rather than per-monitor providers, and this importer copies no provider credentials — it does not even read them. Recreate the channel under Settings → Notifications; the imported monitors will use it without being attached to it.`,
+      detail: `A Kuma "${notification.provider ?? "unknown"}" provider. Vigil routes alerts through an organization-wide webhook endpoint and its escalation policies rather than per-monitor providers, and this importer copies no provider credentials. It does not even read them. Recreate the channel under Settings → Notifications; the imported monitors will use it without being attached to it.`,
       monitorId: null,
     });
   }
@@ -1538,7 +1538,7 @@ export async function importKumaDatabase(
       label: tag.name,
       outcome: "unsupported",
       detail:
-        "Vigil has no monitor tags. Nothing in the schema can hold the name or its colour.",
+        "Vigil has no monitor tags. Nothing in the schema can hold the name or its color.",
       monitorId: null,
     });
   }
@@ -1549,7 +1549,7 @@ export async function importKumaDatabase(
       sourceId: `${applied.monitorId}:${applied.tagId}`,
       label: `${monitorNames.get(applied.monitorId) ?? applied.monitorId} tagged ${applied.tagId}`,
       outcome: "unsupported",
-      detail: `Tag applied${applied.value !== null && applied.value.length > 0 ? ` with the value "${applied.value}"` : ""}. Vigil has no monitor tags. A group is the nearest thing and is not the same thing — a monitor belongs to one group and carries any number of tags.`,
+      detail: `Tag applied${applied.value !== null && applied.value.length > 0 ? ` with the value "${applied.value}"` : ""}. Vigil has no monitor tags. A group is the nearest thing and is not the same thing. A monitor belongs to one group and carries any number of tags.`,
       monitorId: null,
     });
   }
@@ -1745,7 +1745,7 @@ async function importStatusPages(
 
     if (base === null) {
       refusePage(
-        `The Kuma slug "${page.slug}" cannot become a Vigil one: a slug is 3–63 characters of lowercase letters, digits and dashes, because it is the public URL. Create the page by hand and add the imported monitors to it.`,
+        `The Kuma slug "${page.slug}" cannot become a Vigil one: a slug is 3-63 characters of lowercase letters, digits and dashes, because it is the public URL. Create the page by hand and add the imported monitors to it.`,
       );
       continue;
     }
@@ -1779,7 +1779,7 @@ async function importStatusPages(
 
     if (page.passwordProtected) {
       notes.push(
-        "Kuma kept this page behind a shared password, which cannot be carried — Kuma hashes it with bcrypt and Vigil with scrypt, and neither can produce the other without the plaintext. The page is imported as private, visible to members of this organisation only, so a migration cannot become a disclosure. Set a password to make it shared again.",
+        "Kuma kept this page behind a shared password, which cannot be carried. Kuma hashes it with bcrypt and Vigil with scrypt, and neither can produce the other without the plaintext. The page is imported as private, visible to members of this organisation only, so a migration cannot become a disclosure. Set a password to make it shared again.",
       );
     }
     await updateStatusPage(db, actor, {

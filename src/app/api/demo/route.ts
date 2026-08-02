@@ -29,7 +29,7 @@ export async function GET() {
     }
     return redirect;
   } catch (error) {
-    logger.error({ err: error }, "demo sign-in failed — is the demo seeded?");
+    logger.error({ err: error }, "demo sign-in failed. Is the demo seeded?");
     return new NextResponse("Demo is not seeded yet.", { status: 503 });
   }
 }

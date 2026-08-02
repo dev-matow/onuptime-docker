@@ -21,7 +21,7 @@ export function ResponseTimeChart({
   if (checks.length === 0) {
     return (
       <div className="text-muted-foreground flex h-24 items-center justify-center border border-dashed text-xs">
-        No checks yet — the first check runs within a minute.
+        No checks yet. The first check runs within a minute.
       </div>
     );
   }
@@ -105,7 +105,7 @@ export function ResponseTimeChart({
               height={barHeight}
               className={barClass}
             >
-              <title>{`${formatDateTime(check.checkedAt)} — ${label}`}</title>
+              <title>{`${formatDateTime(check.checkedAt)}, ${label}`}</title>
             </rect>
           );
         })}

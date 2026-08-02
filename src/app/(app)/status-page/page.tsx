@@ -26,7 +26,7 @@ import { DeleteStatusPageButton } from "./delete-status-page";
 import { StatusPageSettingsForm } from "./settings-form";
 import { StatusPageMonitorsForm } from "./monitors-form";
 
-export const metadata: Metadata = { title: "Status pages — Vigil" };
+export const metadata: Metadata = { title: "Status pages · Vigil" };
 
 export default async function StatusPageSettings() {
   const ctx = await requireOrgContext();
@@ -133,7 +133,7 @@ export default async function StatusPageSettings() {
                 <CardTitle>Components</CardTitle>
                 <CardDescription>
                   Choose which monitors appear on this page. Give them
-                  customer-facing names — visitors see the display name, never
+                  customer-facing names, visitors see the display name, never
                   the URL.
                 </CardDescription>
               </CardHeader>

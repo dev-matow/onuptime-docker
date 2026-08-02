@@ -36,7 +36,7 @@ Before you open a pull request:
 npm run lint && npm run typecheck && npm test && npm run format:check
 ```
 
-CI runs the same three plus a Playwright end-to-end pass and a Docker
+CI runs the same four plus a Playwright end-to-end pass and a Docker
 build. See [docs/HANDBOOK.md](docs/HANDBOOK.md) for the full command
 table and debugging notes.
 
@@ -61,7 +61,7 @@ These aren't style preferences — breaking them breaks things:
 
 ## Tests
 
-New behaviour needs a test. The suite is split:
+New behavior needs a test. The suite is split:
 
 - `tests/unit/` — pure functions, no database.
 - `tests/integration/` — real Postgres, one throwaway organization per
@@ -98,5 +98,5 @@ valuable on its own and costs you nothing.
 ## Code of conduct
 
 Be decent. Assume good faith, keep criticism about the code, and don't
-make people regret showing up. Behaviour that makes this an unpleasant
+make people regret showing up. Behavior that makes this an unpleasant
 place gets you removed from it.

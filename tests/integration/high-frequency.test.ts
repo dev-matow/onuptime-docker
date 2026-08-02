@@ -446,6 +446,14 @@ describe("rollups", () => {
     // mean of the two minute-means says ~505ms; the truth is ~14ms.
     const base = new Date(Date.now() - 150_000);
     base.setUTCSeconds(0, 0);
+    // The two minutes have to land in the same hour, or the assertion
+    // below reads whichever of the two hour buckets came back first and
+    // counts half the samples. Truncated to the minute, `base` sits at
+    // :59 for one minute in every sixty, which is how this test passed
+    // locally and failed a CI run that happened to start at 00:02 UTC.
+    if (base.getUTCMinutes() === 59) {
+      base.setUTCMinutes(58);
+    }
     await db.insert(monitorHfSamples).values([
       {
         monitorId: monitor.id,

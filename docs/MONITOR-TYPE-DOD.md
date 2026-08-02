@@ -6,7 +6,7 @@ edit this file; run `npm run dod`.
 Section 13 of the release reference lists what makes a monitor type
 complete, and says plainly that a selector option, a registry entry or a
 conformance test does not prove it. A hand-written table proves less
-still — it records what someone believed on the day they typed it. So
+still: it records what someone believed on the day they typed it. So
 every cell below is answered by looking at the code.
 
 **What a "yes" means, and what it does not.** It means the artefact
@@ -15,58 +15,69 @@ stands up a real server. It does not mean the artefact is good. This
 matrix can prove absence; it cannot prove quality. Reviewers still
 review.
 
-Columns that do not apply to a kind are `—`, not a failure. A `group`
+Columns that do not apply to a kind are `-`, not a failure. A `group`
 monitor has no protocol fixture because it dials nothing, and scoring it
 against one would make this table lie in the direction that flatters it.
 
-40 types.
+**Remote probe** says whether a customer-hosted probe agent can run the
+type. Every active type can: the agent loads the same registry the
+controller does, so there is one checker per protocol rather than two.
+The three types marked `-` have no target to dial from anywhere. A
+`push` monitor is the monitored thing calling Vigil, a `group` is
+arithmetic over its children, and a `manual` monitor is set by a
+person. Assigning one to a fleet is refused when it is requested, and
+refused again by the dispatcher if an older row survives, so a monitor
+never sits on a fleet reporting nothing. See
+[docs/REMOTE-PROBES.md](REMOTE-PROBES.md).
 
-| Type             | Kind      | Probe | Assertions | Secrets declared | Config preserved | Export/import | Unit test | Protocol fixture |
-| ---------------- | --------- | ----- | ---------- | ---------------- | ---------------- | ------------- | --------- | ---------------- |
-| `dns`            | active    | yes   | yes        | —                | yes              | yes           | yes       | —                |
-| `docker`         | active    | yes   | yes        | —                | yes              | yes           | yes       | yes              |
-| `domain-expiry`  | active    | yes   | yes        | —                | yes              | yes           | yes       | yes              |
-| `elasticsearch`  | active    | yes   | yes        | yes              | yes              | yes           | yes       | yes              |
-| `ftp`            | active    | yes   | yes        | yes              | yes              | yes           | yes       | yes              |
-| `gamedig`        | active    | yes   | yes        | —                | yes              | yes           | yes       | yes              |
-| `globalping`     | active    | yes   | yes        | yes              | yes              | yes           | yes       | yes              |
-| `group`          | aggregate | yes   | yes        | —                | yes              | yes           | yes       | —                |
-| `grpc`           | active    | yes   | yes        | —                | yes              | yes           | yes       | yes              |
-| `http`           | active    | yes   | yes        | —                | yes              | yes           | yes       | yes              |
-| `imap`           | active    | yes   | yes        | —                | yes              | yes           | yes       | yes              |
-| `json-query`     | active    | yes   | yes        | —                | yes              | yes           | yes       | yes              |
-| `kafka-producer` | active    | yes   | yes        | yes              | yes              | yes           | yes       | yes              |
-| `ldap`           | active    | yes   | yes        | yes              | yes              | yes           | yes       | yes              |
-| `manual`         | manual    | yes   | yes        | —                | yes              | yes           | yes       | —                |
-| `memcached`      | active    | yes   | yes        | yes              | yes              | yes           | yes       | yes              |
-| `mongodb`        | active    | yes   | yes        | —                | yes              | yes           | yes       | yes              |
-| `mqtt`           | active    | yes   | yes        | yes              | yes              | yes           | yes       | yes              |
-| `mysql`          | active    | yes   | yes        | —                | yes              | yes           | yes       | yes              |
-| `ntp`            | active    | yes   | yes        | —                | yes              | yes           | yes       | yes              |
-| `oracledb`       | active    | yes   | yes        | —                | yes              | yes           | yes       | yes              |
-| `ping`           | active    | yes   | yes        | —                | yes              | yes           | yes       | yes              |
-| `postgres`       | active    | yes   | yes        | —                | yes              | yes           | yes       | yes              |
-| `push`           | passive   | yes   | yes        | yes              | yes              | yes           | yes       | —                |
-| `rabbitmq`       | active    | yes   | yes        | yes              | yes              | yes           | yes       | yes              |
-| `radius`         | active    | yes   | yes        | yes              | yes              | yes           | yes       | yes              |
-| `real-browser`   | active    | yes   | yes        | yes              | yes              | yes           | yes       | yes              |
-| `redis`          | active    | yes   | yes        | yes              | yes              | yes           | yes       | yes              |
-| `sip`            | active    | yes   | yes        | —                | yes              | yes           | yes       | yes              |
-| `smtp`           | active    | yes   | yes        | —                | yes              | yes           | yes       | yes              |
-| `snmp`           | active    | yes   | yes        | yes              | yes              | yes           | yes       | yes              |
-| `sqlserver`      | active    | yes   | yes        | —                | yes              | yes           | yes       | yes              |
-| `ssh`            | active    | yes   | yes        | —                | yes              | yes           | yes       | yes              |
-| `steam`          | active    | yes   | yes        | —                | yes              | yes           | yes       | yes              |
-| `system-service` | active    | yes   | yes        | —                | yes              | yes           | yes       | yes              |
-| `tailscale-ping` | active    | yes   | yes        | —                | yes              | yes           | yes       | yes              |
-| `tcp`            | active    | yes   | yes        | —                | yes              | yes           | yes       | yes              |
-| `tls-expiry`     | active    | yes   | yes        | —                | yes              | yes           | yes       | yes              |
-| `udp`            | active    | yes   | yes        | —                | yes              | yes           | yes       | yes              |
-| `websocket`      | active    | yes   | yes        | yes              | yes              | yes           | yes       | yes              |
+40 types: 37 run on probes, 3 run only on the controller.
+
+| Type             | Kind      | Probe | Remote probe | Assertions | Secrets declared | Config preserved | Export/import | Unit test | Protocol fixture |
+| ---------------- | --------- | ----- | ------------ | ---------- | ---------------- | ---------------- | ------------- | --------- | ---------------- |
+| `dns`            | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | -                |
+| `docker`         | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
+| `domain-expiry`  | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
+| `elasticsearch`  | active    | yes   | yes          | yes        | yes              | yes              | yes           | yes       | yes              |
+| `ftp`            | active    | yes   | yes          | yes        | yes              | yes              | yes           | yes       | yes              |
+| `gamedig`        | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
+| `globalping`     | active    | yes   | yes          | yes        | yes              | yes              | yes           | yes       | yes              |
+| `group`          | aggregate | yes   | -            | yes        | -                | yes              | yes           | yes       | -                |
+| `grpc`           | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
+| `http`           | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
+| `imap`           | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
+| `json-query`     | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
+| `kafka-producer` | active    | yes   | yes          | yes        | yes              | yes              | yes           | yes       | yes              |
+| `ldap`           | active    | yes   | yes          | yes        | yes              | yes              | yes           | yes       | yes              |
+| `manual`         | manual    | yes   | -            | yes        | -                | yes              | yes           | yes       | -                |
+| `memcached`      | active    | yes   | yes          | yes        | yes              | yes              | yes           | yes       | yes              |
+| `mongodb`        | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
+| `mqtt`           | active    | yes   | yes          | yes        | yes              | yes              | yes           | yes       | yes              |
+| `mysql`          | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
+| `ntp`            | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
+| `oracledb`       | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
+| `ping`           | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
+| `postgres`       | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
+| `push`           | passive   | yes   | -            | yes        | yes              | yes              | yes           | yes       | -                |
+| `rabbitmq`       | active    | yes   | yes          | yes        | yes              | yes              | yes           | yes       | yes              |
+| `radius`         | active    | yes   | yes          | yes        | yes              | yes              | yes           | yes       | yes              |
+| `real-browser`   | active    | yes   | yes          | yes        | yes              | yes              | yes           | yes       | yes              |
+| `redis`          | active    | yes   | yes          | yes        | yes              | yes              | yes           | yes       | yes              |
+| `sip`            | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
+| `smtp`           | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
+| `snmp`           | active    | yes   | yes          | yes        | yes              | yes              | yes           | yes       | yes              |
+| `sqlserver`      | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
+| `ssh`            | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
+| `steam`          | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
+| `system-service` | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
+| `tailscale-ping` | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
+| `tcp`            | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
+| `tls-expiry`     | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
+| `udp`            | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
+| `websocket`      | active    | yes   | yes          | yes        | yes              | yes              | yes           | yes       | yes              |
 
 ## Protocol-fixture exemptions
 
-- `dns` — Its seam is an injected `DnsResolver`, deliberately: the probe must query the resolver the monitor names rather than the worker's own, and `check-dns.test.ts` drives that seam. A UDP fixture would have to override the system resolver to reach the probe, and what it would then exercise is `node:dns`, not this code.
+- `dns`: Its seam is an injected `DnsResolver`, deliberately: the probe must query the resolver the monitor names rather than the worker's own, and `check-dns.test.ts` drives that seam. A UDP fixture would have to override the system resolver to reach the probe, and what it would then exercise is `node:dns`, not this code.
 
 ## Open gaps
 

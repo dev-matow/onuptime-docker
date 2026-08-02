@@ -19,8 +19,8 @@ samples are evenly spaced, and Vigil's scheduler deliberately makes sure
 they are not: `src/modules/monitors/scheduling.ts` probes a suspicious
 monitor `SUSPICION_DIVISOR` (16) times as often as its baseline and a
 calm one `CALM_MULTIPLIER` (2) times less. A count-weighted ratio
-therefore oversamples exactly the minutes that went wrong — by up to 32x
-— and reports a short blip as a long outage.
+therefore oversamples exactly the minutes that went wrong, by up to 32x,
+and reports a short blip as a long outage.
 
 The adaptive scheduler is correct. Counting rows was the wrong reader.
 
@@ -53,7 +53,7 @@ time an operator can explain, too long invents green.
 
 The horizon exists because the thing an observation measured can change
 without telling anybody. That is true of a probe result, of a heartbeat
-and of a group's derived state — and it is not true of a **manual**
+and of a group's derived state, and it is not true of a **manual**
 monitor, whose state is a person's statement. A statement does not go
 stale; it is replaced, by the same person or another one, and until then
 it is exactly as true as it was when it was made.
@@ -74,17 +74,17 @@ that are not probes:
 | `aggregate` | the members' states, rolled up   | 3 × interval\*      |
 | `manual`    | what an operator stated          | until it is changed |
 
-\* A group has no cadence of its own — it can only learn something when
-a member reports — so Vigil keeps its interval equal to its slowest
+\* A group has no cadence of its own. It can only learn something when
+a member reports, so Vigil keeps its interval equal to its slowest
 member's. That is what stops a group of hourly monitors from reporting
 coverage gaps that were never gaps in evidence.
 
 ## What counts as up
 
-- **`ok`** — so `degraded` counts as up. Uptime answers "was it
+- **`ok`**: so `degraded` counts as up. Uptime answers "was it
   serving", not "was it fast". Response time is its own number.
 - **`indeterminate`** observations establish no state at all. They are
-  Vigil saying "I could not tell" — a ping probe on a worker without
+  Vigil saying "I could not tell", a ping probe on a worker without
   `CAP_NET_RAW`, a check type this build no longer has. They are stored
   `ok = false` because there is no third boolean, so counting them would
   publish a red strip for an operator configuration problem. They enter
@@ -100,8 +100,8 @@ coverage gaps that were never gaps in evidence.
 ## Paused monitors
 
 A paused monitor writes no checks, so a paused stretch produces exactly
-one thing: uncovered time. That is the honest answer — Vigil has no
-evidence about a period it was told not to look at — and it needs no
+one thing: uncovered time. That is the honest answer. Vigil has no
+evidence about a period it was told not to look at, and it needs no
 pause-history table to say it.
 
 The consequence worth knowing: pausing a monitor for a week and resuming
@@ -118,7 +118,7 @@ and the detail page will say so.
   is no separate carry-in lookup to get wrong.
 - The final observation in a window stands until the window ends or its
   horizon expires, whichever comes first. Callers pass
-  `min(now, requested end)` — the future is not covered.
+  `min(now, requested end)`: the future is not covered.
 - A monitor created mid-window has no evidence about the time before it
   existed and is not charged for it.
 
@@ -142,7 +142,7 @@ One ratio over the whole window: total up time divided by total covered
 time.
 
 Not the mean of ninety daily percentages. That older rule weighted a day
-holding three samples exactly as heavily as a day holding seven hundred —
+holding three samples exactly as heavily as a day holding seven hundred,
 a second distortion stacked on the first. Because the headline and the
 strip now come from the same segments at different resolutions, they can
 no longer disagree.
@@ -154,7 +154,7 @@ samples. `uptimeSegments()` is the same rule in SQL, so a 90-day page
 does not stream a million rows into Node.
 
 Two implementations of one rule is exactly the arrangement that drifts,
-and the drift would be invisible — both sides return a plausible
+and the drift would be invisible, both sides return a plausible
 percentage. So `tests/integration/uptime-parity.test.ts` runs them
 against the same randomised, deliberately ugly histories (irregular
 gaps, clustered bursts, blackouts longer than any horizon, samples
@@ -179,4 +179,4 @@ defensible one.
 
 Retention prunes `monitor_checks` at 90 days, which is also the
 status-page window, so the oldest end of the strip is always partially
-pruned. That is pre-existing behaviour and unchanged by this work.
+pruned. That is pre-existing behavior and unchanged by this work.

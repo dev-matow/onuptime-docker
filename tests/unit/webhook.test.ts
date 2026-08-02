@@ -102,7 +102,7 @@ describe("renderEventText / buildDeliveryBody", () => {
 
   it("renders a one-line summary with severity, monitor and link", () => {
     expect(renderEventText(incidentPayload)).toBe(
-      "🔴 Incident opened — Checkout Service is down [critical] (Checkout Service)\n" +
+      "🔴 Incident opened - Checkout Service is down [critical] (Checkout Service)\n" +
         "https://vigil.example/incidents/i1",
     );
   });
@@ -114,7 +114,7 @@ describe("renderEventText / buildDeliveryBody", () => {
       data: { monitor: { name: "API Gateway" } },
     });
     expect(renderEventText(monitorOnly)).toBe(
-      "🟢 Monitor recovered — API Gateway",
+      "🟢 Monitor recovered - API Gateway",
     );
 
     const test = buildWebhookPayload({
@@ -123,7 +123,7 @@ describe("renderEventText / buildDeliveryBody", () => {
       data: { message: "This is a test delivery from Vigil." },
     });
     expect(renderEventText(test)).toBe(
-      "✅ Test notification from Vigil — This is a test delivery from Vigil.",
+      "✅ Test notification from Vigil - This is a test delivery from Vigil.",
     );
 
     const bare = buildWebhookPayload({

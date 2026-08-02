@@ -132,13 +132,13 @@ export function renderEventText(payload: WebhookPayload): string {
   };
   const parts = [EVENT_LABELS[payload.event] ?? payload.event];
   if (data.incident?.title) {
-    parts.push(`— ${data.incident.title}`);
+    parts.push(`- ${data.incident.title}`);
     if (data.incident.severity) parts.push(`[${data.incident.severity}]`);
     if (data.monitor?.name) parts.push(`(${data.monitor.name})`);
   } else if (data.monitor?.name) {
-    parts.push(`— ${data.monitor.name}`);
+    parts.push(`- ${data.monitor.name}`);
   } else if (typeof data.message === "string") {
-    parts.push(`— ${data.message}`);
+    parts.push(`- ${data.message}`);
   }
   const line = parts.join(" ");
   return data.incident?.url ? `${line}\n${data.incident.url}` : line;

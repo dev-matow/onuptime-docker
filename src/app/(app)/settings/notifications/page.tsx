@@ -18,7 +18,7 @@ import { WEBHOOK_EVENTS } from "@/modules/notifications/webhook";
 
 import { WebhookForm } from "./webhook-form";
 
-export const metadata: Metadata = { title: "Notifications — Vigil" };
+export const metadata: Metadata = { title: "Notifications · Vigil" };
 
 export default async function NotificationsSettingsPage() {
   const ctx = await requireOrgContext();
@@ -51,7 +51,7 @@ export default async function NotificationsSettingsPage() {
                 aria-hidden
               />
               <span className="text-muted-foreground">
-                Not configured — set{" "}
+                Not configured, set{" "}
                 <code className="font-mono">RESEND_API_KEY</code> to enable
                 delivery. Notifications are written to the logs until then.
               </span>

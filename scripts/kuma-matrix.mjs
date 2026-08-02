@@ -16,7 +16,7 @@
  *
  * It derives, never restates. If a reviewer wants to know whether
  * `mqtt` imports, the answer here is the same object the importer
- * branches on — not a sentence somebody kept up to date by hand.
+ * branches on, not a sentence somebody kept up to date by hand.
  */
 
 import { execFileSync } from "node:child_process";
@@ -113,7 +113,7 @@ if (CHECK) {
 } else {
   writeFileSync(ARTIFACT, serialised);
   console.log(
-    `kuma: wrote ${ARTIFACT} — ${artifact.counts.typesMapped}/${artifact.counts.kumaTypes} types, ` +
+    `kuma: wrote ${ARTIFACT}, ${artifact.counts.typesMapped}/${artifact.counts.kumaTypes} types, ` +
       `${artifact.counts.monitorColumns} columns`,
   );
 }

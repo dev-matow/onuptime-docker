@@ -114,7 +114,7 @@ export const snmpStoredSchema = z
       .max(255)
       .refine(isEncodableOid, {
         message:
-          "Enter a numeric OID like 1.3.6.1.2.1.1.3.0 — names from a MIB are not resolved.",
+          "Enter a numeric OID like 1.3.6.1.2.1.1.3.0, names from a MIB are not resolved.",
       })
       .default(DEFAULT_SNMP_OID),
     version: z.enum(SNMP_VERSIONS).default("2c"),

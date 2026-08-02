@@ -318,7 +318,7 @@ describe("the types that were unsupported until Vigil had an equivalent", () => 
     // the token is the only thing authenticating /api/push/<token>.
     const built = buildMonitorInput(fixtureRow("push"), "push", NO_REGISTRIES);
     expect(built.input.config).toEqual({});
-    expect(built.notes.join(" ")).toContain("32–128 characters");
+    expect(built.notes.join(" ")).toContain("32-128 characters");
   });
 
   it("splits Kuma's gRPC host:port and says the health service is not the method Kuma called", () => {

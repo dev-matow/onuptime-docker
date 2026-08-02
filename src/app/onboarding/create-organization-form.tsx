@@ -80,7 +80,7 @@ export function CreateOrganizationForm() {
             }}
           />
           <FieldDescription>
-            Used in URLs — lowercase letters, numbers and dashes.
+            Used in URLs, lowercase letters, numbers and dashes.
           </FieldDescription>
         </Field>
         {error && (

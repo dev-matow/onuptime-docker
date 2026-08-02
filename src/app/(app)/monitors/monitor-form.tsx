@@ -406,7 +406,7 @@ export function MonitorForm({
                 Have your job call this URL when it finishes. Add{" "}
                 <code>?status=down&amp;msg=what+broke</code> to report a
                 failure, or <code>?ping=1234</code> to record how long the job
-                took. Anyone holding this URL can say this monitor is fine —
+                took. Anyone holding this URL can say this monitor is fine,
                 treat it like a password.
               </FieldDescription>
             </Field>
@@ -456,7 +456,7 @@ export function MonitorForm({
         {descriptor.requiresCapability === "icmp" && (
           <FieldDescription>
             ICMP needs a raw socket. If the worker cannot open one, this monitor
-            reports <strong>unknown</strong> with an explanation — never a false
+            reports <strong>unknown</strong> with an explanation, never a false
             outage.
           </FieldDescription>
         )}
@@ -541,7 +541,7 @@ export function MonitorForm({
               <FieldDescription>
                 {dials ? (
                   <>
-                    {humanSeconds(readNumber(intervalSeconds, 60))} — a
+                    {humanSeconds(readNumber(intervalSeconds, 60))}, a
                     baseline, not a fixed rate. Vigil checks more often when a
                     target looks suspicious and backs off when it has been
                     steady.
@@ -549,7 +549,7 @@ export function MonitorForm({
                 ) : (
                   <>
                     How often the job is supposed to check in. Go this long
-                    without a heartbeat — plus the grace below — and the monitor
+                    without a heartbeat (plus the grace below) and the monitor
                     is down.
                   </>
                 )}
@@ -681,7 +681,7 @@ export function MonitorForm({
                 ))}
               </datalist>
               <FieldDescription>
-                How long it must keep failing before an incident opens —{" "}
+                How long it must keep failing before an incident opens:{" "}
                 {humanSeconds(readNumber(failureWindowSeconds, 120))}. Counting
                 failures instead stops meaning anything once the interval
                 adapts.
@@ -714,8 +714,8 @@ export function MonitorForm({
                   className="font-mono"
                 />
                 <FieldDescription>
-                  Assert the response body contains (or doesn&apos;t) this text
-                  — catches a 200 that serves an error page. Leave empty to
+                  Assert the response body contains (or doesn&apos;t) this text,
+                  catches a 200 that serves an error page. Leave empty to
                   skip.
                 </FieldDescription>
               </Field>

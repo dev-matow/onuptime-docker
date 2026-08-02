@@ -226,7 +226,7 @@ export async function draftPostmortemAction(
   try {
     const ctx = await requirePermission({ incident: ["postmortem"] });
     if (!checkRateLimit(`ai:${ctx.organizationId}`, AI_RATE_LIMIT)) {
-      return actionError("AI limit reached for this hour — try again later.");
+      return actionError("AI limit reached for this hour, try again later.");
     }
     const detail = await getIncidentDetail(db, ctx.organizationId, incidentId);
     const draft = await draftPostmortem(detail);
@@ -242,7 +242,7 @@ export async function suggestStatusUpdateAction(
   try {
     const ctx = await requirePermission({ incident: ["update"] });
     if (!checkRateLimit(`ai:${ctx.organizationId}`, AI_RATE_LIMIT)) {
-      return actionError("AI limit reached for this hour — try again later.");
+      return actionError("AI limit reached for this hour, try again later.");
     }
     const detail = await getIncidentDetail(db, ctx.organizationId, incidentId);
     const suggestion = await suggestStatusUpdate(detail);

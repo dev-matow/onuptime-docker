@@ -385,7 +385,7 @@ describe("websocketProbe", () => {
     // `new URL` throwing on the worker's hot path would escape the probe.
     const result = await websocketProbe(context("https://example.com/socket"));
 
-    expect(result.error).toBe("Not a WebSocket URL — expected ws:// or wss://");
+    expect(result.error).toBe("Not a WebSocket URL, expected ws:// or wss://");
   });
 });
 

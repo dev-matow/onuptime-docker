@@ -43,7 +43,7 @@ function button(url: string, label: string): string {
 /**
  * How long a monitor had been failing, in words. Replaces the old
  * "failed 3 checks" phrasing, which stopped being meaningful once the
- * interval between those checks became adaptive — three failures could
+ * interval between those checks became adaptive, three failures could
  * be three seconds or half an hour and the reader had no way to tell.
  */
 export function describeFailureWindow(seconds: number): string {
@@ -99,7 +99,7 @@ export function renderSubscriptionConfirmEmail(input: {
     text: [
       `Confirm that you want status updates for ${input.pageName}.`,
       `Confirm here: ${input.confirmUrl}`,
-      `If you didn't request this, ignore this email — nothing was subscribed.`,
+      `If you didn't request this, ignore this email. Nothing was subscribed.`,
     ].join("\n\n"),
     html: shell(
       `<div style="font-size:18px;font-weight:600;margin-bottom:8px">Confirm your subscription</div>

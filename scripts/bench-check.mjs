@@ -16,7 +16,7 @@
  *
  * SECOND: an artefact that cannot be audited. A benchmark result with
  * no commit, no environment and no window is a number with no
- * provenance — unreproducible by definition, however true it was on the
+ * provenance, unreproducible by definition, however true it was on the
  * day. Every required field is asserted present.
  *
  * What this cannot do is re-run the benchmark. It checks that what was
@@ -67,7 +67,7 @@ for (const name of files) {
   const raw = JSON.parse(readFileSync(join(BENCH, name), "utf8"));
   for (const [path, why] of REQUIRED) {
     if (pick(raw, path) === undefined || pick(raw, path) === null) {
-      fail(`${name}: missing \`${path}\` — ${why}`);
+      fail(`${name}: missing \`${path}\`: ${why}`);
     }
   }
 
@@ -96,6 +96,8 @@ for (const name of files) {
     fail(`two artefacts for N=${n}; the table cannot quote both`);
   runs.set(n, { name, raw });
 }
+
+/* ── the probe artefacts ───────────────────────────────────────────── */
 
 /* ── the published table ───────────────────────────────────────────── */
 
@@ -152,7 +154,7 @@ for (const n of runs.keys()) {
 /* ── the boundary ──────────────────────────────────────────────────── */
 
 // Stated as a requirement rather than a prohibition, because this is
-// the one page where those exact phrases SHOULD appear — in the
+// the one page where those exact phrases SHOULD appear, in the
 // sentences that deny them. Forbidding the words here would flag the
 // disclaimer and pass a page that simply never raised the subject,
 // which is the wrong way round: silence about the boundary is the

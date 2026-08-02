@@ -55,7 +55,7 @@ export function ForgotPasswordForm() {
         </p>
         <p className="text-muted-foreground">
           If an account uses that address, the email holds a link to set a new
-          password — it works once and expires in an hour. If no account uses
+          password. It works once and expires in an hour. If no account uses
           it, the email says that instead.
         </p>
       </div>

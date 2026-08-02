@@ -13,7 +13,7 @@ import { requireSession } from "@/lib/session";
 
 import { CreateOrganizationForm } from "./create-organization-form";
 
-export const metadata: Metadata = { title: "Create organization — Vigil" };
+export const metadata: Metadata = { title: "Create organization · Vigil" };
 
 export default async function OnboardingPage(props: PageProps<"/onboarding">) {
   const session = await requireSession();

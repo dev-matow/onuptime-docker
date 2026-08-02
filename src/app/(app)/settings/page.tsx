@@ -19,7 +19,7 @@ import { OrganizationForm } from "./organization-form";
 import { PasswordForm } from "./password-form";
 import { ProfileForm } from "./profile-form";
 
-export const metadata: Metadata = { title: "Settings — Vigil" };
+export const metadata: Metadata = { title: "Settings · Vigil" };
 
 export default async function GeneralSettingsPage() {
   const ctx = await requireOrgContext();

@@ -48,7 +48,7 @@ import { requireSpec } from "@/modules/monitors/types/specs";
 import { MonitorDetailActions } from "./monitor-detail-actions";
 import { ResponseTimeChart } from "./response-time-chart";
 
-export const metadata: Metadata = { title: "Monitor — Vigil" };
+export const metadata: Metadata = { title: "Monitor · Vigil" };
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -235,11 +235,12 @@ export default async function MonitorDetailPage(
       </Card>
 
 
+
       <section className="space-y-3">
         <h2 className="text-sm font-medium">Recent checks</h2>
         {recentChecks.length === 0 ? (
           <p className="text-muted-foreground border border-dashed p-6 text-center text-xs">
-            No checks recorded yet — the first check runs within a minute.
+            No checks recorded yet. The first check runs within a minute.
           </p>
         ) : (
           <Card className="gap-0 py-0">
@@ -266,11 +267,11 @@ export default async function MonitorDetailPage(
                       />
                     </TableCell>
                     <TableCell className="text-right font-mono tabular-nums">
-                      {check.statusCode ?? "—"}
+                      {check.statusCode ?? "-"}
                     </TableCell>
                     <TableCell className="text-right font-mono tabular-nums">
                       {check.responseTimeMs === null
-                        ? "—"
+                        ? "-"
                         : formatDuration(check.responseTimeMs)}
                     </TableCell>
                     <TableCell className="pr-4">
@@ -282,7 +283,7 @@ export default async function MonitorDetailPage(
                           {check.error}
                         </span>
                       ) : (
-                        <span className="text-muted-foreground">—</span>
+                        <span className="text-muted-foreground">-</span>
                       )}
                     </TableCell>
                   </TableRow>

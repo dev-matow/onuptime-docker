@@ -90,7 +90,7 @@ export const elasticsearchTargetSchema = monitorUrlSchema.refine(
   },
   {
     message:
-      "Put the username and password in this monitor's settings, not in the URL — the URL is exported and shown verbatim.",
+      "Put the username and password in this monitor's settings, not in the URL. The URL is exported and shown verbatim.",
   },
 );
 

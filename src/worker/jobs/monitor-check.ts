@@ -56,7 +56,7 @@ interface Enqueuer {
  * why the chains are per-actor: adding a replica adds a chain instead
  * of adding contention to one.
  */
-function workerActorId(): Promise<string> {
+export function workerActorId(): Promise<string> {
   const name =
     process.env.VIGIL_ACTOR_NAME ?? process.env.HOSTNAME ?? os.hostname();
   return ensureActor(db, "worker", name);
@@ -134,6 +134,7 @@ export async function runMonitorCheck(
     log.debug({ monitorId }, "skipped: the high-frequency plane owns this");
     return;
   }
+
 
   const outcome = await evaluateMonitor(db, monitor, {
     allowPrivateTargets:

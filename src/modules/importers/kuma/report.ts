@@ -181,9 +181,9 @@ export function summariseReport(report: ImportReport): string {
   const lines: string[] = [];
   lines.push(
     report.status === "refused"
-      ? "Import refused — nothing was written."
+      ? "Import refused. Nothing was written."
       : report.status === "preview"
-        ? `Dry run — nothing was written. ${report.totals.monitorsCreated} monitor(s) would be imported.`
+        ? `Dry run. Nothing was written. ${report.totals.monitorsCreated} monitor(s) would be imported.`
         : `Imported ${report.totals.monitorsCreated} monitor(s).`,
   );
   for (const entry of report.drift) {

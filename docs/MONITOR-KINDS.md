@@ -12,8 +12,8 @@ do not, and they cannot be made to without lying about what they are:
 
 Every kind still ends at the same place. Each one produces _facts_, the
 shared condition engine judges those facts against the type's declared
-assertions, and everything downstream — the status controller, incidents,
-notifications, uptime, the ledger — cannot tell which kind produced the
+assertions, and everything downstream, the status controller, incidents,
+notifications, uptime, the ledger. Cannot tell which kind produced the
 observation it is looking at. That indistinguishability is the design.
 The alternative, which is what a monitoring product usually grows when a
 group type is added late, is a second pipeline with its own status field
@@ -35,7 +35,7 @@ the thing that has gone wrong is precisely that nobody is calling.
 
 ---
 
-## `push` — a job reports in
+## `push`: a job reports in
 
 Create a push monitor, give it the interval you expect the job to report
 on, and point the job at the endpoint Vigil generates:
@@ -71,8 +71,8 @@ The request performs exactly one write: the monitor's row in
 write to the ledger or send anything.
 
 That is not an optimisation. The endpoint is unauthenticated by
-construction — possession of the token is the whole of the
-authentication — and every consequence attached to it becomes something
+construction, possession of the token is the whole of the
+authentication, and every consequence attached to it becomes something
 a leaked token can make Vigil do to its own operators. The observation is
 made by the scheduled evaluation, which is rate-governed, actor-stamped
 and identical for every passive monitor.
@@ -95,7 +95,7 @@ Without a tolerance the two clocks eventually land the wrong way round
 and a job that never missed a beat records a failed observation.
 
 Before the first heartbeat ever arrives, the monitor is **Pending**, not
-up — nothing has succeeded — and not down — nothing has failed. Once the
+up (nothing has succeeded) and not down. Nothing has failed. Once the
 first deadline passes with still no beat it goes down, so a job whose
 cron was never installed is caught rather than sitting green.
 
@@ -104,7 +104,7 @@ that starts taking four times as long shows amber before it fails.
 
 ---
 
-## `group` — one state from many
+## `group`. One state from many
 
 A group's state is derived from its members:
 
@@ -116,7 +116,7 @@ Paused members are excluded entirely: pausing is how an operator says
 "stop telling me about this one", and counting its last known status
 would let a monitor nobody has watched since March keep a group red
 today. Members Vigil could not measure (`unknown`) are counted and
-reported as a fact, but never escalate the group — one ping monitor on a
+reported as a fact, but never escalate the group, one ping monitor on a
 host without `CAP_NET_RAW` must not turn a whole region red.
 
 A group with no members, or one whose members are all paused or all
@@ -136,8 +136,8 @@ every monitor inside it", recursively, from a confirmation dialog that
 cannot show you how much you are about to lose. **Deleting a group
 releases its members.**
 
-Groups can nest. A monitor cannot be its own ancestor — the service
-refuses it — and membership never crosses an organization.
+Groups can nest. A monitor cannot be its own ancestor, the service
+refuses it, and membership never crosses an organization.
 
 ### When a group is re-derived
 
@@ -149,18 +149,18 @@ monitors costs one derivation per member observation instead of forty
 reads per tick for ever.
 
 The derivation is _recorded_ when the state changed, or when the last
-recording is older than the group's interval — and Vigil keeps that
+recording is older than the group's interval, and Vigil keeps that
 interval equal to the slowest member's, because a group cannot learn
 anything faster than that. See `docs/UPTIME.md` for why the two have to
 agree.
 
 ---
 
-## `manual` — an operator's statement
+## `manual`. An operator's statement
 
 For the parts of a service Vigil cannot reach: a payment provider, a
 warehouse, a supplier's API behind a VPN Vigil is not on. Set the status
-by hand — operational, degraded or down, with a note — and it stands
+by hand (operational, degraded or down, with a note) and it stands
 until somebody changes it.
 
 The statement lives in the monitor's config, which makes it an ordinary
@@ -170,7 +170,7 @@ change, and preserved by a save that touched something else.
 The consequences are not special either. A manual monitor set to `down`
 opens an incident through the same status controller, the same failure
 window, the same held-alert handling and the same webhooks as a probe
-that stopped answering — because an outage an operator knows about is
+that stopped answering, because an outage an operator knows about is
 not a lesser kind of outage. Setting it back to operational resolves it.
 
 Its uptime is covered for as long as the statement stood: see
@@ -193,11 +193,11 @@ evaluation function:
 
 The compiler enforces the pairing at the point a spec is declared, and
 the registry refuses at import time to build a type whose function is
-missing — or an inactive type that somehow has a probe, which would be a
+missing, or an inactive type that somehow has a probe, which would be a
 transport nothing would ever call. The conformance suite in
 `tests/unit/check-registry.test.ts` checks the same rule from both
 directions for every registered type.
 
 Because `observe`, `derive` and `declare` are pure and isomorphic, they
-live in the spec next to the assertions rather than in `probes/` — there
+live in the spec next to the assertions rather than in `probes/`: there
 is no `node:` import to keep out of the browser bundle.

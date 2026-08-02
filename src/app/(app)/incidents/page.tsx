@@ -44,7 +44,7 @@ import {
 
 import { CreateIncidentDialog } from "./create-incident-dialog";
 
-export const metadata: Metadata = { title: "Incidents — Vigil" };
+export const metadata: Metadata = { title: "Incidents · Vigil" };
 
 export default async function IncidentsPage(props: PageProps<"/incidents">) {
   const ctx = await requireOrgContext();
@@ -118,7 +118,7 @@ export default async function IncidentsPage(props: PageProps<"/incidents">) {
               </EmptyMedia>
               <EmptyTitle>No incidents yet</EmptyTitle>
               <EmptyDescription>
-                When something breaks — or you report it — the full history will
+                When something breaks (or you report it). The full history will
                 live here.
               </EmptyDescription>
             </EmptyHeader>

@@ -12,15 +12,11 @@
  * and the test exercises the path it meant to. A test that wants the
  * guard to refuse passes its own.
  */
-export const publicLookup = async (
-  _hostname: string,
-): Promise<{ address: string; family: number }[]> => [
-  { address: "93.184.216.34", family: 4 },
-];
+export const publicLookup = async (): Promise<
+  { address: string; family: number }[]
+> => [{ address: "93.184.216.34", family: 4 }];
 
 /** Answers with a private address, for tests that want a refusal. */
-export const privateLookup = async (
-  _hostname: string,
-): Promise<{ address: string; family: number }[]> => [
-  { address: "10.0.0.5", family: 4 },
-];
+export const privateLookup = async (): Promise<
+  { address: string; family: number }[]
+> => [{ address: "10.0.0.5", family: 4 }];

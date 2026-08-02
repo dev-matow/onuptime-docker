@@ -54,7 +54,7 @@ export function PostmortemCard({
     }
     setContent(result.data.draft);
     setEditing(true);
-    toast.success("Draft generated — review before saving.");
+    toast.success("Draft generated, review before saving.");
   }
 
   async function handleSave(event: React.FormEvent<HTMLFormElement>) {

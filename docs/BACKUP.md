@@ -1,7 +1,7 @@
 # Backup and restore
 
 Vigil keeps everything it knows in one Postgres database. Back that up
-and you have backed up Vigil — with the exceptions in
+and you have backed up Vigil, with the exceptions in
 [What is not backed up](#what-is-not-backed-up), which are the part
 worth reading twice.
 
@@ -44,7 +44,7 @@ table is wrong.
 ### Automating it
 
 ```
-# /etc/cron.d/vigil-backup — nightly at 03:17, keep 30 days
+# /etc/cron.d/vigil-backup, nightly at 03:17, keep 30 days
 17 3 * * * root cd /opt/vigil && ./scripts/backup.sh --docker \
   -o /var/backups/vigil/vigil-$(date -u +\%FT\%H\%M\%SZ).dump \
   && find /var/backups/vigil -name 'vigil-*.dump' -mtime +30 -delete
@@ -52,7 +52,7 @@ table is wrong.
 
 The script writes to `<output>.partial` and renames only after
 `pg_restore --list` has parsed what it wrote. A backup killed halfway
-therefore leaves no file that looks finished — which matters more for a
+therefore leaves no file that looks finished, which matters more for a
 cron job nobody watches than for one you run by hand.
 
 ## What is backed up
@@ -94,7 +94,7 @@ will not bring them back:
 --no-privileges` on purpose: the shipped stack connects as `vigil` and a
   local install usually as `postgres`, and an archive that names a role
   refuses to restore where that role does not exist. Vigil creates no
-  roles and no grants of its own, so nothing real is lost — but if _you_
+  roles and no grants of its own, so nothing real is lost, but if _you_
   added any, they are yours to recreate.
 - **Anything else in the same cluster.** The dump is one database, not the
   server. Other databases, and cluster-level settings, are not in it.
@@ -111,7 +111,7 @@ holds tables.**
 
 That is the reason the script exists. `pg_restore`'s default is to
 create what is missing, log an error for everything that already exists,
-and exit 0 — so restoring last week's backup over a live database leaves
+and exit 0, so restoring last week's backup over a live database leaves
 every current row in place, adds nothing, and reports success. You find
 out which of the two databases you are looking at some time later, from
 a customer.
@@ -148,7 +148,7 @@ A backup you have never restored is a hypothesis. Test it the only way
 that settles it: restore it somewhere else and count.
 
 ```bash
-# 1. Cheapest check — the archive parses and has a table of contents.
+# 1. Cheapest check, the archive parses and has a table of contents.
 pg_restore --list vigil-2026-08-01.dump | head
 
 # 2. Restore into a scratch database that nothing is using.
@@ -170,7 +170,7 @@ from (
 order by table_name;
 SQL
 
-# 4. A value, not just a count — content, in order, hashed.
+# 4. A value, not just a count, content, in order, hashed.
 psql postgresql://postgres@localhost:5432/vigil_restore_check -tAc \
   "select md5(string_agg(id::text||name||coalesce(url,''), '|' order by id))
    from monitors;"
@@ -208,16 +208,16 @@ e071a10e2ff87b2a2f1613082bdf7bdb          # identical
 ```
 
 Row counts across all 25 tables matched, `monitor_checks` among them at
-8945 rows, and `drizzle.__drizzle_migrations` came back with all 17 rows
-— so `db:migrate` afterwards was a no-op, which is the point of the
+8945 rows, and `drizzle.__drizzle_migrations` came back with all 17 rows,
+so `db:migrate` afterwards was a no-op, which is the point of the
 journal being in the dump.
 
 Three more properties, proved the same way and worth knowing before you
 need them:
 
 - **The `--docker` path is the same path.** The same cycle run against
-  the shipped Compose stack — `backup.sh --docker`, drop and recreate
-  `vigil` inside the container, `restore.sh --docker` — came back with an
+  the shipped Compose stack, `backup.sh --docker`, drop and recreate
+  `vigil` inside the container, `restore.sh --docker`: came back with an
   identical hash and all 8945 check rows.
 - **A corrupt archive costs nothing.** `restore.sh --force` pointed at a
   file that is not an archive refused, with the target database
@@ -230,11 +230,11 @@ need them:
 
 - **Sessions.** They are in the dump, so people restored from an old
   backup may be signed in with sessions that pre-date it. That is
-  harmless — unless `BETTER_AUTH_SECRET` changed, in which case every one
+  harmless, unless `BETTER_AUTH_SECRET` changed, in which case every one
   of them is invalid and everybody signs in again.
 - **The outbox.** Messages that were `queued` when the backup was taken
   are queued again, and the worker will send them. Incident notifications
-  from the restored window will therefore go out a second time — expected,
+  from the restored window will therefore go out a second time, expected,
   and the idempotency key stops it happening more than once from here.
 - **Monitor scheduling.** `monitors.next_evaluation_at` is restored as it
   was, so every monitor whose slot has passed is checked shortly after the

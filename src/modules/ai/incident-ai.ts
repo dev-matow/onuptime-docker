@@ -14,7 +14,7 @@ function renderTimeline(detail: IncidentDetail): string {
     .map((event) => {
       const author = event.authorName ?? "System";
       const status = event.status ? ` [status → ${event.status}]` : "";
-      return `- ${formatDateTime(event.createdAt)} — ${author}${status}: ${event.message}`;
+      return `- ${formatDateTime(event.createdAt)}, ${author}${status}: ${event.message}`;
     })
     .join("\n");
 }
@@ -55,7 +55,7 @@ Rules:
 - Root cause: if the timeline doesn't establish one, list the open questions the team should answer instead.
 - Action items: concrete and checkable, as a Markdown task list.
 - Blameless: describe systems and processes, never fault individuals.
-- Keep it under 500 words. No preamble — start directly with the first heading.`;
+- Keep it under 500 words. No preamble, start directly with the first heading.`;
 
 export async function draftPostmortem(detail: IncidentDetail): Promise<string> {
   return generateText({
@@ -67,11 +67,11 @@ export async function draftPostmortem(detail: IncidentDetail): Promise<string> {
 
 const STATUS_UPDATE_SYSTEM = `You draft public status-page updates during live incidents for an engineering team. You are given the incident record and timeline.
 
-Write ONE short update (2–3 sentences) suitable for a public status page:
+Write ONE short update (2-3 sentences) suitable for a public status page:
 - Plain language, calm and factual. No internal jargon, hostnames, URLs, or names of people.
 - State what is known, what customers may experience, and what happens next.
 - Never promise timelines the timeline data doesn't support.
-- Respond with the update text only — no quotes, no preamble.`;
+- Respond with the update text only, no quotes, no preamble.`;
 
 export async function suggestStatusUpdate(
   detail: IncidentDetail,

@@ -625,7 +625,7 @@ describe("the relationships between records, not just the records", () => {
     const token = (monitor.config as { token?: string }).token;
     expect(token).toBeTypeOf("string");
     expect(token).not.toBe("seedPushToken1234");
-    expect(monitorEntry(10).detail).toContain("32–128 characters");
+    expect(monitorEntry(10).detail).toContain("32-128 characters");
   });
 
   it("carries a push monitor's last heartbeat, so it is not born having never reported", async () => {

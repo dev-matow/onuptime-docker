@@ -43,7 +43,7 @@ const SUBPROTOCOL_TOKEN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
  * This is the one validation here that is a security control rather than
  * a nicety. The value is written into the handshake request as-is, so a
  * newline would let whoever can edit a monitor append headers of their
- * own to a request Vigil makes — the classic response-splitting shape,
+ * own to a request Vigil makes, the classic response-splitting shape,
  * pointed outward. Node's client would refuse it too, but by then the
  * failure reads as an unexplained probe error rather than as a rejected
  * field with a message.

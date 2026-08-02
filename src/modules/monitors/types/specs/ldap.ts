@@ -93,7 +93,7 @@ export const LDAP_RESULT_MESSAGES: Readonly<Record<number, string>> = {
   8: "The server requires a stronger authentication method",
   13: "The server requires TLS before it will accept a bind",
   14: "The server is midway through a SASL bind",
-  32: "No such object — the bind DN does not exist",
+  32: "No such object. The bind DN does not exist",
   34: "The bind DN is not valid DN syntax",
   48: "The server will not accept this kind of authentication",
   49: "Invalid credentials",

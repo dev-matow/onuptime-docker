@@ -68,7 +68,7 @@ export const tcpDescriptor: CheckTypeDescriptor<"active"> = {
     kind: "hostname",
     label: "Hostname",
     placeholder: "db.example.com",
-    help: "A bare hostname — no scheme, no port.",
+    help: "A bare hostname, no scheme, no port.",
   },
   port: { required: true, default: null },
   facts: [RESPONSE_TIME],
@@ -175,7 +175,7 @@ export const domainExpiryDescriptor: CheckTypeDescriptor<"active"> = {
     kind: "domain",
     label: "Domain",
     placeholder: "example.com",
-    help: "The registrable domain — no scheme, no subdomain.",
+    help: "The registrable domain, no scheme, no subdomain.",
   },
   port: null,
   facts: [
@@ -244,7 +244,7 @@ export const mysqlDescriptor: CheckTypeDescriptor<"active"> = {
     kind: "hostname",
     label: "Hostname",
     placeholder: "db.example.com",
-    help: "A bare hostname — no scheme, no port.",
+    help: "A bare hostname, no scheme, no port.",
   },
   port: { required: true, default: DEFAULT_MYSQL_PORT },
   facts: [
@@ -273,7 +273,7 @@ export const mongodbDescriptor: CheckTypeDescriptor<"active"> = {
     kind: "hostname",
     label: "Hostname",
     placeholder: "mongo.example.com",
-    help: "A bare hostname — no scheme, no connection string.",
+    help: "A bare hostname, no scheme, no connection string.",
   },
   port: { required: true, default: DEFAULT_MONGODB_PORT },
   facts: [
@@ -301,7 +301,7 @@ export const redisDescriptor: CheckTypeDescriptor<"active"> = {
     kind: "hostname",
     label: "Hostname",
     placeholder: "cache.example.com",
-    help: "A bare hostname — no scheme, no port.",
+    help: "A bare hostname, no scheme, no port.",
   },
   port: { required: true, default: DEFAULT_REDIS_PORT },
   facts: [
@@ -356,7 +356,7 @@ export const mqttDescriptor: CheckTypeDescriptor<"active"> = {
     kind: "hostname",
     label: "Hostname",
     placeholder: "broker.example.com",
-    help: "A bare hostname — no scheme, no port.",
+    help: "A bare hostname, no scheme, no port.",
   },
   port: { required: true, default: 1883 },
   facts: [
@@ -383,7 +383,7 @@ export const smtpDescriptor: CheckTypeDescriptor<"active"> = {
     kind: "hostname",
     label: "Hostname",
     placeholder: "mail.example.com",
-    help: "A bare hostname — no scheme, no port. The conversation is plaintext, so port 465 (implicit TLS) will never answer; use 25, 587 or 2525.",
+    help: "A bare hostname, no scheme, no port. The conversation is plaintext, so port 465 (implicit TLS) will never answer; use 25, 587 or 2525.",
   },
   port: { required: true, default: DEFAULT_SMTP_PORT },
   facts: [
@@ -456,7 +456,7 @@ export const pushDescriptor: CheckTypeDescriptor<"passive"> = {
     kind: "label",
     label: "Job name",
     placeholder: "nightly-backup",
-    help: "What reports in. Nothing is dialled — this names the job in incidents, emails and on status pages.",
+    help: "What reports in. Nothing is dialled, this names the job in incidents, emails and on status pages.",
   },
   port: null,
   facts: [
@@ -520,7 +520,7 @@ export const manualDescriptor: CheckTypeDescriptor<"manual"> = {
   id: "manual",
   label: "Manual",
   description:
-    "A status an operator sets by hand — for what Vigil cannot reach.",
+    "A status an operator sets by hand, for what Vigil cannot reach.",
   target: {
     kind: "label",
     label: "What this tracks",
@@ -581,7 +581,7 @@ export const kafkaProducerDescriptor: CheckTypeDescriptor<"active"> = {
     kind: "hostname",
     label: "Bootstrap broker",
     placeholder: "kafka-1.example.com",
-    help: "A bare hostname — no scheme, no port. Vigil asks this broker which node leads the topic and produces to that one.",
+    help: "A bare hostname, no scheme, no port. Vigil asks this broker which node leads the topic and produces to that one.",
   },
   port: { required: true, default: DEFAULT_KAFKA_PORT },
   facts: [
@@ -609,7 +609,7 @@ export const memcachedDescriptor: CheckTypeDescriptor<"active"> = {
     kind: "hostname",
     label: "Hostname",
     placeholder: "cache.example.com",
-    help: "A bare hostname — no scheme, no port.",
+    help: "A bare hostname, no scheme, no port.",
   },
   port: { required: true, default: DEFAULT_MEMCACHED_PORT },
   facts: [
@@ -646,7 +646,7 @@ export const elasticsearchDescriptor: CheckTypeDescriptor<"active"> = {
   id: "elasticsearch",
   label: "Elasticsearch",
   description:
-    "Read a cluster's health endpoint and judge it by the status colour.",
+    "Read a cluster's health endpoint and judge it by the status color.",
   target: {
     kind: "url",
     label: "Cluster URL",
@@ -722,7 +722,7 @@ export const grpcDescriptor: CheckTypeDescriptor<"active"> = {
     kind: "hostname",
     label: "Hostname",
     placeholder: "api.example.com",
-    help: "A bare hostname — no scheme, no port. Plaintext HTTP/2 unless the monitor is set to use TLS.",
+    help: "A bare hostname, no scheme, no port. Plaintext HTTP/2 unless the monitor is set to use TLS.",
   },
   port: { required: true, default: DEFAULT_GRPC_PORT },
   facts: [
@@ -753,7 +753,7 @@ export const ldapDescriptor: CheckTypeDescriptor<"active"> = {
     kind: "hostname",
     label: "Hostname",
     placeholder: "ldap.example.com",
-    help: "A bare hostname — no scheme, no port. The bind is plaintext, so port 636 (LDAPS) will never answer; use 389, or 3268 for an Active Directory global catalog.",
+    help: "A bare hostname, no scheme, no port. The bind is plaintext, so port 636 (LDAPS) will never answer; use 389, or 3268 for an Active Directory global catalog.",
   },
   port: { required: true, default: DEFAULT_LDAP_PORT },
   facts: [
@@ -778,7 +778,7 @@ export const sshDescriptor: CheckTypeDescriptor<"active"> = {
     kind: "hostname",
     label: "Hostname",
     placeholder: "bastion.example.com",
-    help: "A bare hostname — no scheme, no port. Nothing is authenticated: Vigil reads the banner the daemon sends first and hangs up.",
+    help: "A bare hostname, no scheme, no port. Nothing is authenticated: Vigil reads the banner the daemon sends first and hangs up.",
   },
   port: { required: true, default: DEFAULT_SSH_PORT },
   facts: [
@@ -809,7 +809,7 @@ export const sqlserverDescriptor: CheckTypeDescriptor<"active"> = {
     kind: "url",
     label: "Connection string",
     placeholder: "sqlserver://user:pass@db.example.com:1433/app",
-    help: "The full connection string, credentials included. The login is spoken in plaintext TDS, so a server with Force Encryption on — and Azure SQL, which always requires it — is watched as far as its TDS greeting and no further.",
+    help: "The full connection string, credentials included. The login is spoken in plaintext TDS, so a server with Force Encryption on (and Azure SQL, which always requires it). Is watched as far as its TDS greeting and no further.",
   },
   // The port is already in the connection string, exactly as for
   // postgres. A separate field would be a second answer to the same
@@ -873,7 +873,7 @@ export const imapDescriptor: CheckTypeDescriptor<"active"> = {
     kind: "hostname",
     label: "Hostname",
     placeholder: "imap.example.com",
-    help: "A bare hostname — no scheme, no port. The conversation is plaintext, so port 993 (implicit TLS) will never answer; use 143.",
+    help: "A bare hostname, no scheme, no port. The conversation is plaintext, so port 993 (implicit TLS) will never answer; use 143.",
   },
   port: { required: true, default: DEFAULT_IMAP_PORT },
   facts: [
@@ -908,7 +908,7 @@ export const ftpDescriptor: CheckTypeDescriptor<"active"> = {
     kind: "hostname",
     label: "Hostname",
     placeholder: "files.example.com",
-    help: "A bare hostname — no scheme, no port. The conversation is plaintext, so port 990 (implicit FTPS) will never answer; use 21. Credentials, if you set any, travel in the clear — point them at an account that can do nothing.",
+    help: "A bare hostname, no scheme, no port. The conversation is plaintext, so port 990 (implicit FTPS) will never answer; use 21. Credentials, if you set any, travel in the clear, point them at an account that can do nothing.",
   },
   port: { required: true, default: DEFAULT_FTP_PORT },
   facts: [
@@ -960,7 +960,7 @@ export const snmpDescriptor: CheckTypeDescriptor<"active"> = {
     kind: "hostname",
     label: "Hostname",
     placeholder: "switch.example.com",
-    help: "A bare hostname — no scheme, no port. SNMP is UDP, so nothing is connected: one request goes out and Vigil waits for one answer. Without further settings it asks for sysUpTime.0 as v2c with the community `public`.",
+    help: "A bare hostname, no scheme, no port. SNMP is UDP, so nothing is connected: one request goes out and Vigil waits for one answer. Without further settings it asks for sysUpTime.0 as v2c with the community `public`.",
   },
   port: { required: true, default: DEFAULT_SNMP_PORT },
   facts: [
@@ -1016,7 +1016,7 @@ export const systemServiceDescriptor: CheckTypeDescriptor<"active"> = {
     // being asked, and nothing would ever dial it.
     label: "Unit name",
     placeholder: "nginx.service",
-    help: "A systemd unit on the machine this worker runs on, suffix included. Nothing is dialled — the local init system is asked — so this monitor speaks for that one machine and no other.",
+    help: "A systemd unit on the machine this worker runs on, suffix included. Nothing is dialled (the local init system is asked) so this monitor speaks for that one machine and no other.",
   },
   port: null,
   facts: [
@@ -1059,7 +1059,7 @@ export const steamDescriptor: CheckTypeDescriptor<"active"> = {
     kind: "hostname",
     label: "Hostname",
     placeholder: "cs.example.com",
-    help: "A bare hostname — no scheme. The port is the server's query port, which is the game port on all but the most crowded boxes.",
+    help: "A bare hostname, no scheme. The port is the server's query port, which is the game port on all but the most crowded boxes.",
   },
   port: { required: true, default: DEFAULT_STEAM_PORT },
   facts: [
@@ -1144,7 +1144,7 @@ export const gamedigDescriptor: CheckTypeDescriptor<"active"> = {
     kind: "hostname",
     label: "Hostname",
     placeholder: "mc.example.com",
-    help: "A bare hostname — no scheme. The port is the server's query port: 27015 for Source, 25565 for Minecraft, 27960 for id Tech 3.",
+    help: "A bare hostname, no scheme. The port is the server's query port: 27015 for Source, 25565 for Minecraft, 27960 for id Tech 3.",
   },
   // No default: the right port is a property of the protocol, and one
   // guess would be wrong for two thirds of the servers this watches.
@@ -1195,7 +1195,7 @@ export const udpDescriptor: CheckTypeDescriptor<"active"> = {
     kind: "hostname",
     label: "Hostname",
     placeholder: "dns.example.com",
-    help: "A bare hostname — no scheme, no port. UDP answers nothing it was not asked, so the check needs a payload the service will reply to.",
+    help: "A bare hostname, no scheme, no port. UDP answers nothing it was not asked, so the check needs a payload the service will reply to.",
   },
   // No default, and required: there is no such thing as "the" UDP port.
   // A default here would be a guess dressed as a setting.
@@ -1223,7 +1223,7 @@ export const ntpDescriptor: CheckTypeDescriptor<"active"> = {
     kind: "hostname",
     label: "Hostname",
     placeholder: "time.example.com",
-    help: "A bare hostname — no scheme, no port. One server, not a pool name: a pool answers from a different machine every check, so a bad member hides in the average.",
+    help: "A bare hostname, no scheme, no port. One server, not a pool name: a pool answers from a different machine every check, so a bad member hides in the average.",
   },
   port: { required: false, default: DEFAULT_NTP_PORT },
   facts: [
@@ -1247,7 +1247,7 @@ export const radiusDescriptor: CheckTypeDescriptor<"active"> = {
     kind: "hostname",
     label: "Hostname",
     placeholder: "radius.example.com",
-    help: "A bare hostname — no scheme, no port. The shared secret and the test account are settings, not part of the address.",
+    help: "A bare hostname, no scheme, no port. The shared secret and the test account are settings, not part of the address.",
   },
   port: { required: false, default: DEFAULT_RADIUS_PORT },
   facts: [
@@ -1289,7 +1289,7 @@ export const sipDescriptor: CheckTypeDescriptor<"active"> = {
     kind: "hostname",
     label: "Hostname",
     placeholder: "sip.example.com",
-    help: "A bare hostname — no scheme, no port. The proxy, registrar or gateway that answers OPTIONS. UDP unless the monitor says otherwise; TLS on 5061 is a transport this check does not speak.",
+    help: "A bare hostname, no scheme, no port. The proxy, registrar or gateway that answers OPTIONS. UDP unless the monitor says otherwise; TLS on 5061 is a transport this check does not speak.",
   },
   port: { required: true, default: DEFAULT_SIP_PORT },
   facts: [
@@ -1361,7 +1361,7 @@ export const realBrowserDescriptor: CheckTypeDescriptor<"active"> = {
     kind: "url",
     label: "URL",
     placeholder: "https://example.com/app",
-    help: "The page to open. It is fetched by a browser, so a single-page app that renders its content in JavaScript is checked as a visitor sees it — not as curl sees it.",
+    help: "The page to open. It is fetched by a browser, so a single-page app that renders its content in JavaScript is checked as a visitor sees it, not as curl sees it.",
   },
   port: null,
   facts: [
@@ -1393,7 +1393,7 @@ export const globalpingDescriptor: CheckTypeDescriptor<"active"> = {
     kind: "hostname",
     label: "Hostname",
     placeholder: "example.com",
-    help: "A bare hostname — no scheme, no port. Nothing is dialled from this machine: the measurement is run by Globalping's probe network, so what it reports is what the internet sees rather than what your network sees.",
+    help: "A bare hostname, no scheme, no port. Nothing is dialled from this machine: the measurement is run by Globalping's probe network, so what it reports is what the internet sees rather than what your network sees.",
   },
   port: null,
   facts: [

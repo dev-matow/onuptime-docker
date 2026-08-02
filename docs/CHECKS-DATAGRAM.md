@@ -8,13 +8,13 @@ accepted it.
 
 So all three send something the far end is obliged to answer, and all
 three treat the **reply** as the evidence. What follows is what each one
-sends, what it judges, and — more usefully — what it cannot tell you.
+sends, what it judges, and (more usefully). What it cannot tell you.
 
-| Type     | Sends                        | Default port    | Credentials             |
-| -------- | ---------------------------- | --------------- | ----------------------- |
-| `udp`    | a payload you write          | none — required | none                    |
-| `ntp`    | a 48-byte SNTP client packet | 123             | none                    |
-| `radius` | an Access-Request            | 1812            | shared secret + account |
+| Type     | Sends                        | Default port   | Credentials             |
+| -------- | ---------------------------- | -------------- | ----------------------- |
+| `udp`    | a payload you write          | none, required | none                    |
+| `ntp`    | a 48-byte SNTP client packet | 123            | none                    |
+| `radius` | an Access-Request            | 1812           | shared secret + account |
 
 ---
 
@@ -26,7 +26,7 @@ answer this particular payload are indistinguishable from the outside.
 The check reports `No reply within 5000ms` and does not guess which
 happened.
 
-**A closed port usually — not always — says so.** A host with nothing
+**A closed port usually (not always). Says so.** A host with nothing
 bound to the port answers with ICMP port unreachable, which Vigil reports
 as `Nothing is listening on 5514/udp`. That message is a gift, not a
 guarantee: plenty of firewalls suppress ICMP, and then a closed port is
@@ -35,7 +35,7 @@ indistinguishable from a silent one.
 **Replies are filtered by source and by content.** The probe's socket is
 connected, so the kernel discards datagrams from anything but the server
 being watched, and each type additionally checks that the _payload_
-answers the request it made — NTP by the timestamp the server echoes
+answers the request it made. NTP by the timestamp the server echoes
 back, RADIUS by the request identifier and the reply's signature. Without
 that second test, a late reply to the previous check is measured as this
 one's answer.
@@ -44,32 +44,32 @@ one's answer.
 scheme, no port in the field, no IP literal. The name is resolved once
 for the egress guard and once to choose the socket family, which means
 these checks carry the same residual every socket-based probe in Vigil
-does — a name that resolves to a public address for the guard and a
+does, a name that resolves to a public address for the guard and a
 private one a moment later. `SECURITY.md` records it; closing it means
 pinning an address through every probe.
 
 **The monitor form does not render these types' settings yet.** The
 target and the port are asked for; the payload, the clock tolerance and
 the RADIUS credentials are set through the API or an import. Every one of
-them has a default, so a monitor created in the form is valid — see the
+them has a default, so a monitor created in the form is valid, see the
 per-type notes for what that default actually watches.
 
 ---
 
-## `udp` — send a datagram, expect a reply
+## `udp`: send a datagram, expect a reply
 
 The generic one. You supply the payload; the check reports what came
 back.
 
-| Setting            | Default | Meaning                                                              |
-| ------------------ | ------- | -------------------------------------------------------------------- |
-| `payload`          | `""`    | Sent verbatim.                                                       |
-| `payloadEncoding`  | `text`  | `text` or `hex` — how the payload _and_ the expected reply are read. |
-| `expectedResponse` | none    | A substring the reply must contain.                                  |
+| Setting            | Default | Meaning                                                             |
+| ------------------ | ------- | ------------------------------------------------------------------- |
+| `payload`          | `""`    | Sent verbatim.                                                      |
+| `payloadEncoding`  | `text`  | `text` or `hex`: how the payload _and_ the expected reply are read. |
+| `expectedResponse` | none    | A substring the reply must contain.                                 |
 
 Facts: reply size, a printable preview of the first 120 bytes, whether
 the reply matched, and the round trip. The only assertion is the content
-match, and it is only made when you have asked for one — a monitor with
+match, and it is only made when you have asked for one, a monitor with
 no expectation is judged on "something answered, fast enough", which is
 the UDP equivalent of a TCP port check.
 
@@ -77,7 +77,7 @@ the UDP equivalent of a TCP port check.
 
 - **The default payload is empty.** A zero-length datagram is legal and
   some services answer it; most do not. A `udp` monitor created with no
-  payload will usually report `No reply` — that is the check working, and
+  payload will usually report `No reply`: that is the check working, and
   it is why the payload is the first thing to set.
 - **Payloads are capped at 1024 bytes**, well under a typical MTU. A
   larger datagram fragments, and a fragmented probe measures the
@@ -90,7 +90,7 @@ the UDP equivalent of a TCP port check.
   appear in an incident. Do not point this at an endpoint whose reply
   contains a secret.
 
-## `ntp` — ask a time server for the time
+## `ntp`. Ask a time server for the time
 
 Sends a version 4 SNTP client packet and reads the four timestamps that
 make up an NTP measurement: when we sent, when the server received, when
@@ -100,7 +100,7 @@ Facts: stratum, leap indicator, clock offset, round-trip delay, the
 reference identifier (`GPS` for a stratum-1 clock, the upstream server's
 address above that), and the round trip.
 
-Judged down when the server says it is not synchronised — leap indicator
+Judged down when the server says it is not synchronised, leap indicator
 3, or stratum 16. Judged degraded when the clock offset exceeds
 `maxOffsetMs` (default 1000).
 
@@ -128,7 +128,7 @@ Judged down when the server says it is not synchronised — leap indicator
   what an NTP client uses to decide whether an answer is worth believing.
   This check reports the answer, not its own confidence in it.
 
-## `radius` — authenticate, and check the answer's signature
+## `radius`: authenticate, and check the answer's signature
 
 Sends an Access-Request for a configured account and reads the reply. The
 reply's Response Authenticator is verified against the shared secret,
@@ -148,13 +148,13 @@ the round trip.
 By default **any signed answer is healthy**, including an Access-Reject:
 a rejection proves the server read the packet, verified the shared
 secret, consulted its user store, and made a decision. That is the usual
-way to monitor RADIUS — with credentials that are meant to fail. Set
+way to monitor RADIUS, with credentials that are meant to fail. Set
 `expectAccept` when the account is a real test account, where a rejection
 means the directory behind the server has stopped answering.
 
 The request carries a Message-Authenticator (RFC 3579 §3.2). FreeRADIUS
-3.2.5 and later can be configured to require one — the BlastRADIUS
-mitigation, CVE-2024-3596 — and a request refused for its absence is
+3.2.5 and later can be configured to require one, the BlastRADIUS
+mitigation, CVE-2024-3596, and a request refused for its absence is
 dropped silently, which would arrive here as an outage that is not one.
 
 **Limitations**
@@ -174,13 +174,13 @@ dropped silently, which would arrive here as an outage that is not one.
 - **RADIUS is MD5, by protocol.** The password cipher and the reply
   signature are defined in terms of it (RFC 2865 §5.2, §3), so this is
   not a choice a client gets to make. It is why RADIUS must not cross a
-  network you do not trust — a property of the protocol, reported
+  network you do not trust, a property of the protocol, reported
   honestly rather than papered over.
 - **Authentication only.** Port 1812 (or 1645 on older kit). RADIUS
   accounting on 1813 is a different exchange and is not implemented.
 - **PAP only.** The check sends User-Name and User-Password. It does not
   speak CHAP, MS-CHAP or EAP, so a server whose policy refuses PAP will
-  answer Access-Reject — which, with the default `expectAccept: false`,
+  answer Access-Reject, which, with the default `expectAccept: false`,
   is still read as "the server is alive".
 - **An Access-Challenge counts as alive.** It is a server mid-EAP asking
   for more, and the conversation is not continued.

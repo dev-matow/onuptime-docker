@@ -24,8 +24,7 @@ async function resolveIds() {
     where: eq(organization.slug, DEMO_ORG.slug),
     columns: { id: true },
   });
-  if (!org)
-    throw new Error("Demo org not found — run `npm run db:seed` first.");
+  if (!org) throw new Error("Demo org not found, run `npm run db:seed` first.");
 
   const gateway = await db.query.monitors.findFirst({
     where: and(
@@ -42,7 +41,7 @@ async function resolveIds() {
     columns: { id: true },
   });
   if (!gateway || !ongoing) {
-    throw new Error("Demo data incomplete — re-run `npm run db:seed`.");
+    throw new Error("Demo data incomplete, re-run `npm run db:seed`.");
   }
   return { monitorId: gateway.id, incidentId: ongoing.id };
 }

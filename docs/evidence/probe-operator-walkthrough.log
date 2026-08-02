@@ -1,0 +1,47 @@
+# The operator path for remote probes, driven end to end in Chromium
+# Vigil 1.14.0, commit b0a7193
+# 2026-08-02T11:57:53Z
+#
+# Against a production build (node .next/standalone/server.js) on a
+# database seeded with three enrolled probes: ams-edge-1 and
+# ams-edge-2 in Amsterdam, fra-edge-1 in Frankfurt. Two of them
+# share a city on purpose, so the independence prompt has something
+# to find. Every line below is something a buyer sees on a screen,
+# not a function returning the right value.
+#
+# Path: fleet page -> enrol -> copy the command -> assign a monitor
+# -> majority -> K of N -> save -> evidence -> rotate -> revoke ->
+# an unusable assignment -> labelling -> keyboard -> 375px.
+
+ 1. ok   the fleet page names what a probe is before asking for one
+ 2. ok   enrolled probes are listed with where they are
+ 3. ok   liveness is shown, not just existence
+ 4. ok   the token is shown once, with that said plainly
+ 5. ok   a docker command is offered rather than described
+ 6. ok   the command names an image the operator has actually been told to build
+ 7. ok   the secret is in the command, not left as an exercise
+ 8. ok   closing without copying is challenged rather than allowed
+ 9. ok   the choice is framed as where the monitor runs
+10. ok   the threshold is resolved on screen before saving
+11. ok   majority on three probes is stated as two
+12. ok   two probes in one city is called out as one failure domain
+13. ok   switching to K of N keeps the threshold instead of dropping to one
+14. ok   a typed K is reflected in the threshold immediately
+15. ok   saving says so
+16. ok   the evidence card appears by itself and explains its own emptiness
+17. ok   the empty state says where to look next
+18. ok   an empty selection is explained, not silently allowed
+18. ok   and saving is blocked while it is unusable
+20. ok   rotate and revoke are both reachable from the fleet page
+21. ok   rotation hands back a credential rather than only announcing itself
+22. ok   and tells the operator how to restart the container with it
+23. ok   revocation states its consequence before it is confirmed
+24. ok   a revoked probe stays visible rather than vanishing
+25. ok   every control this feature added is labelled (all labelled)
+26. ok   the execution choice is a real radio group and moves under the arrow keys
+27. ok   /probes does not overflow at 375px (clean)
+28. ok   /monitors/019fc245-351d-75ab-a915-af696283261a does not overflow at 375px (table.w-full caption-bottom text-xs | thead.[&_tr]:border-b | tr.has-aria-expanded:bg-muted/50 )
+
+console errors: none
+
+ALL PASS

@@ -467,3 +467,61 @@ export function isManualType<Config>(
 ): type is ManualCheckType<Config> {
   return type.descriptor.kind === "manual";
 }
+
+/**
+ * Whether a remote probe can execute this type, and why not when it
+ * cannot.
+ *
+ * Three of the forty types have nothing for an agent to dial. A `push`
+ * monitor is the *target* calling Vigil, so a probe watching from
+ * Frankfurt has nothing to observe. A `group` is arithmetic over its
+ * children's stored statuses. A `manual` monitor is an operator's
+ * statement. Sending any of them to a fleet does not fail loudly: every
+ * agent answers `indeterminate`, the round never reaches quorum, and
+ * the monitor quietly stops changing status while the page still says
+ * it is checked from three places.
+ *
+ * So it is refused, at the point where an operator asks for it, with
+ * the reason. One predicate here rather than a `kind` comparison at
+ * each call site, because "can a probe run this" is a question about
+ * the type and the answer must be the same in the form, the service,
+ * the dispatcher and the capability list.
+ */
+export interface ProbeExecutability {
+  executable: boolean;
+  /** Operator-facing, and null exactly when `executable` is true. */
+  reason: string | null;
+}
+
+export function probeExecutability(
+  descriptor: Pick<CheckTypeDescriptor, "kind" | "label">,
+): ProbeExecutability {
+  const label = descriptor.label;
+  switch (descriptor.kind) {
+    case "active":
+      return { executable: true, reason: null };
+    case "passive":
+      return {
+        executable: false,
+        reason:
+          `A ${label} monitor is reported to Vigil by the thing being ` +
+          `monitored, so there is nothing for a probe to check. It runs ` +
+          `on the controller, which is where the heartbeat arrives.`,
+      };
+    case "aggregate":
+      return {
+        executable: false,
+        reason:
+          `A ${label} monitor has no target of its own: its status is ` +
+          `computed from the monitors inside it. Assign those to probes ` +
+          `instead, and this one follows.`,
+      };
+    case "manual":
+      return {
+        executable: false,
+        reason:
+          `A ${label} monitor's status is set by a person, so there is ` +
+          `nothing to measure from anywhere.`,
+      };
+  }
+}

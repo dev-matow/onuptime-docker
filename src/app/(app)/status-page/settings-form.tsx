@@ -104,7 +104,7 @@ export function StatusPageSettingsForm({
             required
           />
           <FieldDescription>
-            Changing the slug changes the public URL — old links will break.
+            Changing the slug changes the public URL. Old links will break.
           </FieldDescription>
         </Field>
         <Field orientation="horizontal">
@@ -150,12 +150,12 @@ export function StatusPageSettingsForm({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="public">Public — anyone can view</SelectItem>
+              <SelectItem value="public">Public. Anyone can view</SelectItem>
               <SelectItem value="private">
-                Private — signed-in members only
+                Private, signed-in members only
               </SelectItem>
               <SelectItem value="password">
-                Password — anyone with the shared password
+                Password, anyone with the shared password
               </SelectItem>
             </SelectContent>
           </Select>

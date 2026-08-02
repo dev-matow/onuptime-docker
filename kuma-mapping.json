@@ -60,7 +60,7 @@
     {
       "kumaType": "postgres",
       "checkType": "postgres",
-      "transform": "The connection string is Vigil's target too, so it carries whole — credentials included, exactly as an operator typing it into Vigil would.",
+      "transform": "The connection string is Vigil's target too, so it carries whole, credentials included, exactly as an operator typing it into Vigil would.",
       "reason": null
     },
     {
@@ -96,7 +96,7 @@
     {
       "kumaType": "group",
       "checkType": "group",
-      "transform": "A Kuma group becomes a Vigil group monitor. Membership moves onto each child's parentId — Vigil stores it on the member, never on the group — and the group's state is derived from its members rather than measured.",
+      "transform": "A Kuma group becomes a Vigil group monitor. Membership moves onto each child's parentId (Vigil stores it on the member, never on the group) and the group's state is derived from its members rather than measured.",
       "reason": null
     },
     {
@@ -108,19 +108,19 @@
     {
       "kumaType": "push",
       "checkType": "push",
-      "transform": "Kuma's push token is carried when it satisfies Vigil's 32–128 character rule and no monitor already holds it; otherwise a fresh one is generated and the report says which. The deadline is the monitor's interval plus a 30-second grace, so point the job at /api/push/<token> and nothing else changes.",
+      "transform": "Kuma's push token is carried when it satisfies Vigil's 32-128 character rule and no monitor already holds it; otherwise a fresh one is generated and the report says which. The deadline is the monitor's interval plus a 30-second grace, so point the job at /api/push/<token> and nothing else changes.",
       "reason": null
     },
     {
       "kumaType": "real-browser",
       "checkType": "real-browser",
-      "transform": "Vigil renders through a browser service it talks to over HTTP rather than one it ships, so the monitor reads misconfigured — never down — until BROWSER_SERVICE_URL or the monitor's own serviceUrl names a renderer. A Kuma remote browser, where the monitor named one, becomes that serviceUrl.",
+      "transform": "Vigil renders through a browser service it talks to over HTTP rather than one it ships, so the monitor reads misconfigured (never down) until BROWSER_SERVICE_URL or the monitor's own serviceUrl names a renderer. A Kuma remote browser, where the monitor named one, becomes that serviceUrl.",
       "reason": null
     },
     {
       "kumaType": "globalping",
       "checkType": "globalping",
-      "transform": "Vigil's Globalping check runs one measurement kind — a ping from the probe network — so a Kuma HTTP, DNS, traceroute or MTR measurement arrives as a ping of the same host from the same location, and the report says so on the monitor.",
+      "transform": "Vigil's Globalping check runs one measurement kind (a ping from the probe network) so a Kuma HTTP, DNS, traceroute or MTR measurement arrives as a ping of the same host from the same location, and the report says so on the monitor.",
       "reason": null
     },
     {
@@ -162,7 +162,7 @@
     {
       "kumaType": "websocket-upgrade",
       "checkType": "websocket",
-      "transform": "The URL and the subprotocol carry. Vigil always verifies the Sec-WebSocket-Accept header the server returns, so Kuma's opt-out does not — a server that answers with a wrong one reads as down here.",
+      "transform": "The URL and the subprotocol carry. Vigil always verifies the Sec-WebSocket-Accept header the server returns, so Kuma's opt-out does not, a server that answers with a wrong one reads as down here.",
       "reason": null
     },
     {
@@ -174,7 +174,7 @@
     {
       "kumaType": "oracledb",
       "checkType": "oracledb",
-      "transform": "Kuma's Easy Connect string becomes an `oracle://` URL. Vigil asks the listener whether it will accept a connection for the service and never signs in, so the login Kuma stored is reported rather than kept — a credential nothing sends is a credential nothing should store.",
+      "transform": "Kuma's Easy Connect string becomes an `oracle://` URL. Vigil asks the listener whether it will accept a connection for the service and never signs in, so the login Kuma stored is reported rather than kept, a credential nothing sends is a credential nothing should store.",
       "reason": null
     },
     {
@@ -186,7 +186,7 @@
     {
       "kumaType": "gamedig",
       "checkType": "gamedig",
-      "transform": "Kuma's GameDig game id is resolved to one of the three protocol families Vigil queries — Source/GoldSrc, Minecraft or id Tech 3. A game id that is not one of them is refused rather than queried with the wrong protocol.",
+      "transform": "Kuma's GameDig game id is resolved to one of the three protocol families Vigil queries. Source/GoldSrc, Minecraft or id Tech 3. A game id that is not one of them is refused rather than queried with the wrong protocol.",
       "reason": null
     },
     {
@@ -229,21 +229,21 @@
       "kind": "int?",
       "classification": "not-applicable",
       "target": null,
-      "note": "Kuma is single-tenant; the imported monitor belongs to the organisation the import was run in."
+      "note": "Kuma is single-tenant; the imported monitor belongs to the organization the import was run in."
     },
     {
       "column": "interval",
       "kind": "int",
       "classification": "transformed",
       "target": "monitors.interval_seconds",
-      "note": "Clamped to Vigil's 2–86400s. Vigil treats it as a baseline the adaptive scheduler tightens and relaxes around, not a fixed cadence."
+      "note": "Clamped to Vigil's 2-86400s. Vigil treats it as a baseline the adaptive scheduler tightens and relaxes around, not a fixed cadence."
     },
     {
       "column": "url",
       "kind": "text?",
       "classification": "transformed",
       "target": "monitors.url",
-      "note": "The target only for the types whose Vigil equivalent takes a URL — http, keyword, json-query, real-browser and websocket-upgrade, plus globalping, whose hostname is lifted out of it. Kuma writes a filler `https://example.com` here for host-based types, which read `hostname` instead."
+      "note": "The target only for the types whose Vigil equivalent takes a URL, http, keyword, json-query, real-browser and websocket-upgrade, plus globalping, whose hostname is lifted out of it. Kuma writes a filler `https://example.com` here for host-based types, which read `hostname` instead."
     },
     {
       "column": "type",
@@ -264,7 +264,7 @@
       "kind": "text?",
       "classification": "mapped",
       "target": "monitors.url",
-      "note": "The target for every type whose Vigil equivalent takes a bare hostname or a tailnet peer. Not read by the types that keep their address somewhere else — a gRPC monitor's is in `grpc_url`, a Kafka monitor's in the broker list, a RabbitMQ monitor's in the node list, a system-service monitor's is a unit name and not an address at all."
+      "note": "The target for every type whose Vigil equivalent takes a bare hostname or a tailnet peer. Not read by the types that keep their address somewhere else. A gRPC monitor's is in `grpc_url`, a Kafka monitor's in the broker list, a RabbitMQ monitor's in the node list, a system-service monitor's is a unit name and not an address at all."
     },
     {
       "column": "port",
@@ -355,7 +355,7 @@
       "kind": "text?",
       "classification": "transformed",
       "target": "config.token",
-      "note": "The token a job authenticates with at /api/push/<token>, on both sides. It is carried when it satisfies Vigil's 32–128 character rule and no monitor anywhere already holds it — the uniqueness is a database constraint, because that path resolves a caller to one monitor — and a fresh token is generated and reported otherwise."
+      "note": "The token a job authenticates with at /api/push/<token>, on both sides. It is carried when it satisfies Vigil's 32-128 character rule and no monitor anywhere already holds it (the uniqueness is a database constraint, because that path resolves a caller to one monitor) and a fresh token is generated and reported otherwise."
     },
     {
       "column": "method",
@@ -432,7 +432,7 @@
       "kind": "text?",
       "classification": "unsupported",
       "target": null,
-      "note": "See mqtt_topic — Vigil judges the connection, not a payload."
+      "note": "See mqtt_topic. Vigil judges the connection, not a payload."
     },
     {
       "column": "mqtt_username",
@@ -509,7 +509,7 @@
       "kind": "text?",
       "classification": "transformed",
       "target": "config.authorization",
-      "note": "Free-form `key: value` lines. Vigil's gRPC check carries one header — `authorization`, declared as a secret — so that line is lifted out and every other one is reported per monitor."
+      "note": "Free-form `key: value` lines. Vigil's gRPC check carries one header (`authorization`, declared as a secret) so that line is lifted out and every other one is reported per monitor."
     },
     {
       "column": "grpc_method",
@@ -523,7 +523,7 @@
       "kind": "text?",
       "classification": "transformed",
       "target": "config.service",
-      "note": "The fully-qualified service Kuma addressed. Vigil asks the health service about that same name, which is what the gRPC health protocol's `service` field means — a name the server does not know comes back NOT_SERVING rather than silently passing."
+      "note": "The fully-qualified service Kuma addressed. Vigil asks the health service about that same name, which is what the gRPC health protocol's `service` field means, a name the server does not know comes back NOT_SERVING rather than silently passing."
     },
     {
       "column": "grpc_enable_tls",
@@ -537,14 +537,14 @@
       "kind": "text?",
       "classification": "transformed",
       "target": "config.username",
-      "note": "The test account whose Access-Request the RADIUS check sends. Kuma reuses the column for the OracleDB login, which Vigil's Oracle check never sends — it asks the listener and does not sign in — so on an Oracle monitor it is reported and dropped instead."
+      "note": "The test account whose Access-Request the RADIUS check sends. Kuma reuses the column for the OracleDB login, which Vigil's Oracle check never sends (it asks the listener and does not sign in) so on an Oracle monitor it is reported and dropped instead."
     },
     {
       "column": "radius_password",
       "kind": "text?",
       "classification": "transformed",
       "target": "config.password",
-      "note": "Three settings share this column and each lands somewhere different: the RADIUS test account's password becomes `config.password`, the SNMP community string becomes `config.community` on a v1 or v2c monitor, and the OracleDB password is reported and dropped because Vigil's Oracle check never signs in. On an SNMP v3 monitor it is dropped too — Kuma stores no column saying which protocol the pass phrase is for, and Vigil requires the protocol beside it."
+      "note": "Three settings share this column and each lands somewhere different: the RADIUS test account's password becomes `config.password`, the SNMP community string becomes `config.community` on a v1 or v2c monitor, and the OracleDB password is reported and dropped because Vigil's Oracle check never signs in. On an SNMP v3 monitor it is dropped too. Kuma stores no column saying which protocol the pass phrase is for, and Vigil requires the protocol beside it."
     },
     {
       "column": "radius_calling_station_id",
@@ -586,7 +586,7 @@
       "kind": "text?",
       "classification": "transformed",
       "target": "config.protocol",
-      "note": "A GameDig game id. Vigil speaks three query protocols rather than GameDig's hundreds, so the id is resolved to the family that answers it — Source/GoldSrc, Minecraft or id Tech 3 — and a game Vigil cannot place is refused rather than queried with the wrong protocol."
+      "note": "A GameDig game id. Vigil speaks three query protocols rather than GameDig's hundreds, so the id is resolved to the family that answers it (Source/GoldSrc, Minecraft or id Tech 3) and a game Vigil cannot place is refused rather than queried with the wrong protocol."
     },
     {
       "column": "http_body_encoding",
@@ -670,7 +670,7 @@
       "kind": "text?",
       "classification": "transformed",
       "target": "config.password",
-      "note": "A JSON blob holding the SASL mechanism and its credentials. Vigil speaks PLAIN and nothing else, so a `plain` mechanism's user name and password carry and any other — SCRAM, GSSAPI, OAUTHBEARER — refuses the monitor: importing it would produce a check that cannot ever authenticate and would report an outage that is not one."
+      "note": "A JSON blob holding the SASL mechanism and its credentials. Vigil speaks PLAIN and nothing else, so a `plain` mechanism's user name and password carry and any other (SCRAM, GSSAPI, OAUTHBEARER) refuses the monitor: importing it would produce a check that cannot ever authenticate and would report an outage that is not one."
     },
     {
       "column": "kafka_producer_message",
@@ -719,21 +719,21 @@
       "kind": "real",
       "classification": "transformed",
       "target": "monitors.timeout_ms",
-      "note": "Seconds to milliseconds, clamped to Vigil's 1000–30000ms. Zero means Kuma never stored one, and Vigil's own default applies."
+      "note": "Seconds to milliseconds, clamped to Vigil's 1000-30000ms. Zero means Kuma never stored one, and Vigil's own default applies."
     },
     {
       "column": "gamedig_given_port_only",
       "kind": "bool",
       "classification": "unsupported",
       "target": null,
-      "note": "Off, Kuma also tries the ports beside the one it was given. Vigil queries the port on the monitor and nothing else — a probe that finds a different server on a neighbouring port would report the wrong one healthy."
+      "note": "Off, Kuma also tries the ports beside the one it was given. Vigil queries the port on the monitor and nothing else, a probe that finds a different server on a neighbouring port would report the wrong one healthy."
     },
     {
       "column": "kafka_producer_ssl",
       "kind": "bool",
       "classification": "mapped",
       "target": "config.tls",
-      "note": "Whether the connection is wrapped in TLS — an SSL or SASL_SSL listener. The same switch on both sides, and the one that decides whether a SASL/PLAIN password travels in the clear."
+      "note": "Whether the connection is wrapped in TLS, an SSL or SASL_SSL listener. The same switch on both sides, and the one that decides whether a SASL/PLAIN password travels in the clear."
     },
     {
       "column": "kafka_producer_allow_auto_topic_creation",
@@ -789,14 +789,14 @@
       "kind": "text",
       "classification": "transformed",
       "target": "config.expectedValue",
-      "note": "A nested expression tree. Two shapes map: a single `record contains \"x\"` on a DNS monitor and a single `oid == \"x\"` on an SNMP one, each of which is what that type's expectedValue already means. Every other tree — an `or` group, a `>` on a numeric variable, more than one expression — is counted and reported per monitor rather than approximated, because a condition that half-carries is an alert that fires on something else."
+      "note": "A nested expression tree. Two shapes map: a single `record contains \"x\"` on a DNS monitor and a single `oid == \"x\"` on an SNMP one, each of which is what that type's expectedValue already means. Every other tree (an `or` group, a `>` on a numeric variable, more than one expression). Is counted and reported per monitor rather than approximated, because a condition that half-carries is an alert that fires on something else."
     },
     {
       "column": "rabbitmq_nodes",
       "kind": "text?",
       "classification": "transformed",
       "target": "monitors.url",
-      "note": "A JSON array of management API URLs. A Vigil monitor watches one node, so the first becomes the target and the rest are named in the monitor's report line — create a monitor per node to watch them all."
+      "note": "A JSON array of management API URLs. A Vigil monitor watches one node, so the first becomes the target and the rest are named in the monitor's report line, create a monitor per node to watch them all."
     },
     {
       "column": "rabbitmq_username",
@@ -838,7 +838,7 @@
       "kind": "int",
       "classification": "transformed",
       "target": "config.packets",
-      "note": "Clamped to Vigil's 1–5 echo requests per check."
+      "note": "Clamped to Vigil's 1-5 echo requests per check."
     },
     {
       "column": "ping_numeric",
@@ -915,21 +915,21 @@
       "kind": "text?",
       "classification": "transformed",
       "target": "monitors.url",
-      "note": "The unit name is the target of Vigil's system-service check rather than a setting on it — nothing is dialled, so the field that would hold an address holds the unit. A name without a systemd suffix is refused, because `nginx` leaves whoever is woken at 3am guessing which unit was meant."
+      "note": "The unit name is the target of Vigil's system-service check rather than a setting on it. Nothing is dialled, so the field that would hold an address holds the unit. A name without a systemd suffix is refused, because `nginx` leaves whoever is woken at 3am guessing which unit was meant."
     },
     {
       "column": "subtype",
       "kind": "text?",
       "classification": "unsupported",
       "target": null,
-      "note": "The Globalping measurement kind. Vigil runs one — a ping — so an HTTP, DNS, traceroute or MTR measurement arrives as a ping of the same host, and the monitor's report line says which measurement it used to be."
+      "note": "The Globalping measurement kind. Vigil runs one (a ping) so an HTTP, DNS, traceroute or MTR measurement arrives as a ping of the same host, and the monitor's report line says which measurement it used to be."
     },
     {
       "column": "location",
       "kind": "text?",
       "classification": "mapped",
       "target": "config.location",
-      "note": "Where the Globalping probes measure from — a country, a continent, a network. The same magic string Globalping's own API takes, on both sides."
+      "note": "Where the Globalping probes measure from, a country, a continent, a network. The same magic string Globalping's own API takes, on both sides."
     },
     {
       "column": "protocol",
@@ -964,7 +964,7 @@
       "kind": "int",
       "classification": "unsupported",
       "target": null,
-      "note": "How long Kuma waits before capturing a screenshot. Vigil keeps no screenshot — it reads the rendered DOM and records facts — so there is no capture for a delay to precede, and its own settle time is a separate setting whose unit is not this one's."
+      "note": "How long Kuma waits before capturing a screenshot. Vigil keeps no screenshot (it reads the rendered DOM and records facts) so there is no capture for a delay to precede, and its own settle time is a separate setting whose unit is not this one's."
     },
     {
       "column": "bearer_token",

@@ -15,7 +15,7 @@ import { getSession } from "@/lib/session";
 
 import { AcceptInvitationCard } from "./accept-invitation-card";
 
-export const metadata: Metadata = { title: "Invitation — Vigil" };
+export const metadata: Metadata = { title: "Invitation · Vigil" };
 
 export default async function InvitationPage(
   props: PageProps<"/invitations/[id]">,

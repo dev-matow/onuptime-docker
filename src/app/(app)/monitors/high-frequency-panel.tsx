@@ -175,7 +175,7 @@ export function HighFrequencyPanel({
             <strong>
               {Math.round(1000 / HF_MIN_INTERVAL_MS)} requests a second
             </strong>{" "}
-            at your target, around the clock — about{" "}
+            at your target, around the clock, about{" "}
             {Math.round((86_400 * 1000) / HF_MIN_INTERVAL_MS / 1000)} thousand a
             day. Each one costs CPU on the worker and a row in Postgres.
           </p>
@@ -232,7 +232,7 @@ export function HighFrequencyPanel({
                   onChange={(event) => setIntervalMs(event.target.value)}
                 />
                 <FieldDescription>
-                  {HF_MIN_INTERVAL_MS}–{HF_MAX_INTERVAL_MS}ms. What you are
+                  {HF_MIN_INTERVAL_MS}-{HF_MAX_INTERVAL_MS}ms. What you are
                   asking for.
                 </FieldDescription>
               </Field>
@@ -290,7 +290,7 @@ function AchievedCadenceReadout({ report }: { report: CadenceReport | null }) {
         {achieved.samples.toLocaleString()} samples over the last{" "}
         {achieved.windowMinutes} minutes, longest gap {ms(achieved.maxMs)},{" "}
         {achieved.missedSlots.toLocaleString()} slots missed. A missed slot is a
-        gap of at least twice the configured interval — the scheduler skips them
+        gap of at least twice the configured interval, the scheduler skips them
         rather than firing a burst to catch up.
       </p>
     </div>
@@ -307,5 +307,5 @@ function Figure({ label, value }: { label: string; value: string }) {
 }
 
 function ms(value: number | null): string {
-  return value === null ? "—" : `${value.toLocaleString()} ms`;
+  return value === null ? "-" : `${value.toLocaleString()} ms`;
 }

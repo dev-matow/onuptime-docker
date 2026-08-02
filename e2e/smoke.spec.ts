@@ -322,4 +322,5 @@ test.describe("Vigil golden path", () => {
     ).toBeVisible({ timeout: 10_000 });
     await expect(page.getByText("Second Monitor")).toHaveCount(0);
   });
+
 });

@@ -152,7 +152,7 @@ export async function radiusProbe(
       statusCode: null,
       error: null,
       unavailable:
-        "The reply was not signed with the stored shared secret — check the secret, or whether something else is answering on this port",
+        "The reply was not signed with the stored shared secret, check the secret, or whether something else is answering on this port",
     };
   }
 

@@ -56,7 +56,7 @@ npm ci
 npm run build
 npm run db:migrate
 
-# standalone output does not include static assets — copy them in once per build:
+# standalone output does not include static assets, copy them in once per build:
 cp -r .next/static .next/standalone/.next/static
 cp -r public .next/standalone/public
 
@@ -74,13 +74,13 @@ annotated template. Required: `DATABASE_URL`, `BETTER_AUTH_SECRET`,
 ## Operational notes
 
 - **Health**: `GET /api/health` returns 200 when the app can reach
-  Postgres and 503 otherwise — point load-balancer/orchestrator probes
+  Postgres and 503 otherwise, point load-balancer/orchestrator probes
   at it (the compose file already does). The worker logs
-  `worker started` on boot and exits non-zero on fatal errors — wire it
+  `worker started` on boot and exits non-zero on fatal errors, wire it
   into your restart policy.
 - **Logs**: both processes emit structured JSON (pino) on stdout. Set
   `LOG_LEVEL=debug` temporarily for check-level detail.
-- **Backups**: one `pg_dump` covers everything — see
+- **Backups**: one `pg_dump` covers everything, see
   [Backups & restore](#backups--restore) below for the procedure.
 - **Email**: set `RESEND_API_KEY` (and `EMAIL_FROM`, a Resend-verified
   sender) on both the app and the worker to deliver incident emails via
@@ -88,26 +88,26 @@ annotated template. Required: `DATABASE_URL`, `BETTER_AUTH_SECRET`,
   SMTP/SES provider is another `EmailTransport` in
   `src/modules/notifications`.
 - **Webhooks**: configured per organization under
-  _Settings → Notifications_ — no env needed. Receivers verify the
+  _Settings → Notifications_, no env needed. Receivers verify the
   `X-Vigil-Signature` header (HMAC-SHA-256 of the raw body). See
   ARCHITECTURE.md §8 for the payload and event list.
 - **On-call & escalation**: schedules and escalation policies are
   configured under _Settings → Escalation_; attach a policy to a monitor
   on its form. Email steps need no extra config. SMS and voice steps
-  deliver through Twilio — set `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`
+  deliver through Twilio, set `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`
   and `TWILIO_FROM_NUMBER` on the **worker** (it runs escalation);
   without them those steps are a logged no-op and the ladder still runs.
   Members set their own escalation phone (E.164) under _Settings →
   General → Your profile_.
 - **Status-page subscriptions**: visitors to a _public_ status page can
   subscribe by email (double opt-in) to incident open/update/resolve
-  notifications. Delivery reuses the email transport above — no separate
+  notifications. Delivery reuses the email transport above, no separate
   config; without `RESEND_API_KEY` the confirmation and notification
   emails are written to the logs like every other email. Operators see
   subscriber counts under _Settings → Status page_.
 - **Automatic recovery**: configured per monitor on its detail page.
   Point the recovery endpoint at something inside your infrastructure
-  that fixes the failure — a restart hook, a runbook trigger; a
+  that fixes the failure, a restart hook, a runbook trigger; a
   dependency-free starter lives in `examples/recovery-receiver.mjs`
   (verify the signature, run one command), with ready-made Docker,
   Compose, Kubernetes and systemd templates in
@@ -126,7 +126,7 @@ annotated template. Required: `DATABASE_URL`, `BETTER_AUTH_SECRET`,
 All state lives in Postgres: domain data, auth, the audit trail,
 status-page subscribers and the job queue. The `pgboss` schema is
 disposable (it rebuilds on worker start), so a single dump is a complete
-backup. The only other thing to keep is your `.env` — **the same
+backup. The only other thing to keep is your `.env`: **the same
 `BETTER_AUTH_SECRET` must survive a restore**, because sessions and
 status-page subscription tokens are signed with it; restoring data under
 a new secret signs everyone out and invalidates pending
@@ -138,8 +138,8 @@ confirm/unsubscribe links.
 docker compose exec postgres pg_dump -U vigil -Fc vigil > vigil-$(date +%F).dump
 ```
 
-Run it from cron at whatever cadence your incident history is worth —
-daily is typical. Keep dumps off the host that runs Vigil.
+Run it from cron at whatever cadence your incident history is worth.
+Daily is typical. Keep dumps off the host that runs Vigil.
 
 **Restore** onto a fresh stack:
 
@@ -156,7 +156,7 @@ missing migrations automatically.
 
 **Disaster recovery** is those two steps on a new host: copy the source
 checkout and your `.env`, restore the latest dump, `docker compose up -d`.
-Nothing else holds state — no volumes to move besides Postgres, no local
+Nothing else holds state, no volumes to move besides Postgres, no local
 files the app writes.
 
 ## Troubleshooting
@@ -164,37 +164,37 @@ files the app writes.
 Symptom → cause → fix, from real deployments:
 
 - **App container exits immediately, logs show `getaddrinfo` /
-  `EAI_AGAIN`** — Next's standalone server binds to `$HOSTNAME`, which
+  `EAI_AGAIN`**. Next's standalone server binds to `$HOSTNAME`, which
   Docker sets to the container id. The shipped image already pins
   `HOSTNAME=0.0.0.0`; if you run the standalone build outside this image,
   set that yourself.
-- **`relation "..." does not exist`** — migrations haven't run. Compose
+- **`relation "..." does not exist`**: migrations haven't run. Compose
   runs them via the one-shot `migrate` service; on bare metal run
   `npm run db:migrate` before starting.
-- **No emails arrive** — without `RESEND_API_KEY` every email is written
+- **No emails arrive**: without `RESEND_API_KEY` every email is written
   to the logs instead (grep for `email`); that's the designed fallback,
   not a failure. With a key set: `EMAIL_FROM` must be a Resend-verified
-  sender — the default `onboarding@resend.dev` only delivers to the
+  sender, the default `onboarding@resend.dev` only delivers to the
   Resend account owner.
-- **Monitor against an internal host fails instantly** — monitor URLs
+- **Monitor against an internal host fails instantly**. Monitor URLs
   are SSRF-guarded: private and loopback addresses are refused by
   default. `ALLOW_PRIVATE_MONITOR_TARGETS=true` lifts this for dev only.
   Recovery endpoints are the deliberate exception (your own restart
-  hooks are usually internal) — see docs/security.
-- **Sign-up disabled / every mutation rejected** — `DEMO_MODE=true` is
+  hooks are usually internal), see docs/security.
+- **Sign-up disabled / every mutation rejected**: `DEMO_MODE=true` is
   set. That's the read-only public-demo switch (docs/DEMO.md), not a
   broken install.
-- **Browser sign-in rejected while `curl` works** — `APP_URL` must equal
+- **Browser sign-in rejected while `curl` works**: `APP_URL` must equal
   the origin users type into the browser (it's the auth trusted origin).
   A port or scheme mismatch fails exactly this way.
-- **SMS/voice escalation steps never fire** — the three `TWILIO_*`
+- **SMS/voice escalation steps never fire**: the three `TWILIO_*`
   variables must be set **on the worker**. Without them those steps are
   a logged no-op by design; email steps and the rest of the ladder still
   run.
-- **A recovery attempt shows `running` forever** — the worker was
+- **A recovery attempt shows `running` forever**: the worker was
   interrupted mid-attempt (recovery jobs deliberately never retry). The
   nightly retention job closes attempts stuck over an hour as failed;
   no action needed beyond restarting the worker.
-- **Status page shows slightly stale data** — public pages are cached
+- **Status page shows slightly stale data**: public pages are cached
   for ~60 s so an outage traffic spike never reaches Postgres. That lag
   is by design.

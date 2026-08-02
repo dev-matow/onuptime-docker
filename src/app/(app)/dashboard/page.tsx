@@ -34,7 +34,8 @@ import { requireOrgContext } from "@/lib/session";
 import { listIncidents } from "@/modules/incidents/service";
 import { listMonitors } from "@/modules/monitors/service";
 
-export const metadata: Metadata = { title: "Dashboard — Vigil" };
+
+export const metadata: Metadata = { title: "Dashboard · Vigil" };
 
 export default async function DashboardPage() {
   const ctx = await requireOrgContext();
@@ -88,6 +89,7 @@ export default async function DashboardPage() {
           alert={activeIncidents.length > 0}
         />
       </div>
+
 
       {activeIncidents.length > 0 && (
         <Card>

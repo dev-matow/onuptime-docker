@@ -28,10 +28,10 @@ install.
 - **Assertions** — expected status, response-time thresholds, body
   contains or does not contain a keyword, DNS record values, days left
   on a certificate. A 200 that serves an error page is caught.
-- **Scheduling that adapts** — the interval you set is a baseline, not a
-  fixed rate: a suspicious monitor is probed harder and a steady one
-  backs off. Minimum interval two seconds, which is what the queue
-  actually delivers rather than what the form will accept.
+- **Scheduling that adapts.** The interval you set is a baseline: a
+  suspicious monitor is probed harder and a steady one backs off. The
+  minimum is two seconds on the ordinary scheduler, or 500 ms for
+  HTTP, JSON and TCP monitors on the high-frequency plane.
 - **Incidents** — opened and resolved by the check loop, with a failure
   window measured in seconds rather than a count of checks. Severity, a
   lifecycle, an append-only timeline, internal-only notes and a
@@ -110,17 +110,20 @@ with your contribution. Security issues go privately to
 
 ## The commercial edition
 
-[Vigil](https://vigil-uptime.com) is the same monitor with four things
+[Vigil](https://vigil-uptime.com) is the same monitor with five things
 Core does not have, none of which Uptime Kuma has either:
 
-- **Isolate** — many client organizations in one install, each with its
+- **Isolate.** Many client organizations in one install, each with its
   own status pages and unable to see the others.
-- **Rotate** — on-call schedules and escalation ladders that know whose
+- **Rotate.** On-call schedules and escalation ladders that know whose
   turn it is tonight, with acknowledgement stopping the ladder.
-- **Reach** — SMS and voice through your own Twilio account.
-- **Repair** — automatic recovery: verify the failure, call a restart
+- **Reach.** SMS and voice through your own Twilio account.
+- **Repair.** Automatic recovery: verify the failure, call a restart
   hook you own with a signed payload, verify it came back, and page a
   human only if it did not.
+- **Confirm.** Probe agents you run on your own machines, in the regions
+  you choose, with a quorum deciding the verdict. Vigil ships the agent
+  and hosts nothing.
 
 Everything else — every check type, the scheduler, the ledger, the audit
 page, subscribers, password-protected pages — is here, free, and stays

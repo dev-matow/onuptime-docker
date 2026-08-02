@@ -198,7 +198,7 @@ export const auth = betterAuth({
       );
       throw new APIError("BAD_GATEWAY", {
         message:
-          "Vigil could not send the reset email, so none was sent. The reason is in the server log — tell whoever runs this install, then try again.",
+          "Vigil could not send the reset email, so none was sent. The reason is in the server log. Tell whoever runs this install, then try again.",
         code: "RESET_EMAIL_NOT_SENT",
       });
     }),

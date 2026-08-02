@@ -21,20 +21,20 @@ const description =
 export const metadata: Metadata = {
   metadataBase: new URL(env.APP_URL),
   title: {
-    default: "Vigil — uptime monitoring & incident management",
+    default: "Vigil, uptime monitoring & incident management",
     template: "%s",
   },
   description,
   openGraph: {
     siteName: "Vigil",
     type: "website",
-    title: "Vigil — uptime monitoring & incident management",
+    title: "Vigil, uptime monitoring & incident management",
     description,
     images: ["/og.png"],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Vigil — uptime monitoring & incident management",
+    title: "Vigil, uptime monitoring & incident management",
     description,
     images: ["/og.png"],
   },

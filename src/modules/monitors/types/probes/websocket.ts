@@ -45,7 +45,7 @@ export async function websocketProbe(
 ): Promise<ProbeResult> {
   const url = handshakeUrl(ctx.target);
   if (url === null) {
-    return blank("Not a WebSocket URL — expected ws:// or wss://");
+    return blank("Not a WebSocket URL, expected ws:// or wss://");
   }
 
   let pin: ResolvedAddress | null;

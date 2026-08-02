@@ -6,6 +6,29 @@ free edition; entries for commercial-only features live in the other
 repository, because they are not in this one and listing them here would
 describe software you do not have.
 
+## 1.14.0 — 2026-08-02
+
+The commercial edition added remote probe agents and a retention policy
+for the data they produce. Both are commercial, so neither is in this
+repository. Core gets two fixes and a correction.
+
+### Fixed
+
+- **Settings pages no longer scroll sideways on a phone.** The six
+  section tabs sat in a row with nowhere to put the overflow, so on a
+  375px screen they pushed the whole document wider than the viewport.
+  The strip scrolls on its own now and all six tabs stay reachable.
+
+- **This README said the minimum interval is two seconds.** It is two
+  seconds on the ordinary scheduler and 500 ms for HTTP, JSON and TCP
+  monitors on the high-frequency plane, which 1.13.0 shipped and this
+  file never caught up with.
+
+Both editions are cut from the same commit, which is why Core carries
+the version number. Upgrading is still
+`git pull && npm ci && npm run db:migrate`, and the one migration this
+release adds creates no table Core has.
+
 ## 1.13.0 — 2026-08-01
 
 Trust, and a migration path off Uptime Kuma. Everything below is in

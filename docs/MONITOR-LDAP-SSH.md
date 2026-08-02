@@ -9,7 +9,7 @@ and then stops.
 
 ---
 
-## `ldap` — one simple bind
+## `ldap`: one simple bind
 
 Vigil connects, sends a BER-encoded `BindRequest` (RFC 4511 §4.2), reads
 the `BindResponse`, and unbinds. No search follows it, so the check costs
@@ -28,7 +28,7 @@ runs.
 
 **When it is down**
 
-- Nothing answered as a directory — the wrong port, a TLS listener, a
+- Nothing answered as a directory, the wrong port, a TLS listener, a
   proxy in front of a dead backend.
 - The bind was refused. **Any** non-zero result code is down, including
   `invalidCredentials`: a directory that will not let the application in
@@ -36,7 +36,7 @@ runs.
   else.
 
 A refusal is never reported as a transport error. `invalidCredentials`
-means the directory is running, answering, and saying no — and "wrong
+means the directory is running, answering, and saying no, and "wrong
 password" must never be indistinguishable from "unreachable" on a
 timeline. Active Directory's real reason arrives in
 `diagnosticMessage`, where `data 52e` (bad password) and `data 532`
@@ -44,18 +44,18 @@ timeline. Active Directory's real reason arrives in
 
 **Settings**
 
-| Field          | Meaning                                             |
-| -------------- | --------------------------------------------------- |
-| `bindDn`       | The DN to bind as. Empty binds anonymously.         |
-| `bindPassword` | The simple-bind password. **A secret** — see below. |
+| Field          | Meaning                                            |
+| -------------- | -------------------------------------------------- |
+| `bindDn`       | The DN to bind as. Empty binds anonymously.        |
+| `bindPassword` | The simple-bind password. **A secret**: see below. |
 
 A password with no DN is refused at the form: RFC 4511 §4.2 carries the
 credential _for_ a name, so a directory handed one without a name
-compares it against an anonymous bind and answers `success` — a green
+compares it against an anonymous bind and answers `success`: a green
 monitor whose password is being ignored.
 
 A DN with no password is allowed, and that is deliberate. It is the
-_unauthenticated bind_ of RFC 4513 §5.1.2, which servers refuse — and it
+_unauthenticated bind_ of RFC 4513 §5.1.2, which servers refuse, and it
 is exactly the shape an **imported** monitor arrives in, because the
 export masked the credential and the importer strips the mask rather
 than writing it. The monitor is created, reports
@@ -69,7 +69,7 @@ makes it masked in everything the server renders, replaced by
 `__vigil_unchanged_secret__` in an export, and dropped rather than
 written on import. The bind **DN** is not masked: it is an identity, not
 a credential, and an operator has to be able to see which account the
-check binds as. It is kept out of `describeTarget` all the same — an
+check binds as. It is kept out of `describeTarget` all the same, an
 incident email and a public status page are no place to name the service
 account Vigil authenticates with.
 
@@ -79,7 +79,7 @@ account Vigil authenticates with.
   handshake before the first BER byte, so it will never answer this
   probe; use 389, or 3268 for an Active Directory global catalog. What
   the check reports is that the directory is answering, not that its TLS
-  is healthy — put a `tls-expiry` monitor on 636 for that.
+  is healthy, put a `tls-expiry` monitor on 636 for that.
 - **A bind, not a search.** It cannot tell you that a particular subtree
   is readable or that replication is current. A directory that binds and
   then fails every search reads as up here.
@@ -94,11 +94,11 @@ account Vigil authenticates with.
 
 ---
 
-## `ssh` — the version banner, and nothing else
+## `ssh`. The version banner, and nothing else
 
 RFC 4253 §4.2: an SSH server sends `SSH-2.0-OpenSSH_9.6p1 Debian-3` as
 soon as it accepts, before any key exchange. Vigil reads that line and
-hangs up. It writes **nothing** — not even its own identification
+hangs up. It writes **nothing**: not even its own identification
 string, which would start a Diffie-Hellman the monitored host has to pay
 for every interval and which proves nothing the banner has not already
 proved.
@@ -116,7 +116,7 @@ proved.
 **When it is down**
 
 - Nothing identified itself as SSH: a web server on the port, a proxy in
-  front of a daemon that is gone, or a host that accepts and hangs up —
+  front of a daemon that is gone, or a host that accepts and hangs up,
   which is what one over `MaxStartups` does.
 - The banner does not contain the expected text, when one is configured.
 
@@ -138,7 +138,7 @@ hosts: one that stops answering is the outage whatever version it ran.
   `publickey` attempt. That is the design: an SSH check that logged in
   would need a credential on the monitoring host, and the monitoring
   host would become a credentialed foothold on every machine it watches.
-  This type therefore holds no secrets at all — an exported `ssh`
+  This type therefore holds no secrets at all, an exported `ssh`
   monitor arrives in another tenant complete and immediately working.
 - **The banner is printed early.** `sshd` writes it after forking and
   accepting, so a daemon that is refusing every key, serving a broken
@@ -150,7 +150,7 @@ hosts: one that stops answering is the outage whatever version it ran.
   60-second interval that is 1,440 lines a day per monitor. The probe
   closes with a FIN rather than a reset, precisely so those lines read
   as closures and not as the `Connection reset by` an intrusion-detection
-  rule counts — but a rule that counts pre-auth disconnects at all will
+  rule counts, but a rule that counts pre-auth disconnects at all will
   still see them. Allow-list the monitoring host.
 - **Banner text is not a version guarantee.** `DebianBanner no` and any
   number of hardening guides remove or rewrite it, and nothing stops a
@@ -178,7 +178,7 @@ re-judgeable later against a different spec version.
 
 `bindDn`, `bindPassword` and `expectedBanner` are validated, stored,
 merged, masked, exported and imported like any other type's settings,
-but the monitor dialog does not draw an input for them — it renders the
+but the monitor dialog does not draw an input for them, it renders the
 shared sections a type declares (`port`, here) and nothing else. Until
 it does, they are set the way `redis`' password and `mqtt`'s credentials
 have been set since 1.12.0: through the monitor API, or by importing a

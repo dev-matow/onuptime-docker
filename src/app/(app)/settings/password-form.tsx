@@ -56,7 +56,7 @@ export function PasswordForm() {
       return;
     }
     formRef.current?.reset();
-    toast.success("Password changed — other sessions signed out");
+    toast.success("Password changed, other sessions signed out");
   }
 
   return (
@@ -85,7 +85,7 @@ export function PasswordForm() {
             required
           />
           <FieldDescription>
-            At least 10 characters. Every other session is signed out — a
+            At least 10 characters. Every other session is signed out, a
             browser that already had one open can take up to five minutes to
             notice.
           </FieldDescription>

@@ -14,7 +14,7 @@ import { KUMA_PIN } from "@/modules/importers/kuma";
 
 import { ImportWizard } from "./import-wizard";
 
-export const metadata: Metadata = { title: "Import — Vigil" };
+export const metadata: Metadata = { title: "Import · Vigil" };
 
 export default async function ImportSettingsPage() {
   const ctx = await requireOrgContext();
@@ -36,7 +36,7 @@ export default async function ImportSettingsPage() {
             monitor types have a Vigil equivalent, and all{" "}
             {counts.columns.total} columns of its <code>monitor</code> table are
             classified. A type having an equivalent is not a promise that every
-            monitor of that type imports — Vigil&rsquo;s own rules refuse
+            monitor of that type imports. Vigil&rsquo;s own rules refuse
             individual rows, and every one of them is named below before
             anything is written. See{" "}
             <code className="font-mono">docs/KUMA-IMPORT.md</code> for the full

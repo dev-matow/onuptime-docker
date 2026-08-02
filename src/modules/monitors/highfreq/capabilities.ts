@@ -172,7 +172,7 @@ export const HIGH_FREQUENCY_CAPABILITIES: Readonly<
   // faster: a heartbeat arrives when the job sends it, a group changes
   // when a member does, and a manual status changes when a person says
   // so.
-  push: excluded("derived", "Nothing is dialled — the job reports in."),
+  push: excluded("derived", "Nothing is dialled. The job reports in."),
   group: excluded("derived", "A group's state is derived from its members."),
   manual: excluded("derived", "A manual status changes when an operator says."),
 

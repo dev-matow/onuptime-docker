@@ -316,7 +316,7 @@ async function probeV3(
       !verifyMessage(reply, authKey, authProtocol)
     ) {
       return transportFailure(
-        "The agent's reply did not authenticate — the digest does not match this user's credentials.",
+        "The agent's reply did not authenticate. The digest does not match this user's credentials.",
         responseTimeMs,
       );
     }

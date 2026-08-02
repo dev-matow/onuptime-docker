@@ -1,25 +1,25 @@
-# `memcached` — a cache says which version it is and how full its connection table is
+# `memcached`: a cache says which version it is and how full its connection table is
 
 Opens a TCP connection, asks `version`, then `stats` and `stats
 settings`, and stops. Nothing is ever written to the cache.
 
 |          |                                                         |
 | -------- | ------------------------------------------------------- |
-| Kind     | `active` — Vigil dials it on the monitor's interval     |
+| Kind     | `active`: Vigil dials it on the monitor's interval     |
 | Target   | a bare hostname, e.g. `cache.example.com`               |
 | Port     | required, defaults to **11211**                         |
 | Settings | `username`, `password`, `maxConnectionUsagePercent`     |
 | Secrets  | `password`                                              |
-| Recovery | supported — the target can be re-probed to verify a fix |
+| Recovery | supported. The target can be re-probed to verify a fix |
 
 ## What it observes
 
 | Fact                     | Meaning                                                           |
 | ------------------------ | ----------------------------------------------------------------- |
 | `version`                | what the `VERSION` reply said                                     |
-| `uptimeSeconds`          | `stats uptime` — how long this process has been running           |
+| `uptimeSeconds`          | `stats uptime`: how long this process has been running           |
 | `currentConnections`     | `stats curr_connections`                                          |
-| `maxConnections`         | `stats settings maxconns` — the limit the server was started with |
+| `maxConnections`         | `stats settings maxconns`: the limit the server was started with |
 | `connectionUsagePercent` | the first as a percentage of the second                           |
 | `serverError`            | the server's own words when it refused a command                  |
 | `responseTimeMs`         | connect to the last reply                                         |
@@ -43,7 +43,7 @@ on port 11211:
 - **Connection exhaustion.** When `maxconns` is reached memcached stops
   accepting, and by then a socket check already has its connection. The
   ratio is the one saturation signal `stats` exposes that means something
-  on a single reading — every other counter there is cumulative since the
+  on a single reading, every other counter there is cumulative since the
   process started, and a probe has no previous observation to compare a
   cumulative counter against.
 
@@ -70,7 +70,7 @@ The order of commands matters and is not an accident. **The credential
 is only ever offered after the server has asked for one**, which it does
 by refusing `version` with `CLIENT_ERROR authentication required`. On a
 server that was _not_ started with an auth file, memcached's
-authentication command is not special in any way — it is an ordinary
+authentication command is not special in any way. It is an ordinary
 store, and sending it speculatively would write the password into the
 cache under a key named after the user, where any client can `get` it.
 
@@ -83,7 +83,7 @@ outage is the one failure a monitoring product may not have.
 - **No SASL**, as above. Point a `tcp` monitor at a SASL-only server, or
   give it an auth file.
 - **The cache is never written to.** There is no `set`/`get` round trip,
-  so this check does not prove the cache can store anything — only that
+  so this check does not prove the cache can store anything, only that
   the server is the one that was expected, is answering, and has room to
   accept connections. Writing to a production cache every interval is not
   something a monitor should do uninvited.
@@ -94,7 +94,7 @@ outage is the one failure a monitoring product may not have.
   a missing counter as saturation.
 - **The connection threshold defaults to 90%** and can be turned off by
   setting `maxConnectionUsagePercent` to `null`. It is degraded-only: it
-  colours the monitor amber and opens no incident.
+  colors the monitor amber and opens no incident.
 - **The credentials and the threshold cannot be set from the monitor
   dialog yet.** They travel through the API, an import, or an
   export/edit/import round trip. They are stored and masked like every
@@ -116,7 +116,7 @@ outage is the one failure a monitoring product may not have.
 | Probe      | `src/modules/monitors/types/probes/memcached.ts`                                                  |
 | Tests      | `tests/unit/check-memcached.test.ts`, `tests/integration/monitor-memcached-elasticsearch.test.ts` |
 
-The unit suite dials a real memcached-speaking server on loopback — a
+The unit suite dials a real memcached-speaking server on loopback, a
 scripted `net.createServer`, not a stubbed probe. It frames lines on
 CRLF, reads the length-prefixed data block of a `set` by count, and can
 be told to demand a credential, to split every reply across two packets

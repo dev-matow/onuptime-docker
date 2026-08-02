@@ -49,6 +49,6 @@ export function formatDuration(ms: number): string {
  * downtime — displaying it as "100.00%" would overstate availability.
  */
 export function formatUptime(pct: number | null): string {
-  if (pct === null) return "—";
+  if (pct === null) return "-";
   return `${(Math.floor(pct * 100) / 100).toFixed(2)}%`;
 }

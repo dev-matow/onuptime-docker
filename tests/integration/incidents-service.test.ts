@@ -244,7 +244,7 @@ describe("acknowledgeIncident", () => {
     });
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({
-      message: "Incident acknowledged — escalation stopped.",
+      message: "Incident acknowledged, escalation stopped.",
       internal: true,
     });
 
@@ -471,7 +471,7 @@ describe("monitor-driven incidents", () => {
     );
     expect(systemResolve).toMatchObject({
       status: "resolved",
-      message: "Payments API recovered — incident auto-resolved.",
+      message: "Payments API recovered, incident auto-resolved.",
       createdBy: null,
     });
   });

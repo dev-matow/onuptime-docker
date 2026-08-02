@@ -64,7 +64,7 @@ export function renderTypeTable(): string {
     .sort((a, b) => a.kumaType.localeCompare(b.kumaType))
     .map((entry) => {
       const becomes =
-        entry.checkType === null ? "— not imported" : `\`${entry.checkType}\``;
+        entry.checkType === null ? "- not imported" : `\`${entry.checkType}\``;
       const note = entry.checkType === null ? entry.reason : entry.transform;
       return `| \`${entry.kumaType}\` | ${becomes} | ${cell(note ?? "Imported unchanged.")} |`;
     });
@@ -80,7 +80,7 @@ export function renderFieldTable(): string {
   const rows = FIELD_MATRIX.map(
     (field) =>
       `| \`${field.column}\` | ${field.classification} | ${
-        field.target === null ? "—" : `\`${field.target}\``
+        field.target === null ? "-" : `\`${field.target}\``
       } | ${cell(field.note)} |`,
   );
   return [
@@ -96,10 +96,10 @@ export function renderCountsTable(): string {
   return [
     "| Classification | Columns |",
     "| --- | --- |",
-    `| \`mapped\` — carried unchanged | ${counts.columns.mapped} |`,
-    `| \`transformed\` — carried, meaning restated | ${counts.columns.transformed} |`,
-    `| \`unsupported\` — Vigil cannot express it | ${counts.columns.unsupported} |`,
-    `| \`not-applicable\` — Kuma bookkeeping | ${counts.columns["not-applicable"]} |`,
+    `| \`mapped\`: carried unchanged | ${counts.columns.mapped} |`,
+    `| \`transformed\`: carried, meaning restated | ${counts.columns.transformed} |`,
+    `| \`unsupported\`: Vigil cannot express it | ${counts.columns.unsupported} |`,
+    `| \`not-applicable\`: Kuma bookkeeping | ${counts.columns["not-applicable"]} |`,
     `| **total** | **${counts.columns.total}** |`,
   ].join("\n");
 }

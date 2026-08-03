@@ -1,6 +1,6 @@
 {
   "name": "vigil-core",
-  "version": "1.17.0",
+  "version": "1.18.0",
   "private": false,
   "license": "Apache-2.0",
   "scripts": {
@@ -30,7 +30,8 @@
     "kuma:check": "node scripts/kuma-matrix.mjs --check",
     "bench:check": "node scripts/bench-check.mjs",
     "dod:check": "node scripts/dod-matrix.mjs --check",
-    "bench:channels": "tsx scripts/bench/channel-fanout.ts"
+    "bench:channels": "tsx scripts/bench/channel-fanout.ts",
+    "bench:queue": "tsx scripts/bench/queue-depth.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.109.0",

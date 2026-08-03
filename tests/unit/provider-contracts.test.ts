@@ -45,6 +45,7 @@ import {
   vapidAuthorization,
   webpushProvider,
 } from "@/modules/notifications/providers/webpush";
+import { sentNothing } from "@/modules/notifications/providers/types";
 import { zulipProvider } from "@/modules/notifications/providers/zulip";
 
 /**
@@ -232,7 +233,7 @@ describe("PagerDuty", () => {
         { status: 202, body: '{"status":"success","dedup_key":"abc"}' },
       ],
     });
-    expect(await outcome).toEqual({
+    expect(await outcome).toMatchObject({
       status: "delivered",
       providerMessageId: "abc",
     });
@@ -317,7 +318,7 @@ describe("Jira Service Management", () => {
       secrets,
       replies: [{ body: '{"issues":[{"key":"OPS-24"}]}' }, { status: 201 }],
     });
-    expect(await outcome).toEqual({
+    expect(await outcome).toMatchObject({
       status: "delivered",
       providerMessageId: "OPS-24",
     });
@@ -374,7 +375,7 @@ describe("Jira Service Management", () => {
       msg: recovery(),
       replies: [{ body: '{"issues":[]}' }],
     });
-    expect(await outcome).toEqual({
+    expect(await outcome).toMatchObject({
       status: "delivered",
       providerMessageId: null,
     });
@@ -439,7 +440,7 @@ describe("Matrix", () => {
       replies: [{ body: '{"event_id":"$evt"}' }],
       rowId: "row-1",
     });
-    expect(await outcome).toEqual({
+    expect(await outcome).toMatchObject({
       status: "delivered",
       providerMessageId: "$evt",
     });
@@ -493,7 +494,7 @@ describe("Mattermost", () => {
       secrets: { accessToken: "bot-token" },
       replies: [{ status: 201, body: '{"id":"post-1"}' }],
     });
-    expect(await outcome).toEqual({
+    expect(await outcome).toMatchObject({
       status: "delivered",
       providerMessageId: "post-1",
     });
@@ -528,7 +529,7 @@ describe("Rocket.Chat", () => {
       secrets,
       replies: [{ body: '{"success":true,"message":{"_id":"m1"}}' }],
     });
-    expect(await outcome).toEqual({
+    expect(await outcome).toMatchObject({
       status: "delivered",
       providerMessageId: "m1",
     });
@@ -565,7 +566,7 @@ describe("Zulip", () => {
       secrets,
       replies: [{ body: '{"result":"success","id":42}' }],
     });
-    expect(await outcome).toEqual({
+    expect(await outcome).toMatchObject({
       status: "delivered",
       providerMessageId: "42",
     });
@@ -671,7 +672,7 @@ describe("Pushover", () => {
       secrets,
       replies: [{ body: '{"status":1,"request":"req-1"}' }],
     });
-    expect(await outcome).toEqual({
+    expect(await outcome).toMatchObject({
       status: "delivered",
       providerMessageId: "req-1",
     });
@@ -725,7 +726,7 @@ describe("Pushbullet", () => {
       secrets,
       replies: [{ body: '{"iden":"push-1"}' }],
     });
-    expect(await outcome).toEqual({
+    expect(await outcome).toMatchObject({
       status: "delivered",
       providerMessageId: "push-1",
     });
@@ -1068,7 +1069,7 @@ describe("Twilio SMS", () => {
       secrets,
       replies: [{ status: 201, body: '{"sid":"SM123","status":"queued"}' }],
     });
-    expect(await outcome).toEqual({
+    expect(await outcome).toMatchObject({
       status: "delivered",
       providerMessageId: "SM123",
     });
@@ -1183,7 +1184,7 @@ describe("Amazon SNS", () => {
         },
       ],
     });
-    expect(await outcome).toEqual({
+    expect(await outcome).toMatchObject({
       status: "delivered",
       providerMessageId: "mid-1",
     });
@@ -1766,5 +1767,113 @@ describe("the published provider tables", () => {
         provider.capabilities.receipt ? "yes" : "no",
       );
     }
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* The failure classifier: retryable vs unknown                        */
+/* ------------------------------------------------------------------ */
+
+describe("classifying a transport failure", () => {
+  // The distinction the release advertises, and the one that had no
+  // test at all: `retryable` means nothing was sent that could have
+  // taken effect; `unknown` means the request may have arrived and a
+  // duplicate cannot be ruled out. Both retry. Only `unknown` puts an
+  // amber count in front of the operator.
+  //
+  // These go through the REAL error shapes, because that is where the
+  // first version was wrong: `fetch` rejects with
+  // `TypeError("fetch failed", { cause })`, so a classifier reading
+  // only the top-level error matched nothing and called every network
+  // failure a possible duplicate.
+
+  it("calls a refused connection retryable, through the wrapper fetch uses", () => {
+    const inner = Object.assign(new Error("connect ECONNREFUSED 1.2.3.4:443"), {
+      code: "ECONNREFUSED",
+    });
+    const wrapped = new TypeError("fetch failed", { cause: inner });
+    expect(sentNothing(wrapped)).toBe(true);
+    expect(sentNothing(inner)).toBe(true);
+  });
+
+  it("calls an unresolvable name retryable", () => {
+    const inner = Object.assign(new Error("getaddrinfo ENOTFOUND nope.test"), {
+      code: "ENOTFOUND",
+    });
+    expect(sentNothing(new TypeError("fetch failed", { cause: inner }))).toBe(
+      true,
+    );
+  });
+
+  it("calls a rejected certificate retryable", () => {
+    const inner = Object.assign(new Error("certificate has expired"), {
+      code: "CERT_HAS_EXPIRED",
+    });
+    expect(sentNothing(new TypeError("fetch failed", { cause: inner }))).toBe(
+      true,
+    );
+  });
+
+  it("calls a timeout unknown, because the request may have landed", () => {
+    const abort = Object.assign(new Error("The operation was aborted"), {
+      name: "TimeoutError",
+    });
+    expect(sentNothing(abort)).toBe(false);
+    expect(sentNothing(new TypeError("fetch failed", { cause: abort }))).toBe(
+      false,
+    );
+  });
+
+  it("calls a reset mid-response unknown", () => {
+    // The bytes went out. Whatever happened next, the far end may have
+    // acted on them.
+    const inner = Object.assign(new Error("socket hang up"), {
+      code: "ECONNRESET",
+    });
+    expect(sentNothing(new TypeError("fetch failed", { cause: inner }))).toBe(
+      false,
+    );
+  });
+
+  it("does not loop forever on a self-referencing cause", () => {
+    const looping: { cause?: unknown; message: string } = {
+      message: "round and round",
+    };
+    looping.cause = looping;
+    expect(sentNothing(looping)).toBe(false);
+  });
+
+  it("reports the classification a real delivery gets", async () => {
+    // End to end through `httpDeliver`, with a transport that fails the
+    // way a refused connection fails.
+    const fetchImpl = vi.fn<typeof fetch>(async () => {
+      throw new TypeError("fetch failed", {
+        cause: Object.assign(new Error("connect ECONNREFUSED"), {
+          code: "ECONNREFUSED",
+        }),
+      });
+    });
+    const outcome = await getProvider("slack")!.deliver({
+      config: {},
+      secrets: { webhookUrl: "https://hooks.slack.com/services/T/B/x" },
+      message: message(),
+      rowId: "row-1",
+      net: { fetchImpl, lookup: publicLookup },
+    });
+    expect(outcome.status).toBe("retryable");
+
+    const timedOut = vi.fn<typeof fetch>(async () => {
+      throw Object.assign(new Error("The operation was aborted"), {
+        name: "TimeoutError",
+      });
+    });
+    const second = await getProvider("slack")!.deliver({
+      config: {},
+      secrets: { webhookUrl: "https://hooks.slack.com/services/T/B/x" },
+      message: message(),
+      rowId: "row-1",
+      net: { fetchImpl: timedOut, lookup: publicLookup },
+    });
+    expect(second.status).toBe("unknown");
   });
 });

@@ -15,6 +15,7 @@ import {
   monitors,
   notificationChannelMonitors,
   notificationChannels,
+  notificationAttempts,
   notificationOutbox,
   organization,
   statusPageMonitors,
@@ -39,6 +40,7 @@ import { DEMO_ORG, DEMO_PASSWORD, DEMO_USERS } from "@/lib/demo";
  */
 
 const DAY = 24 * 60 * 60 * 1000;
+const MINUTE = 60 * 1000;
 const HOUR = 60 * 60 * 1000;
 const MIN = 60 * 1000;
 
@@ -708,21 +710,24 @@ async function main() {
     events: ["incident"],
     enabled: true,
   });
-  await db.insert(notificationChannels).values({
-    organizationId,
-    name: "Matrix - Infra room",
-    provider: "matrix",
-    config: {
-      homeserverUrl: "https://matrix.altitude.demo",
-      roomId: "!infra:altitude.demo",
-    },
-    secrets: sealSecrets({
-      accessToken: `syt_demo_not_real_${"m".repeat(16)}`,
-    }),
-    destination: "Matrix room !infra:altitude.demo",
-    events: ["monitor", "incident"],
-    enabled: true,
-  });
+  const [matrixChannel] = await db
+    .insert(notificationChannels)
+    .values({
+      organizationId,
+      name: "Matrix - Infra room",
+      provider: "matrix",
+      config: {
+        homeserverUrl: "https://matrix.altitude.demo",
+        roomId: "!infra:altitude.demo",
+      },
+      secrets: sealSecrets({
+        accessToken: `syt_demo_not_real_${"m".repeat(16)}`,
+      }),
+      destination: "Matrix room !infra:altitude.demo",
+      events: ["monitor", "incident"],
+      enabled: true,
+    })
+    .returning();
   // Named for what it is on every surface, including this one: a bridge
   // to a server the customer runs, not a Vigil integration with the
   // services behind it, and not counted among the native providers.
@@ -939,6 +944,100 @@ async function main() {
       lastError: "429: Too Many Requests: retry after 31",
       createdAt: new Date(now - 26 * HOUR),
     },
+  ]);
+
+  // The states 1.18.0 separated, so the ledger screenshot shows the
+  // distinction rather than describing it: one message the provider
+  // rejected outright, one that ran out of attempts against a provider
+  // that was down, and one still going round with hours of budget left.
+  const [deadLettered] = await db
+    .insert(notificationOutbox)
+    .values({
+      organizationId,
+      idempotencyKey: `demo:api:monitor.down:deadletter`,
+      channel: "channel",
+      channelId: matrixChannel!.id,
+      provider: "matrix",
+      event: "monitor.down",
+      destination: "Matrix room !infra:altitude.demo",
+      payload: {
+        kind: "channel",
+        event: "monitor.down",
+        title: "🔴 Monitor down - Public API",
+        text: "Public API is not responding.",
+        severity: "critical",
+        organizationId,
+        data: {},
+        timestamp: new Date(now - 9 * HOUR).toISOString(),
+      },
+      state: "dead_letter",
+      attempts: 20,
+      lastError: "503: matrix.altitude.demo returned Service Unavailable",
+      createdAt: new Date(now - 9 * HOUR),
+      expiresAt: new Date(now - 3 * HOUR),
+    })
+    .returning();
+
+  const [retrying] = await db
+    .insert(notificationOutbox)
+    .values({
+      organizationId,
+      idempotencyKey: `demo:cert:expiry:retrying`,
+      channel: "channel",
+      channelId: pagerdutyChannel!.id,
+      provider: "pagerduty",
+      event: "monitor.down",
+      destination: "PagerDuty service (US)",
+      payload: {
+        kind: "channel",
+        event: "monitor.down",
+        title: "🔴 Monitor down - Billing webhook",
+        text: "Billing webhook is not responding.",
+        severity: "critical",
+        organizationId,
+        data: {},
+        timestamp: new Date(now - 40 * MINUTE).toISOString(),
+      },
+      state: "queued",
+      attempts: 7,
+      lastError: "503: events.pagerduty.com returned Service Unavailable",
+      nextAttemptAt: new Date(now + 4 * MINUTE),
+      createdAt: new Date(now - 40 * MINUTE),
+      expiresAt: new Date(now + 5 * HOUR),
+    })
+    .returning();
+
+  // The evidence behind them. Written per attempt, never overwritten,
+  // which is what makes the timeline in the app worth opening - and one
+  // attempt with no answer, because that is the honest shape of a
+  // worker that died mid-flight.
+  await db.insert(notificationAttempts).values([
+    ...Array.from({ length: 20 }, (_, i) => ({
+      outboxId: deadLettered!.id,
+      organizationId,
+      attempt: i + 1,
+      fence: i + 1,
+      outcome: (i === 11 ? "unknown" : "retryable") as "unknown" | "retryable",
+      httpStatus: i === 11 ? null : 503,
+      error:
+        i === 11
+          ? "the worker holding this attempt never reported an outcome"
+          : "503: matrix.altitude.demo returned Service Unavailable",
+      startedAt: new Date(now - 9 * HOUR + i * 25 * MINUTE),
+      finishedAt: new Date(now - 9 * HOUR + i * 25 * MINUTE + 8_000),
+    })),
+    ...Array.from({ length: 7 }, (_, i) => ({
+      outboxId: retrying!.id,
+      organizationId,
+      attempt: i + 1,
+      fence: i + 1,
+      outcome: "retryable" as const,
+      httpStatus: 503,
+      error: "503: events.pagerduty.com returned Service Unavailable",
+      startedAt: new Date(now - 40 * MINUTE + i * 5 * MINUTE),
+      finishedAt: new Date(now - 40 * MINUTE + i * 5 * MINUTE + 1_200),
+      nextAttemptAt: new Date(now - 40 * MINUTE + (i + 1) * 5 * MINUTE),
+    })),
   ]);
 
   console.log(`

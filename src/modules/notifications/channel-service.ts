@@ -1,14 +1,27 @@
 import { randomBytes } from "node:crypto";
 
-import { and, desc, eq, ilike, inArray, like, or, sql } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  gte,
+  ilike,
+  inArray,
+  isNotNull,
+  like,
+  or,
+  sql,
+} from "drizzle-orm";
 
 import type { DbClient } from "@/db";
 import {
   monitors,
   notificationChannelMonitors,
+  notificationAttempts,
   notificationChannels,
   notificationOutbox,
 } from "@/db/schema";
+import { env } from "@/lib/env";
 import { AppError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import { writeAudit } from "@/modules/audit";
@@ -1050,33 +1063,282 @@ export interface DeliveryHistoryEntry {
   lastError: string | null;
   deliveredAt: Date | null;
   createdAt: Date;
+  /** When the next attempt is due; null once the row is terminal. */
+  nextAttemptAt: Date | null;
+  /** When it stops being worth delivering. Null on rows queued before
+   * migration 0026, which are bounded by attempts alone. */
+  expiresAt: Date | null;
+  /** Attempts that went out and never reported an outcome. Above zero
+   * means a duplicate cannot be ruled out. */
+  unknownAttempts: number;
+  /** Set on a replay: the delivery this one repeats. */
+  replayOf: string | null;
 }
 
-/** The most recent deliveries for an organization - the history table. */
+/** A replay is a deliberate act on a bounded selection, not a "retry
+ * everything" button: a thousand replayed deliveries is a thousand
+ * messages to real people. */
+const MAX_REPLAY = 100;
+
+/** And a workspace may replay this many deliveries an hour, counted in
+ * the database so the bound survives more than one app replica. */
+const REPLAY_PER_HOUR = 500;
+
+export interface DeliveryHistoryFilters {
+  /** One of the six states, or "unhappy" for everything that is not
+   * delivered and not still trying - the filter an operator reaches for
+   * during an incident. */
+  state?: string;
+  provider?: string;
+  event?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface DeliveryHistoryPage {
+  rows: DeliveryHistoryEntry[];
+  total: number;
+}
+
+/**
+ * The delivery ledger, filtered and paged in the database.
+ *
+ * This read existed before 1.18.0 and nothing rendered it, which is
+ * why it returned thirty rows with no filters and no way to ask a
+ * question. The columns it returns now are the ones an operator needs
+ * during an outage and could not previously get from anywhere: how many
+ * attempts a message has spent, when the next one is due, how old it
+ * is, why it stopped, and whether any attempt ended without an answer.
+ *
+ * `unknownAttempts` is the important one. It is the count of attempts
+ * that went out and never reported, which is the only honest way to
+ * surface "this may have arrived twice" - and the reason the attempts
+ * table exists at all.
+ */
 export async function deliveryHistory(
   db: DbClient,
   organizationId: string,
-  limit = 30,
-): Promise<DeliveryHistoryEntry[]> {
-  const rows = await db
-    .select()
-    .from(notificationOutbox)
-    .where(eq(notificationOutbox.organizationId, organizationId))
-    .orderBy(desc(notificationOutbox.createdAt))
-    .limit(limit);
-  return rows.map((row) => ({
-    id: row.id,
-    provider: row.provider ?? (row.channel === "email" ? "email" : row.channel),
-    event: row.event,
-    destination: row.destination,
-    state: row.state,
-    attempts: row.attempts,
-    // Errors are redacted before recording; sliced here anyway so a
-    // pre-0022 row cannot leak more than a line.
-    lastError: row.lastError ? row.lastError.slice(0, 300) : null,
-    deliveredAt: row.deliveredAt,
-    createdAt: row.createdAt,
-  }));
+  filters: DeliveryHistoryFilters = {},
+): Promise<DeliveryHistoryPage> {
+  const limit = Math.min(Math.max(filters.limit ?? 30, 1), 200);
+  const offset = Math.max(filters.offset ?? 0, 0);
+
+  const where = [eq(notificationOutbox.organizationId, organizationId)];
+  if (filters.state === "unhappy") {
+    where.push(
+      inArray(notificationOutbox.state, ["failed", "expired", "dead_letter"]),
+    );
+  } else if (
+    filters.state &&
+    [
+      "queued",
+      "sending",
+      "delivered",
+      "failed",
+      "expired",
+      "dead_letter",
+    ].includes(filters.state)
+  ) {
+    where.push(
+      eq(
+        notificationOutbox.state,
+        filters.state as "queued" | "sending" | "delivered",
+      ),
+    );
+  }
+  if (filters.provider) {
+    where.push(eq(notificationOutbox.provider, filters.provider));
+  }
+  if (filters.event) {
+    where.push(eq(notificationOutbox.event, filters.event));
+  }
+  const predicate = and(...where);
+
+  const [rows, [counted]] = await Promise.all([
+    db
+      .select()
+      .from(notificationOutbox)
+      .where(predicate)
+      .orderBy(desc(notificationOutbox.createdAt))
+      .limit(limit)
+      .offset(offset),
+    db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(notificationOutbox)
+      .where(predicate),
+  ]);
+
+  // One grouped query for the whole page rather than one per row.
+  const ids = rows.map((row) => row.id);
+  const unknowns = new Map<string, number>();
+  if (ids.length > 0) {
+    const counts = await db
+      .select({
+        outboxId: notificationAttempts.outboxId,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(notificationAttempts)
+      .where(
+        and(
+          inArray(notificationAttempts.outboxId, ids),
+          eq(notificationAttempts.outcome, "unknown"),
+        ),
+      )
+      .groupBy(notificationAttempts.outboxId);
+    for (const row of counts) unknowns.set(row.outboxId, row.count);
+  }
+
+  return {
+    rows: rows.map((row) => ({
+      id: row.id,
+      provider:
+        row.provider ?? (row.channel === "email" ? "email" : row.channel),
+      event: row.event,
+      destination: row.destination,
+      state: row.state,
+      attempts: row.attempts,
+      // Errors are redacted before recording; sliced here anyway so a
+      // pre-0022 row cannot leak more than a line.
+      lastError: row.lastError ? row.lastError.slice(0, 300) : null,
+      deliveredAt: row.deliveredAt,
+      createdAt: row.createdAt,
+      // Only meaningful while it is still going round; a terminal row's
+      // `next_attempt_at` is whatever it last was, and showing that as
+      // "next retry" would be a lie about a message that has stopped.
+      nextAttemptAt:
+        row.state === "queued" || row.state === "sending"
+          ? row.nextAttemptAt
+          : null,
+      expiresAt: row.expiresAt,
+      unknownAttempts: unknowns.get(row.id) ?? 0,
+      replayOf: row.replayOf,
+    })),
+    total: counted?.count ?? 0,
+  };
+}
+
+/**
+ * Replays finished deliveries as NEW work.
+ *
+ * The rule this function exists to keep: **history is never rewound.**
+ * Re-queueing the original row in place would be one line of SQL and
+ * would destroy the only record of what happened - the attempts it
+ * spent, the reason it stopped, the moment it was decided. An operator
+ * replaying a batch after fixing a credential would be erasing the
+ * evidence that the credential was ever wrong.
+ *
+ * So a replay inserts a new outbox row carrying the same rendered
+ * payload and destination, pointing back at its original through
+ * `replay_of`. The original keeps its terminal state forever. The copy
+ * gets a fresh horizon, a fresh attempt budget and a fresh idempotency
+ * key - derived from the original's key plus its own id, so replaying
+ * twice produces two deliveries rather than silently collapsing into
+ * one, which is what an operator pressing the button twice means.
+ *
+ * Only terminal rows may be replayed. A `queued` row is not stuck, it
+ * is waiting, and copying it would double a message that is still
+ * going to be sent.
+ */
+export async function replayDeliveries(
+  db: DbClient,
+  actor: Actor,
+  ids: string[],
+): Promise<{ replayed: number; skipped: number }> {
+  if (ids.length === 0) return { replayed: 0, skipped: 0 };
+  if (ids.length > MAX_REPLAY) {
+    throw new AppError(`Replay at most ${MAX_REPLAY} deliveries at a time.`);
+  }
+  return db.transaction(async (tx) => {
+    // Counted in the DATABASE, not in a per-process map. The shared
+    // in-memory limiter is a cost guard for AI calls and says so; this
+    // one bounds how many real messages an operator can send to real
+    // people, and with several app replicas a per-process count is the
+    // limit multiplied by the replica count. A replay is identifiable
+    // by `replay_of`, so the window is one indexed count.
+    const [recent] = await tx
+      .select({ count: sql<number>`count(*)::int` })
+      .from(notificationOutbox)
+      .where(
+        and(
+          eq(notificationOutbox.organizationId, actor.organizationId),
+          isNotNull(notificationOutbox.replayOf),
+          gte(notificationOutbox.createdAt, sql`now() - interval '1 hour'`),
+        ),
+      );
+    if ((recent?.count ?? 0) + ids.length > REPLAY_PER_HOUR) {
+      throw new AppError(
+        `Replay is limited to ${REPLAY_PER_HOUR} deliveries an hour in this workspace. Wait before replaying more.`,
+      );
+    }
+
+    const originals = await tx
+      .select()
+      .from(notificationOutbox)
+      .where(
+        and(
+          eq(notificationOutbox.organizationId, actor.organizationId),
+          inArray(notificationOutbox.id, ids),
+          inArray(notificationOutbox.state, [
+            "delivered",
+            "failed",
+            "expired",
+            "dead_letter",
+          ]),
+        ),
+      );
+    if (originals.length === 0) {
+      throw new AppError(
+        "Nothing to replay: those deliveries are still in progress, or are not in this workspace.",
+      );
+    }
+
+    const copies = await tx
+      .insert(notificationOutbox)
+      .values(
+        originals.map((row) => ({
+          organizationId: row.organizationId,
+          // Derived from the original so the link is visible in the
+          // key itself, and suffixed so a second replay is a second
+          // delivery rather than a conflict that silently does nothing.
+          idempotencyKey:
+            `replay:${randomBytes(8).toString("hex")}:${row.idempotencyKey}`.slice(
+              0,
+              400,
+            ),
+          channel: row.channel,
+          channelId: row.channelId,
+          provider: row.provider,
+          event: row.event,
+          destination: row.destination,
+          payload: row.payload,
+          replayOf: row.id,
+          expiresAt: sql`now() + make_interval(hours => ${env.NOTIFICATION_RETRY_HORIZON_HOURS})`,
+        })),
+      )
+      .returning({ id: notificationOutbox.id });
+
+    await writeAudit(tx, {
+      organizationId: actor.organizationId,
+      actorId: actor.userId,
+      action: "notification_delivery.replayed",
+      targetType: "notification_outbox",
+      // One of N in `targetId` is what an audit index will show, so the
+      // full selection is in the metadata beside it and the count is
+      // explicit. A reader must not take the target for the whole act.
+      targetId: originals[0]!.id,
+      metadata: {
+        replayed: copies.length,
+        requested: ids.length,
+        originals: originals.map((row) => row.id),
+        replayIds: copies.map((row) => row.id),
+      },
+    });
+
+    return {
+      replayed: copies.length,
+      skipped: ids.length - originals.length,
+    };
+  });
 }
 
 /**

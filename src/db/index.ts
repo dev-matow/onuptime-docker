@@ -27,3 +27,27 @@ export type Database = typeof db;
 export type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
 export type DbClient = Database | Transaction;
+
+/**
+ * What the pool is, and what it is doing.
+ *
+ * Exported because the notification drain derives its concurrency from
+ * the pool size rather than guessing it, and because a benchmark that
+ * claims to measure database pressure has to be able to see the pool
+ * rather than assume it. `waiting` above zero during a drain is the
+ * measurement that says the concurrency is too high for this
+ * installation - see `docs/NOTIFICATIONS.md`.
+ */
+export function poolStats(): {
+  max: number;
+  total: number;
+  idle: number;
+  waiting: number;
+} {
+  return {
+    max: pool.options.max ?? 10,
+    total: pool.totalCount,
+    idle: pool.idleCount,
+    waiting: pool.waitingCount,
+  };
+}

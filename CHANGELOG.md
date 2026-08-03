@@ -6,6 +6,47 @@ free edition; entries for commercial-only features live in the other
 repository, because they are not in this one and listing them here would
 describe software you do not have.
 
+## 1.18.0 — 2026-08-04
+
+A delivery engine that survives a provider being down for an afternoon.
+
+### Added
+
+- **Durable retries**: twenty attempts over a six-hour horizon, backed
+  off to a half-hour ceiling and jittered. The entire retry window used
+  to be 31 to 62 seconds, so an outage longer than a minute ended with
+  every queued alert marked failed. Two bounds end a chain and the
+  terminal state says which: `dead_letter` for attempts, `expired` for
+  time.
+
+- **An append-only record of every attempt**, written before anything is
+  sent and never overwritten, plus `unknown` as an outcome in its own
+  right for the case where a request went out and its fate is not known.
+
+- **Lease fencing**, so a worker paused past its lease can no longer
+  overwrite the result of the worker that replaced it.
+
+- **Fair draining**: selection round-robins across tenants instead of
+  taking the globally oldest, so one organization's large fan-out
+  cannot starve another's single alert.
+
+- **Replay and retention**: finished deliveries can be queued again as
+  new work without rewinding the original, and terminal rows are pruned
+  after thirty days. Nothing queued is ever deleted.
+
+- **A delivery ledger in the app**: queue health, per-delivery attempts,
+  next retry, final reason, filters and an attempt timeline.
+
+### Fixed
+
+- A worker that died holding a row never spent an attempt, so a row
+  could cycle between crash and re-claim forever without reaching its
+  budget. Attempts are now spent at the claim.
+
+### Notes
+
+- Migration 0026 is additive; upgrading from 1.17.0 is applying it.
+
 ## 1.17.0 — 2026-08-03
 
 Twenty-five providers, in this edition too.

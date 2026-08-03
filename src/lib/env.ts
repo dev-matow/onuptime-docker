@@ -73,6 +73,101 @@ const envSchema = z.object({
    * and say so, which is the honest answer and never a false outage.
    */
   BROWSER_SERVICE_URL: z.url({ protocol: /^https?$/ }).optional(),
+
+  /* ---- Notification delivery ----------------------------------------
+   *
+   * Five dials, all validated, all with defaults that are the shipped
+   * behaviour. They exist because the right value depends on the
+   * installation - a single-tenant box paging one team and an agency
+   * fanning out to forty clients want different numbers - and because
+   * a limit nobody can see or change is indistinguishable from a bug
+   * when it bites. Every one of them is published in
+   * `docs/NOTIFICATIONS.md` with what happens at the edges.
+   */
+
+  /**
+   * How long a message stays worth delivering.
+   *
+   * The OUTER bound, stamped onto each row at enqueue so a running
+   * queue keeps the deadline it was accepted under - changing this
+   * does not retroactively expire or extend work already in flight.
+   *
+   * Six hours by default, and the reason is the product rather than
+   * the machine: an alert is perishable. A monitor-down page that
+   * arrives six hours late is not a late alert, it is a false one -
+   * the outage it describes is over, and it competes for attention
+   * with whatever is happening now. Installations that would rather
+   * have the message eventually than not at all can raise it; the
+   * ceiling is seventy-two hours because past that the message is
+   * archaeology.
+   */
+  NOTIFICATION_RETRY_HORIZON_HOURS: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(72)
+    .default(6),
+  /**
+   * How many times one message may be attempted.
+   *
+   * The INNER bound, and it binds first when a provider fails fast:
+   * twenty attempts on the published backoff is about five hours, so a
+   * provider that refuses instantly exhausts its tries before the
+   * horizon, while a provider that is simply unreachable runs out of
+   * time first. Two controls, two different failure shapes, and the
+   * terminal state says which one was hit - `dead_letter` for attempts,
+   * `expired` for time.
+   */
+  NOTIFICATION_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(50).default(20),
+  /**
+   * How many messages one drain tick may take.
+   *
+   * Bounded rather than "everything due" because an unbounded drain
+   * after a long outage is the second outage. Raising it does not
+   * raise throughput on its own - the concurrency below and the
+   * per-channel limit still apply - it raises how much work one tick
+   * may consider, which is what matters when the queue is deep.
+   */
+  NOTIFICATION_BATCH_SIZE: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(5_000)
+    .default(250),
+  /**
+   * How many deliveries are in flight at once.
+   *
+   * Tied to the database connection pool, not to throughput. Each
+   * delivery takes a connection several times - claim, load the
+   * channel, record the outcome - and the pool is shared with the web
+   * application. The default is derived from the pool size rather than
+   * typed as a constant (see `notification-delivery.ts`), and this
+   * override exists for an operator who has measured their own pool.
+   * Raising it past the pool is how a large fan-out becomes a slow
+   * dashboard.
+   */
+  NOTIFICATION_DELIVERY_CONCURRENCY: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(64)
+    .optional(),
+  /**
+   * How long finished deliveries and their attempt evidence are kept.
+   *
+   * Only terminal rows are ever removed, and never anything still
+   * queued or in flight - see `pruneNotificationHistory`. Thirty days
+   * is long enough to answer "was I paged about that incident last
+   * month" and short enough that a busy installation's ledger reaches
+   * a steady size. The attempt rows go with their delivery by cascade,
+   * in the same statement.
+   */
+  NOTIFICATION_RETENTION_DAYS: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(3_650)
+    .default(30),
   /**
    * Public read-only demo deployment: sign-up and every mutation are
    * disabled, and /api/demo signs visitors in as the seeded viewer.

@@ -200,6 +200,34 @@ async function main() {
     "notifications.png",
     "Notification channels: the provider editor, event-class routing and the delivery history",
   );
+  // The delivery ledger: queue health, the states 1.18.0 separated, and
+  // the attempt timeline behind one of them. The screenshot is worth
+  // taking because "durable retries" is a claim about behaviour nobody
+  // can see, and this is where an operator sees it.
+  await page.goto(`${BASE}/settings/notifications?dstate=unhappy`);
+  await page.waitForSelector("h1", { timeout: 20_000 });
+  // The app scrolls inside its own container, so `fullPage` captures
+  // the viewport and nothing below it. The ledger sits under the
+  // channel list; scroll it into view or the screenshot shows the card
+  // above the one it is named for.
+  await page.getByText("Deliveries", { exact: true }).scrollIntoViewIfNeeded();
+  await page.waitForTimeout(800);
+  await capture(
+    page,
+    "notification-deliveries.png",
+    "The delivery ledger: queue pressure, attempts spent, next retry, and why a message stopped",
+  );
+
+  await page.getByRole("button", { name: "Attempts" }).first().click();
+  await page.getByRole("dialog").waitFor({ timeout: 10_000 });
+  await page.waitForTimeout(700);
+  await capture(
+    page,
+    "notification-attempts.png",
+    "One delivery's attempt timeline, including an attempt that never reported an outcome",
+  );
+  await page.keyboard.press("Escape");
+
   // The provider picker, open. The channel list shows what one
   // workspace configured; this shows what the product actually offers,
   // which is the thing a buyer is trying to find out - including the

@@ -233,14 +233,39 @@ function FieldInput({
   );
 }
 
+/**
+ * What happened to this channel's last delivery.
+ *
+ * The labels are spelled out rather than falling through to the raw
+ * enum, which is what 1.18.0's three new terminal states did until the
+ * screenshot caught it: a channel showed `dead_letter` in a badge. The
+ * three unhappy endings read differently on purpose - "rejected" is a
+ * misconfiguration, "gave up" ran out of attempts, "too late" ran out
+ * of horizon, and an operator does something different about each.
+ */
+const LAST_RESULT_LABEL: Record<string, string> = {
+  queued: "Retrying",
+  sending: "Sending",
+  delivered: "Delivered",
+  failed: "Rejected",
+  dead_letter: "Gave up",
+  expired: "Too late",
+};
+
 function StateBadge({ row }: { row: ChannelSummary }) {
   if (!row.enabled) return <Badge variant="outline">Disabled</Badge>;
   const last = row.lastResult;
   if (!last) return <Badge variant="secondary">No sends yet</Badge>;
-  if (last.state === "delivered") return <Badge>Delivered</Badge>;
-  if (last.state === "failed")
-    return <Badge variant="destructive">Failed</Badge>;
-  return <Badge variant="secondary">{last.state}</Badge>;
+  const label = LAST_RESULT_LABEL[last.state] ?? last.state;
+  if (last.state === "delivered") return <Badge>{label}</Badge>;
+  if (
+    last.state === "failed" ||
+    last.state === "dead_letter" ||
+    last.state === "expired"
+  ) {
+    return <Badge variant="destructive">{label}</Badge>;
+  }
+  return <Badge variant="secondary">{label}</Badge>;
 }
 
 export function ChannelManager({

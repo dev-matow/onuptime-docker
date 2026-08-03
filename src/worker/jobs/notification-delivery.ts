@@ -1,13 +1,16 @@
 import type { DbClient } from "@/db";
+import { poolStats } from "@/db";
+import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { sendEmail, type EmailTransport } from "@/modules/notifications";
 import { deliverChannelRow } from "@/modules/notifications/channel-service";
 import {
   claimDue,
   deferRow,
-  MAX_ATTEMPTS,
+  expireOverdue,
   recordOutcome,
   renewLease,
+  type ClaimedRow,
   type DeliveryOutcome,
   type OutboxRow,
 } from "@/modules/notifications/outbox";
@@ -29,48 +32,38 @@ import type { ProviderNet } from "@/modules/notifications/providers";
  */
 
 /**
- * How many messages one tick takes.
+ * How many messages one tick takes, and how many go at once.
+ *
+ * Both are configurable now (`NOTIFICATION_BATCH_SIZE`,
+ * `NOTIFICATION_DELIVERY_CONCURRENCY`) because the right value depends
+ * on the installation, and because a limit nobody can see or change is
+ * indistinguishable from a bug when it bites.
  *
  * Bounded rather than "everything due": an unbounded drain after a long
- * provider outage would open a thousand concurrent HTTP requests and
- * turn the recovery into a second outage.
+ * provider outage would open thousands of concurrent requests and turn
+ * the recovery into a second outage.
  *
- * The number went up with the channel cap. At 25 a minute, an event
- * fanned out to a thousand channels finished paging forty minutes after
- * the incident, and one tenant's fan-out sat in front of every other
- * tenant's alerts, because the scheduled pass is global and ordered by
- * due time. That was survivable when an organization could own twenty
- * channels and is not now that it can own any number.
- *
- * 250 with a concurrency of 8 rather than 250 sequential: the batch is
- * the unit of work, and the bound that matters for a provider is the
- * per-channel limit below, not the size of the batch. `docs/
- * NOTIFICATIONS.md` publishes the resulting rate rather than implying
- * the only limits are the providers' own.
+ * The concurrency DEFAULT is derived from the connection pool rather
+ * than typed as a constant, because that is what actually constrains
+ * it. Each delivery takes a connection several times - claim, load the
+ * channel, record the outcome - and the pool is shared with the web
+ * application and every other worker job. Forty per cent of the pool
+ * leaves more than half for everything else; at the shipped pool of ten
+ * that is four, which is the number this was hard-coded to after a
+ * raise to eight made an unrelated test fail to get a connection. The
+ * difference is that it now moves with the pool instead of silently
+ * becoming wrong when somebody raises it.
  */
-const BATCH_SIZE = 250;
+function batchSize(): number {
+  return env.NOTIFICATION_BATCH_SIZE;
+}
 
-/**
- * How many deliveries are in flight at once within a batch.
- *
- * Sequential was the old shape and it made the batch size a latency
- * multiplier: 25 rows against a provider taking its full timeout was
- * four minutes of wall clock for 25 messages.
- *
- * Four, and the number is tied to the connection pool rather than
- * chosen for throughput. Each delivery takes a connection three times
- * (renew the lease, load the channel, record the outcome) and the pool
- * is `max: 10`, shared with the web application and every other worker
- * job. At eight this loop could hold most of the pool at once; the
- * first full-suite run after raising it produced an unrelated test
- * failing to get a connection, which is the same starvation an operator
- * would see as a slow dashboard during a large fan-out. Four leaves
- * more than half the pool for everything else and still drains a batch
- * four times faster than sequentially.
- *
- * Raise this only together with the pool.
- */
-const DELIVERY_CONCURRENCY = 4;
+function deliveryConcurrency(): number {
+  if (env.NOTIFICATION_DELIVERY_CONCURRENCY) {
+    return env.NOTIFICATION_DELIVERY_CONCURRENCY;
+  }
+  return Math.max(2, Math.floor(poolStats().max * 0.4));
+}
 
 /**
  * At most this many messages per configured channel per tick. A
@@ -86,8 +79,14 @@ export interface DeliveryTickResult {
   claimed: number;
   delivered: number;
   retrying: number;
+  /** Terminal and unhappy: permanent, dead-lettered or expired. */
   failed: number;
   deferred: number;
+  /** Retired by the horizon before anything was attempted this tick. */
+  expired: number;
+  /** Claims whose fence had moved by the time they reported. Normally
+   * zero; above zero means leases are expiring under live work. */
+  superseded: number;
 }
 
 async function deliver(
@@ -167,7 +166,14 @@ export async function runNotificationDelivery(
   options: DeliveryOptions = {},
 ): Promise<DeliveryTickResult> {
   const send = options.send ?? sendEmail;
-  const limit = Math.max(1, Math.min(options.limit ?? BATCH_SIZE, BATCH_SIZE));
+  const cap = batchSize();
+  const limit = Math.max(1, Math.min(options.limit ?? cap, cap));
+
+  // Before claiming anything: retire whatever ran out of horizon while
+  // it was waiting. Cheap, indexed, and it keeps the deadline honest
+  // for rows parked behind a long backoff - see `expireOverdue`.
+  const expired = await expireOverdue(db, options.organizationId);
+
   const claimed = await claimDue(db, limit, options.organizationId);
   const result: DeliveryTickResult = {
     claimed: claimed.length,
@@ -175,67 +181,85 @@ export async function runNotificationDelivery(
     retrying: 0,
     failed: 0,
     deferred: 0,
+    expired,
+    superseded: 0,
   };
 
   // The per-channel limit is decided up front, over the whole batch,
   // because it is a property of the batch and not of whichever order
   // the workers happen to pick rows up in.
   const perChannel = new Map<string, number>();
-  const sendable: OutboxRow[] = [];
-  for (const row of claimed) {
+  const sendable: ClaimedRow[] = [];
+  for (const claim of claimed) {
+    const { row } = claim;
     if (row.channelId) {
       const sent = perChannel.get(row.channelId) ?? 0;
       if (sent >= CHANNEL_RATE_LIMIT_PER_TICK) {
-        await deferRow(db, row, DEFER_SECONDS);
+        await deferRow(db, claim, DEFER_SECONDS);
         result.deferred++;
         continue;
       }
       perChannel.set(row.channelId, sent + 1);
     }
-    sendable.push(row);
+    sendable.push(claim);
   }
 
-  async function deliverOne(row: OutboxRow): Promise<void> {
+  async function deliverOne(claim: ClaimedRow): Promise<void> {
+    const { row } = claim;
     let outcome: DeliveryOutcome;
     try {
       // Restart the lease clock at the send, so a row waiting behind
       // seven slow ones does not inherit what is left of a lease taken
-      // when the batch was claimed.
-      await renewLease(db, row.id);
+      // when the batch was claimed. Fenced: a worker that already lost
+      // the row does not get to extend a lease it no longer holds.
+      await renewLease(db, row.id, claim.fence);
       outcome = await deliver(db, row, send, options.net ?? {});
     } catch (error) {
       // A transport that throws instead of returning an outcome is a
-      // bug, but it must not take the batch down with it — the other
-      // messages in this tick are unrelated.
+      // bug, but it must not take the batch down with it - the other
+      // messages in this tick are unrelated. `unknown` rather than
+      // `retryable`: a throw from inside a transport can happen after
+      // the request went out, and this path cannot tell.
       outcome = {
-        status: "retryable",
+        status: "unknown",
         error: error instanceof Error ? error.message : String(error),
       };
     }
 
-    await recordOutcome(db, row, outcome);
+    const recorded = await recordOutcome(db, claim, outcome);
 
-    if (outcome.status === "delivered") {
-      result.delivered++;
+    if (!recorded.committed) {
+      // The fence had moved: another worker owns this delivery now, and
+      // this one wrote nothing but its own `unknown` attempt. Counted
+      // and logged, because a non-zero number here means leases are
+      // expiring under live work and the operator should know.
+      result.superseded++;
+      logger.warn(
+        { outboxId: row.id, fence: claim.fence, attempt: claim.attempt },
+        "notification delivery was superseded by another worker",
+      );
       return;
     }
 
-    // Mirrors `recordOutcome`'s rule: a retryable failure that has used
-    // its last attempt is just as final as a permanent one, and an
-    // operator reading this tally needs it counted that way.
-    const attempts = row.attempts + 1;
-    const givenUp = outcome.status === "permanent" || attempts >= MAX_ATTEMPTS;
-    if (givenUp) result.failed++;
-    else result.retrying++;
+    if (recorded.state === "delivered") {
+      result.delivered++;
+      return;
+    }
+    if (recorded.state === "queued") {
+      result.retrying++;
+    } else {
+      result.failed++;
+    }
 
     logger.warn(
       {
         outboxId: row.id,
         channel: row.channel,
         destination: row.destination,
-        attempts,
-        status: givenUp ? "failed" : "retrying",
-        error: outcome.error,
+        attempts: recorded.attempts,
+        status: recorded.state,
+        nextAttemptAt: recorded.nextAttemptAt,
+        error: "error" in outcome ? outcome.error : undefined,
       },
       "notification delivery attempt failed",
     );
@@ -243,16 +267,16 @@ export async function runNotificationDelivery(
 
   // A fixed pool rather than `Promise.all` over the batch: the point of
   // the bound is that a recovering provider sees a civil number of
-  // connections, and `all` over 250 rows is exactly the flood the batch
-  // size exists to prevent.
+  // connections, and `all` over a full batch is exactly the flood the
+  // batch size exists to prevent.
   const queue = [...sendable];
   const workers = Array.from(
-    { length: Math.min(DELIVERY_CONCURRENCY, queue.length) },
+    { length: Math.min(deliveryConcurrency(), queue.length) },
     async () => {
       for (;;) {
-        const row = queue.shift();
-        if (!row) return;
-        await deliverOne(row);
+        const claim = queue.shift();
+        if (!claim) return;
+        await deliverOne(claim);
       }
     },
   );

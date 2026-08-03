@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  bigint,
   boolean,
   index,
   integer,
@@ -163,11 +164,50 @@ export const notificationChannelMonitors = pgTable(
  * row, so a second worker leaves it alone until the lease expires.
  */
 export const notificationState = pgEnum("notification_state", [
+  /** Decided, not yet in flight. `next_attempt_at` says when it is due. */
   "queued",
+  /** A worker holds a lease on it right now. Not a wish: a timestamp. */
   "sending",
+  /* ---- terminal, and four of them because they are four different
+   * operational facts. `failed` used to mean all three of the ones
+   * below it, so an operator reading the ledger could not tell a typo
+   * in a credential from a provider that was down all afternoon, and
+   * the two need opposite responses. ---- */
+  /** A provider accepted it; `provider_message_id` is the receipt. */
   "delivered",
+  /** The provider rejected it and will keep rejecting it: a bad
+   * credential, an address that does not exist, a malformed payload.
+   * Retrying is pointless and hides the configuration error. */
   "failed",
+  /** The retry horizon passed while it was still retryable. The
+   * provider never came back in time, and an alert this old is no
+   * longer worth delivering - see NOTIFICATION_RETRY_HORIZON_HOURS. */
+  "expired",
+  /** Attempts were exhausted while it was still retryable. Distinct
+   * from `expired`: this one ran out of tries, not out of time, which
+   * points at a provider failing fast rather than being unreachable. */
+  "dead_letter",
 ]);
+
+/**
+ * What one attempt did.
+ *
+ * `claimed` is written when a worker takes the row and is REPLACED by
+ * the outcome when it learns one. A row still saying `claimed` long
+ * after its lease expired is the evidence of a worker that died
+ * mid-flight, and it is exactly the case where a duplicate may exist:
+ * the nightly sweep turns those into `unknown` rather than guessing.
+ *
+ * `unknown` is not a synonym for `retryable`. It means the request may
+ * have arrived - a timeout after the bytes went out, a connection reset
+ * mid-response - so a retry can produce a second message at the far
+ * end. Both are retried, because at-least-once is the promise; only
+ * `unknown` says the ledger cannot rule out a duplicate.
+ */
+export const notificationAttemptOutcome = pgEnum(
+  "notification_attempt_outcome",
+  ["claimed", "delivered", "retryable", "permanent", "unknown"],
+);
 
 export const notificationChannel = pgEnum("notification_channel", [
   "email",
@@ -245,6 +285,52 @@ export const notificationOutbox = pgTable(
     nextAttemptAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     /** Set while a worker holds the row; the lease expires with it. */
     leasedUntil: timestamp({ withTimezone: true }),
+    /**
+     * The fencing token. Incremented on every claim, and carried by the
+     * worker that claimed it.
+     *
+     * This is what makes a lease safe rather than hopeful. A lease
+     * bounds how long a worker is TRUSTED, but nothing stopped a worker
+     * whose lease had expired - paused by GC, swapping, a slow provider
+     * - from waking up and writing its result over the newer worker's.
+     * The ledger would then show the loser's outcome for the winner's
+     * send, which is the same class of lie as the duplicate the lease
+     * exists to prevent.
+     *
+     * Every write from a delivery carries `and fence = <the value it
+     * claimed with>`. A superseded worker's update matches no row, it
+     * learns that immediately, and its attempt is recorded as
+     * `unknown` - because it genuinely does not know whether its own
+     * request arrived.
+     *
+     * `bigint`, and it only ever goes up. Wrapping is not a scenario:
+     * one claim a millisecond for three hundred million years.
+     */
+    fence: bigint({ mode: "number" }).notNull().default(0),
+    /** When the current lease was taken. Read by the queue-health view
+     * to show how long the oldest in-flight message has been in flight. */
+    lastClaimedAt: timestamp({ withTimezone: true }),
+    /**
+     * The moment this message stops being worth delivering.
+     *
+     * Stamped at enqueue from the retry horizon, so it survives a
+     * restart, a redeploy and a configuration change: a message already
+     * in the queue keeps the deadline it was accepted under. An alert
+     * is a perishable thing - a monitor-down page delivered six hours
+     * after the fact is noise arriving in the shape of an emergency -
+     * so the horizon is a product decision, not a resource limit.
+     */
+    expiresAt: timestamp({ withTimezone: true }),
+    /**
+     * The delivery this one replays, if an operator asked for it.
+     *
+     * A replay is NEW work, never a mutation of the row it came from:
+     * the original keeps its state, its attempts and its final reason,
+     * and this column is the only link between them. Rewinding a
+     * terminal row in place would destroy the record of what actually
+     * happened, which is the one thing the ledger is for.
+     */
+    replayOf: uuid(),
     /** The provider's receipt. Without it, success is indistinguishable
      * from a silent no-op — which is what the old transport produced. */
     providerMessageId: text(),
@@ -274,5 +360,104 @@ export const notificationOutbox = pgTable(
       t.channelId,
       t.createdAt.desc(),
     ),
+    // Fair selection reads this: due work, partitioned by tenant.
+    //
+    // The drain used to be `order by next_attempt_at limit N` over
+    // every tenant at once, which is first-come-first-served and
+    // therefore starvation by construction - one organization fanning
+    // an incident out to a thousand channels owns the head of the queue
+    // for four ticks, and every other tenant's alerts wait behind it
+    // however small they are. The selection now ranks within each
+    // organization and takes the best rank from each, which this index
+    // makes an ordered walk rather than a sort of the whole queue.
+    index("notification_outbox_fair_idx")
+      .on(t.organizationId, t.nextAttemptAt)
+      .where(sql`${t.state} in ('queued', 'sending')`),
+  ],
+);
+
+/**
+ * One row per delivery attempt. Append-only, and the reason it exists
+ * is that the outbox row alone cannot answer "did this go twice?".
+ *
+ * The outbox row holds the CURRENT state of a message. It is updated in
+ * place - a retry overwrites `last_error`, a success overwrites
+ * `attempts` - which is right for a queue and useless as evidence: the
+ * fourth attempt's error replaces the third's, and a worker that sent
+ * the message and then died leaves nothing behind at all. Every one of
+ * those is invisible in a single mutable row.
+ *
+ * So each attempt writes its own row when it is CLAIMED, before
+ * anything is sent, and that row is completed in place exactly once by
+ * the worker that owns the fence. Nothing here is ever overwritten by a
+ * later attempt, and a row still reading `claimed` after its lease
+ * expired is not missing data - it is the strongest evidence the system
+ * has that a duplicate may exist.
+ *
+ * Append-only with exactly one exception, stated rather than glossed:
+ * a claim WITHDRAWN before anything was sent is deleted (see
+ * `deferRow`). A message deferred by the per-channel rate limit
+ * reached no provider, so leaving a row behind would be evidence of a
+ * send that never happened - and the attempt number is returned to the
+ * pool with it, so the timeline has no gap. Nothing that reached a
+ * provider is ever removed except by retention, with its delivery.
+ */
+export const notificationAttempts = pgTable(
+  "notification_attempts",
+  {
+    id: uuid()
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    /** Cascades: the evidence belongs to the delivery, and a delivery
+     * removed by retention takes its attempts with it in one statement
+     * rather than leaving orphans for a second sweep to find. */
+    outboxId: uuid()
+      .notNull()
+      .references(() => notificationOutbox.id, { onDelete: "cascade" }),
+    /** Denormalized so the tenant-scoped read and the retention sweep
+     * never have to join back to the outbox. */
+    organizationId: text()
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    /** 1-based, and unique per delivery - see the index below. */
+    attempt: integer().notNull(),
+    /** The outbox fence this attempt was claimed under. Two rows with
+     * the same attempt number cannot exist, but a superseded worker and
+     * its replacement carry different fences, which is what identifies
+     * whose write won. */
+    fence: bigint({ mode: "number" }).notNull(),
+    outcome: notificationAttemptOutcome().notNull().default("claimed"),
+    /** The provider's own status line, when there was one. Null for a
+     * transport that never answered, which is itself the signal. */
+    httpStatus: integer(),
+    /** Already redacted when written; never a raw provider body. */
+    error: text(),
+    providerMessageId: text(),
+    /** What the provider asked for, when it asked. Kept so an operator
+     * can see the schedule was the provider's choice, not Vigil's. */
+    retryAfterMs: integer(),
+    /** When this attempt scheduled the next one. Null on a terminal
+     * outcome, which is how the timeline shows where the chain ended. */
+    nextAttemptAt: timestamp({ withTimezone: true }),
+    startedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp({ withTimezone: true }),
+  },
+  (t) => [
+    // One row per attempt number per delivery. This is the constraint
+    // that makes the table append-only in practice: a worker cannot
+    // write a second row for an attempt another worker already claimed,
+    // so a re-claim after a lease expiry takes the NEXT number and both
+    // are visible.
+    uniqueIndex("notification_attempts_unique").on(t.outboxId, t.attempt),
+    index("notification_attempts_timeline_idx").on(t.outboxId, t.startedAt),
+    // The retention sweep and the tenant's history view.
+    index("notification_attempts_org_idx").on(
+      t.organizationId,
+      t.startedAt.desc(),
+    ),
+    // The stale-claim sweep: rows that never finished.
+    index("notification_attempts_unfinished_idx")
+      .on(t.startedAt)
+      .where(sql`${t.outcome} = 'claimed'`),
   ],
 );

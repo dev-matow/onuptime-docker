@@ -404,7 +404,7 @@ describe("slack", () => {
       secrets: { webhookUrl: "https://hooks.slack.com/services/T0/B0/xyz" },
       responseBody: "ok",
     });
-    await expect(outcome).resolves.toEqual({
+    await expect(outcome).resolves.toMatchObject({
       status: "delivered",
       providerMessageId: null,
     });
@@ -521,7 +521,7 @@ describe("telegram", () => {
       secrets,
       responseBody: JSON.stringify({ ok: true, result: { message_id: 42 } }),
     });
-    await expect(outcome).resolves.toEqual({
+    await expect(outcome).resolves.toMatchObject({
       status: "delivered",
       providerMessageId: "42",
     });
@@ -594,7 +594,7 @@ describe("googlechat", () => {
       },
       responseBody: JSON.stringify({ name: "spaces/AAA/messages/BBB" }),
     });
-    await expect(outcome).resolves.toEqual({
+    await expect(outcome).resolves.toMatchObject({
       status: "delivered",
       providerMessageId: "spaces/AAA/messages/BBB",
     });
@@ -728,7 +728,7 @@ describe("resend", () => {
       secrets: { apiKey: "re_secret_key" },
       responseBody: JSON.stringify({ id: "email-1" }),
     });
-    await expect(outcome).resolves.toEqual({
+    await expect(outcome).resolves.toMatchObject({
       status: "delivered",
       providerMessageId: "email-1",
     });

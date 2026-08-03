@@ -17,7 +17,7 @@ import {
   backoffMs,
   claimDue,
   enqueue,
-  MAX_ATTEMPTS,
+  retryPolicy,
   recordOutcome,
   type DeliveryOutcome,
 } from "@/modules/notifications/outbox";
@@ -190,7 +190,7 @@ describe("a crash after commit loses nothing", () => {
       .where(eq(notificationOutbox.id, row.id));
 
     const claimed = await claimDue(db, 10, actor.organizationId);
-    expect(claimed.map((r) => r.id)).toContain(row.id);
+    expect(claimed.map((c) => c.row.id)).toContain(row.id);
   });
 
   it("does not re-claim a message another worker currently holds", async () => {
@@ -202,10 +202,10 @@ describe("a crash after commit loses nothing", () => {
     if (!row) throw new Error("enqueue returned null");
 
     const first = await claimDue(db, 10, actor.organizationId);
-    expect(first.map((r) => r.id)).toContain(row.id);
+    expect(first.map((c) => c.row.id)).toContain(row.id);
 
     const second = await claimDue(db, 10, actor.organizationId);
-    expect(second.map((r) => r.id)).not.toContain(row.id);
+    expect(second.map((c) => c.row.id)).not.toContain(row.id);
   });
 });
 
@@ -230,6 +230,8 @@ describe("the transport's actual outcome is recorded", () => {
       delivered: 0,
       retrying: 1,
       failed: 0,
+      expired: 0,
+      superseded: 0,
       deferred: 0,
     });
     expect(result.retrying).toBe(1);
@@ -272,25 +274,28 @@ describe("the transport's actual outcome is recorded", () => {
     );
     if (!row) throw new Error("enqueue returned null");
 
-    let current = row;
-    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-      await recordOutcome(db, current, {
+    const { maxAttempts } = retryPolicy();
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      // Claim it properly so each attempt carries its own fence and
+      // writes its own evidence row, which is what the worker does.
+      const [claim] = await claimDue(db, 1, actor.organizationId);
+      if (!claim) throw new Error("nothing to claim");
+      await recordOutcome(db, claim, {
         status: "retryable",
         error: "still failing",
       });
-      const [next] = await rowsFor(actor.organizationId);
-      if (!next) throw new Error("row vanished");
-      current = next;
       // Make it due again so the next attempt is not gated on backoff.
       await db
         .update(notificationOutbox)
         .set({ nextAttemptAt: new Date(Date.now() - 1_000) })
-        .where(eq(notificationOutbox.id, current.id));
+        .where(eq(notificationOutbox.id, row.id));
     }
 
     const [final] = await rowsFor(actor.organizationId);
-    expect(final?.state).toBe("failed");
-    expect(final?.attempts).toBe(MAX_ATTEMPTS);
+    // Out of TRIES, not out of time - which is a different terminal
+    // state from a provider that rejected the message outright.
+    expect(final?.state).toBe("dead_letter");
+    expect(final?.attempts).toBe(maxAttempts);
     expect(final?.lastError).toContain("still failing");
   });
 
@@ -411,8 +416,13 @@ describe("backoff", () => {
     expect(backoffMs(1, () => 0.5)).toBeLessThan(backoffMs(5, () => 0.5));
   });
 
-  it("is capped so a message is never parked for hours", () => {
-    expect(backoffMs(30, () => 1)).toBeLessThanOrEqual(300_000);
+  it("is capped, so no single wait swallows the horizon", () => {
+    // The ceiling moved from five minutes to thirty in 1.18.0, because
+    // a five-minute ceiling cannot reach a six-hour horizon in twenty
+    // attempts. It is still a ceiling: the cap plus the jitter bound
+    // is the longest any one message ever waits between tries.
+    expect(backoffMs(30, () => 1)).toBeLessThanOrEqual(1_800_000 * 1.25);
+    expect(backoffMs(30, () => 1)).toBe(backoffMs(40, () => 1));
   });
 });
 

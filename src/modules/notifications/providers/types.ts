@@ -352,11 +352,19 @@ export async function httpAttempt(
         outcome: {
           status: "retryable",
           error: detail,
+          httpStatus: response.status,
           ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
         },
       };
     }
-    return { ok: false, outcome: { status: "permanent", error: detail } };
+    return {
+      ok: false,
+      outcome: {
+        status: "permanent",
+        error: detail,
+        httpStatus: response.status,
+      },
+    };
   } catch (error) {
     if (error instanceof EgressBlockedError) {
       return {
@@ -367,17 +375,80 @@ export async function httpAttempt(
         },
       };
     }
+    // A timeout or a reset is NOT the same fact as a refused
+    // connection, and calling both `retryable` cost the ledger the one
+    // distinction an operator chasing a duplicate page actually needs.
+    // Nothing was sent when a connection was refused or a name did not
+    // resolve; when a request timed out, the bytes may have arrived,
+    // been acted on, and the answer lost coming back. Both are retried
+    // - at-least-once is the promise - but only one of them means a
+    // second message may exist at the far end.
+    const message =
+      error instanceof Error ? error.message : "provider request failed";
     return {
       ok: false,
       outcome: {
-        status: "retryable",
-        error: redactErrorText(
-          error instanceof Error ? error.message : "provider request failed",
-          request.secrets,
-        ),
+        status: sentNothing(error) ? "retryable" : "unknown",
+        error: redactErrorText(message, request.secrets),
       },
     };
   }
+}
+
+/**
+ * Whether this failure happened before anything could have been acted
+ * on at the far end.
+ *
+ * Conservative by construction: the listed causes are the ones where
+ * the socket demonstrably never carried a complete request, and
+ * everything else - timeouts above all - is treated as unknown. Being
+ * wrong in this direction costs an accurate "may be a duplicate" note;
+ * being wrong in the other direction denies a duplicate that happened.
+ */
+const NOTHING_SENT_CODES = new Set([
+  "ECONNREFUSED",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "ERR_TLS_CERT_ALTNAME_INVALID",
+  "CERT_HAS_EXPIRED",
+  "DEPTH_ZERO_SELF_SIGNED_CERT",
+  "ERR_SSL_WRONG_VERSION_NUMBER",
+]);
+
+export function sentNothing(error: unknown): boolean {
+  // Walks the CAUSE CHAIN, and that is the whole correctness of this
+  // function rather than a nicety. `fetch` rejects with
+  // `TypeError("fetch failed", { cause })` and `egressFetch` preserves
+  // that shape, so the outermost error has no `code` and its message is
+  // the literal string "fetch failed". Testing only the top level
+  // matched nothing, ever: a refused connection and an unresolvable
+  // name were both classified `unknown`, which is the outcome the
+  // product defines as "a duplicate cannot be ruled out". The
+  // duplicate-risk counter in the settings page would have gone amber
+  // the moment any provider's host went down - crying wolf on the one
+  // alarm that is supposed to mean something.
+  for (let current = error, depth = 0; current && depth < 5; depth++) {
+    if (typeof current === "object") {
+      const code = (current as { code?: unknown }).code;
+      if (typeof code === "string" && NOTHING_SENT_CODES.has(code)) return true;
+    }
+    const message = (
+      current instanceof Error ? current.message : String(current ?? "")
+    ).toLowerCase();
+    if (
+      message.includes("econnrefused") ||
+      message.includes("enotfound") ||
+      message.includes("getaddrinfo") ||
+      message.includes("certificate") ||
+      message.includes("self-signed")
+    ) {
+      return true;
+    }
+    current = (current as { cause?: unknown } | null)?.cause;
+  }
+  return false;
 }
 
 export async function httpDeliver(
@@ -393,11 +464,13 @@ export async function httpDeliver(
         `${problem}: ${attempt.body.slice(0, ERROR_BODY_LIMIT)}`,
         request.secrets,
       ),
+      httpStatus: attempt.status,
     };
   }
   return {
     status: "delivered",
     providerMessageId: request.messageId?.(attempt.body) ?? null,
+    httpStatus: attempt.status,
   };
 }
 

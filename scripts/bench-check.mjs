@@ -128,7 +128,66 @@ try {
 if (channelFiles.length === 0)
   fail(`no channel benchmark artefacts in ${CHANNEL_BENCH}`);
 
-for (const name of channelFiles) {
+// Two shapes live in this directory now, and they are checked
+// separately for the same reason the probe artefacts are kept apart
+// from the high-frequency ones: one measures the cost of many
+// CHANNELS, the other the cost of many QUEUED MESSAGES, and a shared
+// required-field list would let either drop the field that makes it
+// meaningful. What they share is the discipline - provenance, the
+// sizes the docs table is built from, and caveats that say what the
+// number is NOT.
+const QUEUE_REQUIRED = [
+  ["cases", "the measurements themselves"],
+  ["method", "how the run was configured"],
+  ["doesNotMeasure", "what a reader must not take this for"],
+  ["environment.commit", "which code produced it"],
+  ["environment.node", "runtime"],
+  ["environment.postgres", "the database it wrote to"],
+  ["environment.poolMax", "the pool the concurrency is derived from"],
+];
+
+for (const name of channelFiles.filter((n) => n === "queue-depth.json")) {
+  const raw = JSON.parse(readFileSync(join(CHANNEL_BENCH, name), "utf8"));
+  for (const [path, why] of QUEUE_REQUIRED) {
+    if (pick(raw, path) === undefined || pick(raw, path) === null) {
+      fail(`${name}: missing \`${path}\`: ${why}`);
+    }
+  }
+  // The depths the docs table is built from. A run that skipped the
+  // deep one is the run that would have found the problem.
+  const depths = new Set((raw.cases ?? []).map((row) => row.queued));
+  for (const depth of [1, 100, 1000, 10000]) {
+    if (!depths.has(depth)) {
+      fail(`${name}: no measurement at ${depth} queued deliveries`);
+    }
+  }
+  for (const row of raw.cases ?? []) {
+    for (const field of [
+      "planMs",
+      "claimBatchMs",
+      "tickMs",
+      "workerHeapMb",
+      "poolWaitingAfter",
+    ]) {
+      if (typeof row[field] !== "number") {
+        fail(`${name}: ${row.queued} queued has no ${field}`);
+      }
+    }
+  }
+  // The caveat that stops a queue-depth number being read as a
+  // delivery-rate promise. The transport is a stub; saying so is the
+  // difference between a measurement and a claim about somebody else's
+  // rate limiter.
+  const notMeasured = String(raw.doesNotMeasure ?? "").toLowerCase();
+  if (!notMeasured.includes("provider throughput")) {
+    fail(`${name}: doesNotMeasure must rule out reading this as throughput`);
+  }
+  if (!notMeasured.includes("stub")) {
+    fail(`${name}: doesNotMeasure must say the transport was a stub`);
+  }
+}
+
+for (const name of channelFiles.filter((n) => n !== "queue-depth.json")) {
   const raw = JSON.parse(readFileSync(join(CHANNEL_BENCH, name), "utf8"));
   for (const [path, why] of CHANNEL_REQUIRED) {
     if (pick(raw, path) === undefined || pick(raw, path) === null) {

@@ -13,10 +13,15 @@ import { isEmailEnabled } from "@/lib/env";
 import { hasPermission } from "@/lib/permissions";
 import { requireOrgContext } from "@/lib/session";
 import { listMonitors } from "@/modules/monitors/service";
-import { listChannels } from "@/modules/notifications/channel-service";
+import {
+  deliveryHistory,
+  listChannels,
+} from "@/modules/notifications/channel-service";
+import { queueHealth } from "@/modules/notifications/outbox";
 import { providerDescriptors } from "@/modules/notifications/providers";
 
 import { ChannelManager } from "./channels";
+import { DeliveryLedger } from "./deliveries";
 
 export const metadata: Metadata = { title: "Notifications · Vigil" };
 
@@ -41,8 +46,10 @@ export default async function NotificationsSettingsPage({
   };
   const page = Math.max(Number(one("page") ?? "1") || 1, 1);
   const pageSize = 25;
+  const deliveryPage = Math.max(Number(one("dpage") ?? "1") || 1, 1);
+  const deliveryPageSize = 20;
 
-  const [channels, monitors] = await Promise.all([
+  const [channels, monitors, deliveries, health] = await Promise.all([
     listChannels(db, ctx.organizationId, {
       search: one("q"),
       provider: one("provider"),
@@ -51,6 +58,13 @@ export default async function NotificationsSettingsPage({
       offset: (page - 1) * pageSize,
     }),
     listMonitors(db, ctx.organizationId),
+    deliveryHistory(db, ctx.organizationId, {
+      state: one("dstate"),
+      provider: one("dprovider"),
+      limit: deliveryPageSize,
+      offset: (deliveryPage - 1) * deliveryPageSize,
+    }),
+    queueHealth(db, ctx.organizationId),
   ]);
 
   return (
@@ -102,6 +116,28 @@ export default async function NotificationsSettingsPage({
         }}
         canEdit={canEdit}
       />
+
+      {/* Gated on the same permission as the attempt timeline behind
+       * it. The list was readable by any member while the narrower
+       * per-delivery view required `notification:update`, which is the
+       * coarser surface being the less guarded one. */}
+      {canEdit && (
+        <DeliveryLedger
+          page={deliveries}
+          health={health}
+          pageNumber={deliveryPage}
+          pageSize={deliveryPageSize}
+          providers={providerDescriptors().map((p) => ({
+            id: p.id,
+            label: p.label,
+          }))}
+          filters={{
+            state: one("dstate") ?? "",
+            provider: one("dprovider") ?? "",
+          }}
+          canReplay={canEdit}
+        />
+      )}
     </div>
   );
 }

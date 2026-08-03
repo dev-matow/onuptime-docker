@@ -252,23 +252,58 @@ attempt.
 earlier than the provider asked, capped at an hour.
 
 **Vigil's own drain, which is the binding one for a large fan-out:** the
-worker claims up to **250 messages per tick** and runs one tick a
-minute, four deliveries in flight at a time. So an event addressed to N
-channels needs about `ceil(N / 250)` ticks: one for up to 250 channels,
-four for a thousand. That number is Vigil's, not a provider's, and it is
-stated here because saying only "it depends on your providers" would be
-untrue: for a fan-out wider than 250, this is the limit you hit first.
+worker claims up to **250 messages per tick** (`NOTIFICATION_BATCH_SIZE`)
+and runs one tick a minute, four deliveries in flight at a time. So an
+event addressed to N channels needs about `ceil(N / 250)` ticks: one for
+up to 250 channels, four for a thousand. That number is Vigil's, not a
+provider's, and it is stated here because saying only "it depends on
+your providers" would be untrue: for a fan-out wider than 250, this is
+the limit you hit first.
+
+**Selection is fair, not first-come.** Until 1.18.0 the drain was
+`order by next_attempt_at limit 250` across every tenant at once, which
+is starvation by construction: one organization fanning an incident out
+to a thousand channels owned the head of the queue for four ticks, and
+every other tenant's single page waited behind all thousand of them.
+The selection now ranks each organization's due work independently and
+takes the best rank from each in turn, so a small tenant's one message
+rides in the first tick beside the big tenant's first message. Within an
+organization it is still oldest-first. The big tenant is not penalised:
+this is round-robin, not an equal split, so it still takes almost all of
+a batch nobody else is competing for.
+
+The concurrency of four is **derived from the database connection
+pool**, not chosen for throughput. Each delivery takes a connection
+several times - claim, load the channel, record the outcome - and the
+pool is shared with the web application. The default is 40% of the pool
+(`NOTIFICATION_DELIVERY_CONCURRENCY` overrides it), which at the shipped
+pool of 10 is four. Raising it past the pool is how a large fan-out
+becomes a slow dashboard; the benchmark below reports `pool waiting`,
+and anything above zero during a drain is the measurement that says the
+concurrency is too high for that installation.
 
 A tick whose providers are all slow can take longer than its minute, in
-which case the next one does not start on top of it. The concurrency of
-four is set by the database connection pool, not by throughput: the pool
-is shared with the application, and a drain that took most of it would
-show up as a slow dashboard during a large fan-out.
+which case the next one does not start on top of it.
 
-The scheduled pass is global and ordered by due time, so a very large
-fan-out on one tenant does share the drain with other tenants. A caller
-that needs to bound that runs an organization-scoped pass, which is what
-the inline drain after a dispatch does.
+**The ceiling this puts on the whole installation, stated plainly:** one
+tick a minute at 250 messages a tick is **15,000 deliveries an hour**,
+across every tenant together. The tick does not loop until the queue is
+empty - it takes a batch and stops. A backlog deep enough that a message
+sits behind more than six hours of batches will reach its horizon and be
+marked `expired` without ever being attempted, and at the default
+settings that means a standing backlog above about 90,000 messages. If
+you are near that, raise `NOTIFICATION_BATCH_SIZE`, which is why it is a
+setting.
+
+Two smaller limits worth knowing before they surprise you:
+
+- **The per-channel cap is applied after the claim.** A single very
+  noisy channel can fill a batch and then have most of it deferred, so
+  the tick does less work than its size suggests. A channel is capped at
+  600 messages an hour by that rule.
+- **A message that only ever loses the per-channel cap can expire with
+  zero attempts.** The ledger shows it as expired with no attempts and
+  no error, because there was no provider error - Vigil was the limiter.
 
 Rate limiting is deliberately the only abuse control here. The channel
 count is not one: bounding how many rows a tenant may own is a poor
@@ -328,6 +363,42 @@ three limits above: Vigil's 250-per-minute drain first for a wide
 fan-out, then the per-channel limit, then whatever each provider
 enforces.
 
+## What a DEEP queue costs
+
+The table above is many CHANNELS. This one is many QUEUED MESSAGES,
+which is the shape a provider outage produces. `npm run bench:queue`
+writes `docs/evidence/channel-bench/queue-depth.json` and these figures
+come out of it.
+
+| Queued | Tenants | Planning | Claim a batch | One whole tick | Delivered in it | Worker heap | Pool waiting |
+| ------ | ------- | -------- | ------------- | -------------- | --------------- | ----------- | ------------ |
+| 1      | 1       | 2.13 ms  | 8.94 ms       | 9.36 ms        | 1               | 20.8 MB     | 0            |
+| 100    | 4       | 1.44 ms  | 12.32 ms      | 106.78 ms      | 100             | 25.4 MB     | 0            |
+| 1,000  | 10      | 2 ms     | 31.99 ms      | 148.92 ms      | 250             | 45.1 MB     | 0            |
+| 10,000 | 25      | 16.19 ms | 39.18 ms      | 203.19 ms      | 250             | 55.1 MB     | 0            |
+
+What the shape means:
+
+- **Planning stays cheap as the queue deepens.** The fair ranking is
+  the expensive-looking part - a window function over every due row -
+  and at ten thousand queued messages it is still about 16 ms, because
+  the partial index on `(organization_id, next_attempt_at)` makes it an
+  ordered walk rather than a sort of the queue.
+- **A tick costs the same whatever is behind it.** Claiming and
+  delivering 250 messages takes about the same time at 1,000 queued as
+  at 10,000, because the batch is the unit of work. A deep queue is
+  drained by more ticks, not slower ones.
+- **The pool is never starved.** `pool waiting` is zero at every depth,
+  which is the measurement the concurrency default is derived from.
+
+**This does not measure provider throughput.** The transport in that
+benchmark is a stub that returns `delivered` without opening a socket,
+so every number is Vigil's own work. How fast messages actually reach a
+provider is governed by that provider's limits, by the per-channel cap
+of ten per tick, and by the batch size - and a queue that drains at
+250 a minute here will drain more slowly than that against a real
+provider that is rate limiting you.
+
 ## Why there is an outbox
 
 Before 1.13.0 the flow was: decide, render, call the transport, mark the
@@ -344,19 +415,83 @@ thing that caused them**, the incident opening, the escalation step
 firing. So the intent commits with its cause or not at all, and a worker
 that dies between them comes back to find the message still queued.
 
-## The four states
+## The six states
 
-| State       | Means                                                               |
-| ----------- | ------------------------------------------------------------------- |
-| `queued`    | Vigil decided to send this and has not yet succeeded                |
-| `sending`   | a worker holds a lease on it right now                              |
-| `delivered` | a provider accepted it, and its receipt is in `provider_message_id` |
-| `failed`    | it will never be delivered, and `last_error` says why               |
+Four of them are terminal, and they are four rather than one because an
+operator responds to each differently. `failed` used to mean all three
+of the unhappy ones, so a wrong credential and a provider that was down
+all afternoon looked identical in the ledger and led to opposite fixes.
+
+| State         | Means                                                                                                                    |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `queued`      | decided, waiting for its next attempt - `next_attempt_at` says when                                                      |
+| `sending`     | a worker holds a lease on it right now                                                                                   |
+| `delivered`   | a provider accepted it, and its receipt is in `provider_message_id`                                                      |
+| `failed`      | a provider REJECTED it and will keep rejecting it: a bad credential, an address that does not exist, a malformed payload |
+| `dead_letter` | it ran out of ATTEMPTS while still retryable - a provider answering fast and badly                                       |
+| `expired`     | it ran out of TIME - the retry horizon passed, which is what an unreachable provider looks like                          |
+
+The distinction that matters most: **a screen full of `expired` means
+your provider was unreachable; a screen full of `failed` means
+something is misconfigured.** The first will fix itself, the second
+will not.
 
 `sending` is a timestamped lease, not a flag. That is what makes crash
 recovery possible: a worker killed mid-send has its lease expire and the
 next tick picks the row up. A boolean "in flight" would park the message
 forever.
+
+## Every attempt leaves a record
+
+The outbox row holds the CURRENT state of a message. It is updated in
+place - a retry overwrites `last_error`, a success overwrites the
+counter - which is right for a queue and useless as evidence. The
+fourth attempt's error replaces the third's, and a worker that sent a
+message and then died leaves nothing behind at all.
+
+So each attempt also writes its own row in `notification_attempts`,
+**before anything is sent**, and that row is completed exactly once by
+the worker that owns it. Nothing is ever overwritten by a later
+attempt. The settings page shows the timeline per delivery: attempt
+number, outcome, HTTP status, the redacted error, the provider's
+receipt, and what it asked for in `Retry-After`.
+
+An attempt has five possible outcomes, and the last two are the point:
+
+| Outcome     | Means                                                       |
+| ----------- | ----------------------------------------------------------- |
+| `claimed`   | a worker has it right now and has not reported back         |
+| `delivered` | the provider accepted it                                    |
+| `retryable` | it failed and NOTHING was sent that could have taken effect |
+| `permanent` | the provider rejected it                                    |
+| `unknown`   | the request went out and its fate is not known              |
+
+`unknown` is not a synonym for `retryable`. A refused connection or a
+name that did not resolve sent nothing; a timeout after the body was
+written may have arrived, been acted on, and lost its answer coming
+back. Both are retried - at-least-once is the promise - but only
+`unknown` means **a duplicate at the far end cannot be ruled out**, and
+the settings page counts those separately for exactly that reason. A
+row still reading `claimed` an hour later is a worker that died
+mid-flight; the nightly sweep turns it into `unknown` rather than
+guessing.
+
+## Leases are fenced
+
+A lease bounds how long a worker is TRUSTED. It cannot stop a worker
+that was paused past its lease - by GC, by swapping, by a provider that
+took four minutes - from waking up and writing its result over the
+newer worker's. The ledger would then report the loser's outcome for
+the winner's send, which is the same class of lie as the duplicate the
+lease exists to prevent.
+
+So every claim increments a `fence` on the row and carries the value.
+Every write from that delivery - the outcome, the lease renewal, even a
+deferral - names its fence, and a superseded worker's write matches no
+row. It learns that immediately, records its own attempt as `unknown`
+because it genuinely does not know whether its request arrived, and
+touches nothing else. The drain reports a `superseded` count; above
+zero means leases are expiring under live work.
 
 ## At-least-once, and the window that makes it so
 
@@ -404,25 +539,67 @@ incident class does not double anything.
 
 ## Retries
 
-Six attempts, exponentially backed off and jittered: 2 s, 4 s, 8 s,
-16 s, 32 s before jitter, which is a **total retry window of 31 to 62
-seconds**. Jitter is not decoration - without it, a provider outage that
-queues a thousand messages returns all thousand at the same instant and
-the recovery attempt is the next outage.
+**Twenty attempts over a six-hour horizon**, exponentially backed off to
+a half-hour ceiling and jittered by a quarter either way:
 
-Say the consequence out loud, because rounding it away is how this
-number came to be wrong on three pages at once: **a provider outage
-lasting longer than about a minute ends with its queued messages marked
-`failed`.** They are marked, not lost - the ledger names each one, its
-destination and the last error - but nothing retries them after that. If
-your provider is regularly out for longer than a minute, the outbox is
-doing what it says and the answer is a second channel, not a longer
-queue.
+| Attempt | Wait before it (no jitter) |
+| ------- | -------------------------- |
+| 2       | 2 s                        |
+| 3       | 4 s                        |
+| 4       | 8 s                        |
+| 5       | 16 s                       |
+| 6       | 32 s                       |
+| 7       | 64 s                       |
+| 8       | 2 min                      |
+| 9       | 4 min                      |
+| 10      | 9 min                      |
+| 11      | 17 min                     |
+| 12-20   | 30 min each                |
+
+Jitter is not decoration - without it, an outage that queues a thousand
+messages returns all thousand at the same instant and the recovery
+attempt is the next outage. A quarter either way still spreads a
+thousand messages across a fifteen-minute window at the ceiling, and
+leaves the schedule something you can predict from this table.
+
+Until 1.18.0 this was six attempts over **31 to 62 seconds**, and a
+provider outage lasting longer than a minute ended with every queued
+alert marked failed. That is the limitation this release removes.
+
+**Two bounds end a chain, and the terminal state says which was hit:**
+
+- `NOTIFICATION_MAX_ATTEMPTS` (20) - the message becomes `dead_letter`.
+  It ran out of tries, which is what happens when a provider answers
+  quickly and badly.
+- `NOTIFICATION_RETRY_HORIZON_HOURS` (6) - the message becomes
+  `expired`. It ran out of time, which is what happens when a provider
+  is unreachable.
+
+Both are reachable on the shipped defaults: twenty attempts on the curve
+above is about five hours, inside a six-hour horizon. Two controls that
+can never both bind would be one control and a decoration.
+
+The horizon is a **product** decision, not a resource limit. An alert is
+perishable: a monitor-down page delivered six hours late is not a late
+alert, it is a false one, describing an outage that is over and
+competing for attention with whatever is happening now. Raise it if you
+would rather have the message eventually than not at all; the ceiling
+is 72 hours, past which the message is archaeology.
+
+The deadline is stamped on each row **at enqueue**, so it survives a
+restart, a redeploy and a configuration change: work already in the
+queue keeps the deadline it was accepted under. Nothing about the
+schedule lives in worker memory - it is `next_attempt_at` and
+`expires_at` on the row - so a deploy mid-outage changes nothing about
+when a message is next tried.
 
 A failure is classified before it is retried:
 
-- **retryable**: 429, any 5xx, a timeout, a DNS failure. Backed off and
-  tried again.
+- **retryable**: 429, any 5xx, a refused connection, a name that did not
+  resolve. Backed off and tried again.
+- **unknown**: a timeout, a reset mid-response, a worker that died.
+  Retried the same way, recorded differently, because a duplicate
+  cannot be ruled out.
 - **permanent**: a 4xx that names the message or the recipient. Marked
   `failed` immediately, because retrying a rejected address hides a
   configuration error behind a queue that never drains. The one 4xx
@@ -430,9 +607,40 @@ A failure is classified before it is retried:
   accepted this retry key" - so it is recorded as delivered, which is
   what it is.
 
-After the sixth attempt a retryable failure becomes `failed` too. A
-message nobody will ever receive should say so where an operator can see
-it.
+A provider's own `Retry-After` is honoured up to **one hour**. Honoured,
+because retrying into a stated rate limit burns an attempt to learn
+nothing; bounded, because `Retry-After: 86400` from a misconfigured
+proxy would otherwise park an alert past its own horizon and it would
+expire without ever being tried again.
+
+## Dead letters, replay and retention
+
+A terminal delivery is not the end of what you can do about it.
+
+**Replay** takes one delivery or a bounded selection (at most 100) and
+queues it again. It is new work, never a rewind: the original keeps its
+state, its attempts and its final reason forever, and the copy points
+back at it. Rewinding a terminal row in place would be one line of SQL
+and would destroy the only record of what happened - an operator
+replaying a batch after fixing a credential would be erasing the
+evidence that the credential was ever wrong. Replaying the same
+delivery twice produces two deliveries, because that is what pressing
+the button twice means. It needs the `notification:update` permission,
+which is also what the ledger itself requires. It is bounded twice: at
+most 100 deliveries in one action, and at most 500 replayed deliveries
+an hour per workspace, counted in the database so the bound holds
+however many app replicas you run. Every replay writes an audit row
+naming who did it, which deliveries were replayed and which new ones
+were created.
+
+**Retention** removes finished deliveries and their attempt evidence
+after `NOTIFICATION_RETENTION_DAYS` (30), on the nightly sweep. It only
+ever touches the four terminal states - a queued message is not old,
+it is late, and deleting it would silently drop a notification the
+outbox promised to deliver. The sweep is bounded (5,000 a pass) so a
+first run on a long-lived installation converges over a few nights
+rather than holding locks for minutes, and it logs whether there is
+more to do.
 
 ## What `notified_at` means now
 

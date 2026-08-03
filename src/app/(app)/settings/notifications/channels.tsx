@@ -31,18 +31,25 @@ import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { EVENT_CLASSES } from "@/modules/notifications/events";
 import type {
   ChannelPage,
   ChannelSummary,
   ChannelView,
 } from "@/modules/notifications/channel-service";
+import {
+  PROVIDER_KINDS,
+  PROVIDER_KIND_LABELS,
+} from "@/modules/notifications/providers/kinds";
 import type {
   ProviderDescriptor,
   ProviderField,
@@ -114,6 +121,35 @@ function editorFrom(view: ChannelView): EditorState {
   };
 }
 
+/**
+ * What a provider can do, as badges.
+ *
+ * Two of these change how an operator should wire the channel, so they
+ * are worth the pixels: `lifecycle` means recovery CLOSES the alert
+ * rather than sending a second one, which is why a pager wants the
+ * monitor class and not just incidents. `native: false` is the Apprise
+ * bridge, and it says so in the words the docs use, because "Vigil
+ * integrates with everything Apprise supports" is the claim this label
+ * exists to prevent anyone making.
+ */
+function CapabilityBadges({ provider }: { provider: ProviderDescriptor }) {
+  const { capabilities: c } = provider;
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      {!c.native && (
+        <Badge variant="outline" className="text-amber-500">
+          Bridge, not a Vigil integration
+        </Badge>
+      )}
+      {c.lifecycle && <Badge variant="secondary">Resolves on recovery</Badge>}
+      {c.duplicateSuppression && (
+        <Badge variant="secondary">Collapses retries</Badge>
+      )}
+      {c.receipt && <Badge variant="secondary">Returns a receipt</Badge>}
+    </div>
+  );
+}
+
 function FieldInput({
   field,
   state,
@@ -135,6 +171,27 @@ function FieldInput({
         ? { ...state, secrets: { ...state.secrets, [field.key]: next } }
         : { ...state, config: { ...state.config, [field.key]: next } },
     );
+
+  if (field.type === "textarea") {
+    return (
+      <Field>
+        <FieldLabel htmlFor={id}>{field.label}</FieldLabel>
+        <Textarea
+          id={id}
+          rows={4}
+          autoComplete="off"
+          spellCheck={false}
+          className="font-mono text-xs"
+          value={value}
+          onChange={(event) => set(event.target.value)}
+          placeholder={
+            isSaved ? "saved - leave blank to keep" : (field.placeholder ?? "")
+          }
+        />
+        {field.help && <FieldDescription>{field.help}</FieldDescription>}
+      </Field>
+    );
+  }
 
   if (field.type === "select") {
     return (
@@ -215,11 +272,34 @@ export function ChannelManager({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
   const [search, setSearch] = useState(filters.search);
+  const [picking, setPicking] = useState(false);
+  const [providerQuery, setProviderQuery] = useState("");
 
   const providerById = new Map(providers.map((p) => [p.id, p]));
   const activeProvider = editor ? providerById.get(editor.provider) : undefined;
   const monitorById = new Map(monitors.map((m) => [m.id, m.name]));
   const totalPages = Math.max(Math.ceil(page.total / pageSize), 1);
+  const nativeCount = providers.filter((p) => p.capabilities.native).length;
+
+  /**
+   * The picker matches label, blurb and API version, so "pager",
+   * "webhook" and "v2" all find something. A dropdown of twenty-six
+   * entries is a list you scroll past; a search over what they DO is a
+   * list you find things in.
+   */
+  const providerMatches = providers.filter((provider) => {
+    const q = providerQuery.trim().toLowerCase();
+    if (!q) return true;
+    return `${provider.label} ${provider.blurb} ${provider.apiVersion} ${provider.kind}`
+      .toLowerCase()
+      .includes(q);
+  });
+
+  function choose(provider: ProviderDescriptor) {
+    setPicking(false);
+    setProviderQuery("");
+    setEditor(emptyEditor(provider));
+  }
 
   /** Filters live in the URL, so a filtered list is linkable and the
    * back button behaves. Every change resets to page one. */
@@ -396,11 +476,20 @@ export function ChannelManager({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All providers</SelectItem>
-                {providers.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.label}
-                  </SelectItem>
-                ))}
+                {PROVIDER_KINDS.map((kind) => {
+                  const group = providers.filter((p) => p.kind === kind);
+                  if (group.length === 0) return null;
+                  return (
+                    <SelectGroup key={kind}>
+                      <SelectLabel>{PROVIDER_KIND_LABELS[kind]}</SelectLabel>
+                      {group.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.label}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  );
+                })}
               </SelectContent>
             </Select>
             <Select
@@ -417,14 +506,7 @@ export function ChannelManager({
               </SelectContent>
             </Select>
             {canEdit && (
-              <Button
-                onClick={() => {
-                  const first = providers[0];
-                  if (first) setEditor(emptyEditor(first));
-                }}
-              >
-                Add channel
-              </Button>
+              <Button onClick={() => setPicking(true)}>Add channel</Button>
             )}
           </div>
 
@@ -463,7 +545,7 @@ export function ChannelManager({
           {page.rows.length === 0 ? (
             <p className="text-muted-foreground text-sm">
               {page.totalUnfiltered === 0
-                ? "No channels yet. Alerts reach organization members by email only. Add Slack, Discord, Teams, Telegram, Google Chat, Gotify, ntfy, a signed webhook, SMTP or Resend."
+                ? `No channels yet. Alerts reach organization members by email only. Add channel connects any of ${nativeCount} providers - chat, on-call, push, SMS, email or a signed webhook.`
                 : "No channels match these filters."}
             </p>
           ) : (
@@ -631,6 +713,84 @@ export function ChannelManager({
         </CardContent>
       </Card>
 
+      {/* The provider picker.
+       *
+       * A dialog rather than a longer dropdown, because twenty-six
+       * entries in a Select is a list you scroll past rather than choose
+       * from. Search covers what each one DOES as well as its name, the
+       * groups give the list a shape at 390px, and each row shows the
+       * API version and the capabilities that change how you would wire
+       * it - so the decision is made here rather than after a failed
+       * test delivery. */}
+      <Dialog
+        open={picking}
+        onOpenChange={(open) => {
+          setPicking(open);
+          if (!open) setProviderQuery("");
+        }}
+      >
+        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Choose a provider</DialogTitle>
+            <DialogDescription>
+              {nativeCount} providers Vigil implements directly, plus a bridge
+              to an Apprise server you run.
+            </DialogDescription>
+          </DialogHeader>
+          <Input
+            value={providerQuery}
+            onChange={(event) => setProviderQuery(event.target.value)}
+            placeholder="Search providers"
+            aria-label="Search providers"
+            autoFocus
+          />
+          <div className="flex flex-col gap-3">
+            {PROVIDER_KINDS.map((kind) => {
+              const group = providerMatches.filter((p) => p.kind === kind);
+              if (group.length === 0) return null;
+              return (
+                <div key={kind} className="flex flex-col gap-1">
+                  <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+                    {PROVIDER_KIND_LABELS[kind]}
+                  </p>
+                  {group.map((provider) => (
+                    <button
+                      key={provider.id}
+                      type="button"
+                      onClick={() => choose(provider)}
+                      className="hover:bg-muted/60 focus-visible:ring-ring flex flex-col gap-1 rounded-md border p-2 text-left focus-visible:ring-2 focus-visible:outline-none"
+                    >
+                      <span className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-medium">
+                          {provider.label}
+                        </span>
+                        <Badge
+                          variant="outline"
+                          className="font-mono text-[11px]"
+                        >
+                          {provider.apiVersion}
+                        </Badge>
+                      </span>
+                      <span className="text-muted-foreground text-xs">
+                        {provider.blurb}
+                      </span>
+                      <CapabilityBadges provider={provider} />
+                    </button>
+                  ))}
+                </div>
+              );
+            })}
+            {providerMatches.length === 0 && (
+              <p className="text-muted-foreground text-sm">
+                Nothing matches that. Anything Vigil does not implement natively
+                can still be reached through the Apprise bridge, using an
+                Apprise server you run.
+              </p>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <Dialog
         open={editor !== null}
         onOpenChange={(open) => {
@@ -655,43 +815,46 @@ export function ChannelManager({
             >
               <FieldGroup>
                 <Field>
-                  <FieldLabel htmlFor="channel-provider">Provider</FieldLabel>
-                  <Select
-                    value={editor.provider}
-                    onValueChange={(id) => {
-                      const provider = providerById.get(id);
-                      if (provider) setEditor(emptyEditor(provider));
-                    }}
-                    disabled={Boolean(editor.channelId)}
-                  >
-                    <SelectTrigger id="channel-provider" className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {providers.map((provider) => (
-                        <SelectItem key={provider.id} value={provider.id}>
-                          {provider.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {editor.channelId ? (
+                  <FieldLabel>Provider</FieldLabel>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-medium">
+                      {activeProvider?.label ?? editor.provider}
+                    </span>
+                    <Badge variant="outline" className="font-mono text-[11px]">
+                      {activeProvider?.apiVersion}
+                    </Badge>
+                    {!editor.channelId && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="ml-auto"
+                        onClick={() => setPicking(true)}
+                      >
+                        Change
+                      </Button>
+                    )}
+                  </div>
+                  {activeProvider && (
+                    <CapabilityBadges provider={activeProvider} />
+                  )}
+                  {activeProvider && (
+                    <FieldDescription>
+                      {activeProvider.prerequisite}{" "}
+                      <a
+                        className="underline underline-offset-2"
+                        href={activeProvider.docsUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Provider setup guide
+                      </a>
+                    </FieldDescription>
+                  )}
+                  {editor.channelId && (
                     <FieldDescription>
                       A channel keeps its provider; add a new channel to switch.
                     </FieldDescription>
-                  ) : (
-                    activeProvider && (
-                      <FieldDescription>
-                        <a
-                          className="underline underline-offset-2"
-                          href={activeProvider.docsUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          Provider setup guide
-                        </a>
-                      </FieldDescription>
-                    )
                   )}
                 </Field>
 

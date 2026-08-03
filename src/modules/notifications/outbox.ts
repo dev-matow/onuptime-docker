@@ -55,10 +55,24 @@ export type OutboxRow = typeof notificationOutbox.$inferSelect;
 /**
  * Attempts after which a message is given up on.
  *
- * Six attempts over the backoff below is a little under half an hour.
- * Long enough to ride out a provider incident, short enough that a
- * genuinely undeliverable address is marked failed while the operator
- * still remembers configuring it.
+ * Six attempts spend five backoffs - `recordOutcome` computes
+ * `backoffMs(attempts + 1)`, so the waits are for attempts 1 to 5:
+ * 2 s, 4 s, 8 s, 16 s and 32 s before jitter. **The total retry window
+ * is therefore 31 to 62 seconds**, and the 300-second cap in `backoffMs`
+ * is unreachable at this attempt count.
+ *
+ * This comment used to say "a little under half an hour", which was
+ * wrong by a factor of thirty and was repeated on three published
+ * surfaces. The number is written out above so the next person can
+ * check it against the arithmetic rather than against a sentence, and
+ * `tests/unit/notification-outbox-window.test.ts` fails if it drifts.
+ *
+ * The consequence is worth stating plainly rather than rounding away: a
+ * provider outage lasting longer than a minute marks its queued
+ * messages `failed`. That is a real limit, it is what the ledger will
+ * show, and `docs/NOTIFICATIONS.md` says so. Widening it is a change to
+ * delivery behaviour and belongs in a release that is about delivery
+ * behaviour, not one that adds providers.
  */
 export const MAX_ATTEMPTS = 6;
 

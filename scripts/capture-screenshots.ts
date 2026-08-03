@@ -200,6 +200,22 @@ async function main() {
     "notifications.png",
     "Notification channels: the provider editor, event-class routing and the delivery history",
   );
+  // The provider picker, open. The channel list shows what one
+  // workspace configured; this shows what the product actually offers,
+  // which is the thing a buyer is trying to find out - including the
+  // Apprise row, labelled as a bridge rather than counted as native.
+  await page.goto(`${BASE}/settings/notifications`);
+  await page.waitForSelector("h1", { timeout: 20_000 });
+  await page.getByRole("button", { name: "Add channel" }).click();
+  await page.getByRole("dialog").waitFor({ timeout: 10_000 });
+  await page.waitForTimeout(600);
+  await capture(
+    page,
+    "notification-providers.png",
+    "The provider picker: searchable and grouped, each entry showing its pinned API version and what it can do",
+  );
+  await page.keyboard.press("Escape");
+
   await fullPage(
     page,
     "/status-page",

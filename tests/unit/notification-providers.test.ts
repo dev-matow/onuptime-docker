@@ -4,6 +4,7 @@ import type { EgressLookup } from "@/modules/monitors/egress";
 import {
   CHANNEL_PROVIDERS,
   getProvider,
+  nativeProviders,
   parseRetryAfterMs,
   plainTextBody,
   providerDescriptors,
@@ -90,22 +91,277 @@ function deliver(
   return { sent, outcome };
 }
 
+/**
+ * A success body in each provider's own documented shape, so the
+ * receipt check above exercises the real extractor rather than a stub
+ * that would satisfy any of them. SMTP is absent because it is not an
+ * HTTP request; its receipt is covered by the SMTP suite.
+ */
+const RECEIPT_FIXTURES: Record<
+  string,
+  {
+    config: Record<string, string>;
+    secrets: Record<string, string>;
+    body: string;
+  }
+> = {
+  slack: {
+    config: {},
+    secrets: { webhookUrl: "https://hooks.slack.com/services/T/B/x" },
+    body: "ok",
+  },
+  discord: {
+    config: {},
+    secrets: { webhookUrl: "https://discord.com/api/webhooks/1/x" },
+    body: "",
+  },
+  teams: {
+    config: {},
+    secrets: { webhookUrl: "https://prod-1.westus.logic.azure.com/w/x" },
+    body: "",
+  },
+  telegram: {
+    config: { chatId: "-1001" },
+    secrets: { botToken: `1234567890:${"A".repeat(35)}` },
+    body: '{"ok":true,"result":{"message_id":482}}',
+  },
+  googlechat: {
+    config: {},
+    secrets: {
+      webhookUrl: "https://chat.googleapis.com/v1/spaces/A/messages?key=k",
+    },
+    body: '{"name":"spaces/A/messages/M"}',
+  },
+  gotify: {
+    config: { serverUrl: "https://gotify.example.com" },
+    secrets: { appToken: "t" },
+    body: '{"id":17}',
+  },
+  ntfy: {
+    config: { serverUrl: "https://ntfy.sh", topic: "alerts" },
+    secrets: {},
+    body: '{"id":"abc"}',
+  },
+  webhook: {
+    config: { url: "https://ops.example.com/hooks/vigil" },
+    secrets: { secret: "whsec_x" },
+    body: "",
+  },
+  resend: {
+    config: { from: "a@example.com", to: "b@example.com" },
+    secrets: { apiKey: "re_x" },
+    body: '{"id":"re-1"}',
+  },
+  matrix: {
+    config: {
+      homeserverUrl: "https://matrix.example.org",
+      roomId: "!r:example.org",
+    },
+    secrets: { accessToken: "syt" },
+    body: '{"event_id":"$e"}',
+  },
+  mattermost: {
+    config: {
+      serverUrl: "https://mm.example.com",
+      channelId: "abcdefghijklmnopqrstuvwxyz",
+    },
+    secrets: { accessToken: "t" },
+    body: '{"id":"post-1"}',
+  },
+  rocketchat: {
+    config: {
+      serverUrl: "https://chat.example.com",
+      channel: "#a",
+      userId: "abc12345",
+    },
+    secrets: { authToken: "t" },
+    body: '{"success":true,"message":{"_id":"m1"}}',
+  },
+  zulip: {
+    config: {
+      serverUrl: "https://example.zulipchat.com",
+      channel: "c",
+      topic: "t",
+      botEmail: "b@example.com",
+    },
+    secrets: { apiKey: "k" },
+    body: '{"result":"success","id":42}',
+  },
+  line: {
+    config: { to: "U1234567890abcdef1234567890abcdef" },
+    secrets: { channelAccessToken: "t" },
+    body: "{}",
+  },
+  pagerduty: {
+    config: { region: "us" },
+    secrets: { routingKey: "R0123456789abcdef0123456789abcdef" },
+    body: '{"status":"success","dedup_key":"k"}',
+  },
+  jira: {
+    config: {
+      siteUrl: "https://example.atlassian.net",
+      projectKey: "OPS",
+      issueType: "Task",
+      email: "o@example.com",
+    },
+    secrets: { apiToken: "t" },
+    // The search answers first; an empty result makes the next call a
+    // create, whose body carries the key this provider reports.
+    body: '{"issues":[],"key":"OPS-24"}',
+  },
+  pushover: {
+    config: {},
+    secrets: { apiToken: "a".repeat(30), userKey: "u".repeat(30) },
+    body: '{"status":1,"request":"req-1"}',
+  },
+  pushbullet: {
+    config: {},
+    secrets: { accessToken: "o.x" },
+    body: '{"iden":"push-1"}',
+  },
+  bark: {
+    config: { serverUrl: "https://bark.example.com" },
+    secrets: { deviceKey: "k" },
+    body: '{"code":200,"message":"success"}',
+  },
+  homeassistant: {
+    config: { baseUrl: "https://ha.example.com", service: "notify" },
+    secrets: { accessToken: "t" },
+    body: "[]",
+  },
+  twilio: {
+    config: {
+      accountSid: `AC${"0".repeat(32)}`,
+      to: "+15551234567",
+      from: "+15557654321",
+    },
+    secrets: { authToken: "t" },
+    body: '{"sid":"SM1","status":"queued"}',
+  },
+  "twilio-whatsapp": {
+    config: {
+      accountSid: `AC${"0".repeat(32)}`,
+      to: "+15551234567",
+      from: "+15557654321",
+    },
+    secrets: { authToken: "t" },
+    body: '{"sid":"MM1"}',
+  },
+  sns: {
+    config: {
+      region: "eu-west-1",
+      topicArn: "arn:aws:sns:eu-west-1:123456789012:alerts",
+    },
+    secrets: { accessKeyId: "AKIA", secretAccessKey: "s" },
+    body: "<PublishResponse><PublishResult><MessageId>m1</MessageId></PublishResult></PublishResponse>",
+  },
+  apprise: {
+    config: { serverUrl: "https://apprise.example.com", configKey: "ops" },
+    secrets: {},
+    body: "{}",
+  },
+  webpush: {
+    config: {},
+    secrets: {},
+    // Web Push needs generated keys to deliver at all; its receipt
+    // behaviour is asserted in the Web Push contract tests.
+    body: "",
+  },
+};
+
 describe("the registry", () => {
-  it("ships exactly the ten advertised providers", () => {
+  it("ships exactly the advertised providers, and exactly one bridge", () => {
     expect(CHANNEL_PROVIDERS.map((p) => p.id).sort()).toEqual(
       [
+        "apprise",
+        "bark",
         "discord",
         "googlechat",
         "gotify",
+        "homeassistant",
+        "jira",
+        "line",
+        "matrix",
+        "mattermost",
         "ntfy",
+        "pagerduty",
+        "pushbullet",
+        "pushover",
         "resend",
+        "rocketchat",
         "slack",
         "smtp",
+        "sns",
         "teams",
         "telegram",
+        "twilio",
+        "twilio-whatsapp",
         "webhook",
+        "webpush",
+        "zulip",
       ].sort(),
     );
+    // The published number is the native one, and the bridge is the
+    // only thing that may be missing from it. A second non-native entry
+    // appearing without the docs changing is the drift this catches.
+    expect(nativeProviders()).toHaveLength(25);
+    expect(
+      CHANNEL_PROVIDERS.filter((p) => !p.capabilities.native).map((p) => p.id),
+    ).toEqual(["apprise"]);
+  });
+
+  it("gives every provider a pinned API version and a prerequisite", () => {
+    for (const provider of CHANNEL_PROVIDERS) {
+      expect(provider.apiVersion, `${provider.id} apiVersion`).toMatch(/\S/);
+      // An unresolved template literal reaching a published page is a
+      // real failure mode: `apiVersion` is read out of the source as
+      // text by the docs generator and the facts guard.
+      expect(provider.apiVersion, `${provider.id} apiVersion`).not.toContain(
+        "${",
+      );
+      expect(provider.prerequisite, `${provider.id} prerequisite`).toMatch(
+        /\S/,
+      );
+      expect(provider.docsUrl, `${provider.id} docsUrl`).toMatch(
+        /^(https:\/\/|\/)/,
+      );
+    }
+  });
+
+  it("claims a receipt only where deliver actually returns one", () => {
+    // `capabilities.receipt` is published in the docs table and shown in
+    // the editor, so it is checked by RUNNING each provider against a
+    // stubbed 2xx and looking at what comes back. The previous version
+    // of this test compared the flag against a hand-written list, which
+    // is the registry restated rather than the registry verified.
+    for (const provider of CHANNEL_PROVIDERS) {
+      const fixture = RECEIPT_FIXTURES[provider.id];
+      if (!fixture || provider.id === "webpush") continue;
+      const fetchImpl = vi.fn<typeof fetch>(
+        async () => new Response(fixture.body, { status: 200 }),
+      );
+      const outcome = provider.deliver({
+        config: fixture.config,
+        secrets: fixture.secrets,
+        message: message(),
+        rowId: "row-1",
+        net: { fetchImpl, lookup: publicLookup },
+      });
+      expect(
+        outcome.then((o) =>
+          o.status === "delivered" ? o.providerMessageId !== null : null,
+        ),
+        `${provider.id} receipt capability`,
+      ).resolves.toBe(provider.capabilities.receipt);
+    }
+  });
+
+  it("declares lifecycle only where a resolution is sent", () => {
+    expect(
+      CHANNEL_PROVIDERS.filter((p) => p.capabilities.lifecycle).map(
+        (p) => p.id,
+      ),
+    ).toEqual(["pagerduty", "jira"]);
   });
 
   it("declares its secret fields as secret and never as config", () => {

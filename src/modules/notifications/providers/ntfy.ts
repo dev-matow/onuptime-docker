@@ -29,6 +29,14 @@ export const ntfyProvider: ChannelProvider = {
   kind: "push",
   blurb: "Publish to an ntfy topic, on ntfy.sh or your own server.",
   docsUrl: "https://docs.ntfy.sh/publish/",
+  apiVersion: "Publish API (JSON)",
+  prerequisite: "A topic on ntfy.sh or on your own ntfy server.",
+  capabilities: {
+    native: true,
+    lifecycle: false,
+    duplicateSuppression: false,
+    receipt: true,
+  },
   fields: [
     {
       key: "serverUrl",

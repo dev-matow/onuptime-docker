@@ -17,6 +17,14 @@ export const resendProvider: ChannelProvider = {
   kind: "email",
   blurb: "Email through your Resend account.",
   docsUrl: "https://resend.com/docs/api-reference/emails/send-email",
+  apiVersion: "API v1 (POST /emails)",
+  prerequisite: "A Resend API key and a verified sending domain.",
+  capabilities: {
+    native: true,
+    lifecycle: false,
+    duplicateSuppression: true,
+    receipt: true,
+  },
   fields: [
     {
       key: "apiKey",

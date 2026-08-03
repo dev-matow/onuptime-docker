@@ -77,6 +77,15 @@ export const teamsProvider: ChannelProvider = {
   blurb: "Post to a Teams channel through a Workflows webhook.",
   docsUrl:
     "https://support.microsoft.com/en-us/office/create-incoming-webhooks-with-workflows-for-microsoft-teams-8ae491c7-0394-4861-ba59-055e33f75498",
+  apiVersion: "Workflows (Power Automate) trigger",
+  prerequisite:
+    "A Teams Workflow using the 'when a Teams webhook request is received' trigger.",
+  capabilities: {
+    native: true,
+    lifecycle: false,
+    duplicateSuppression: false,
+    receipt: false,
+  },
   fields: [
     {
       key: "webhookUrl",

@@ -6,6 +6,72 @@ free edition; entries for commercial-only features live in the other
 repository, because they are not in this one and listing them here would
 describe software you do not have.
 
+## 1.17.0 — 2026-08-03
+
+Twenty-five providers, in this edition too.
+
+### Added
+
+- **Fifteen new native provider types**, taking the registry from ten to
+  twenty-five: PagerDuty, Jira Service Management, Mattermost,
+  Rocket.Chat, Matrix, Zulip, LINE, Pushover, Pushbullet, Bark, Web
+  Push, Home Assistant, Twilio SMS, Twilio WhatsApp and Amazon SNS. All
+  of them are here. The provider registry has never been an edition
+  boundary and this release does not make it one.
+
+  _Native_ means Vigil implements that service's own documented API and
+  pins the version it was written against. Every provider carries that
+  version in the registry, shows it in the editor and publishes it in
+  `docs/NOTIFICATIONS.md`.
+
+- **Alert lifecycle for PagerDuty and Jira.** Both derive a key from the
+  cause of the alert, so every event about one outage joins one alert or
+  one issue, and the recovery closes it.
+
+- **An Apprise bridge**, forwarding to an Apprise API server you run.
+  It is not counted as native: the published number is 25 native
+  providers, plus additional services through your own Apprise server.
+  Nothing behind that bridge has been implemented or tested here, and
+  there is no Apprise server operated by anyone but you.
+
+- **Provider capabilities as data** - native, lifecycle, duplicate
+  suppression, receipt - shown as badges in the editor and published as
+  columns in the docs.
+
+- **A searchable provider picker**, because twenty-six entries in a
+  dropdown is a list you scroll past.
+
+### Fixed
+
+- **LINE's `409` is a delivery, not a failure.** It means LINE already
+  accepted that retry key, so the message arrived; recording it as a
+  permanent failure would have put a lie in the ledger.
+
+- **Recovery events now resolve the alert their outage opened.** Their
+  payload names the incident in a different field, so the correlation
+  key was reading the monitor instead.
+
+- **Credentials are scrubbed in the base64 form HTTP Basic sends them
+  in**, not only as raw values.
+
+- **Three capability flags said more than the code does** - SMTP,
+  Amazon SNS on standard topics and Jira do not suppress a redelivery -
+  and the retry window is 31 to 62 seconds, where three pages claimed
+  half an hour. Both are corrected rather than rounded.
+
+### Notes
+
+- **No migration.** `notification_channels.provider` is a text column,
+  so adding providers is not a schema change. Upgrading from 1.16.0 is a
+  deploy; existing channels keep routing and delivering.
+
+- Amazon SNS is signed in-tree with Signature Version 4 and Web Push is
+  encrypted in-tree per RFC 8291 and RFC 8292, rather than through SDKs
+  that would perform their own HTTP outside the egress policy.
+
+- The published drain limits are unchanged: 250 messages a tick, four in
+  flight, ten per channel per tick.
+
 ## 1.16.0 — 2026-08-03
 
 Unlimited notification channels, in this edition too.

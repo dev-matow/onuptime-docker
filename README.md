@@ -69,11 +69,18 @@ Worth knowing before you deploy:
   host_ could not reach it. The failure window filters blips, but this is
   not multi-region confirmation and never claims to be. Run Vigil outside
   the blast radius of what it watches.
-- **Ten provider types, unlimited channels, plus member email**: Slack, Discord, Microsoft Teams, Telegram, Google Chat, Gotify, ntfy, signed webhooks, SMTP and Resend.
-  Uptime Kuma 2.4.0 ships 94 notification
-  providers. This is the gap that is still real: if you page through
-  PagerDuty, Opsgenie, Telegram or any of the other ninety, Kuma routes
-  to them today and this does not.
+- **25 native provider types, unlimited channels, plus member email**:
+  Slack, Discord, Microsoft Teams, Telegram, Google Chat, Mattermost,
+  Rocket.Chat, Matrix, Zulip, LINE, PagerDuty, Jira Service Management,
+  Pushover, Gotify, ntfy, Pushbullet, Bark, Web Push, Home Assistant,
+  Twilio SMS, Twilio WhatsApp, SMTP, Resend, signed webhooks and Amazon
+  SNS. Uptime Kuma 2.4.0 ships 94 notification providers, so the gap is
+  still real and it is still theirs: a service on their list and not on
+  this one routes there today and not here. What narrows it is the
+  Apprise bridge - point Vigil at an Apprise server you run and it will
+  forward to whatever that server is configured for. That is a bridge,
+  not an integration: those services are not implemented, pinned or
+  tested here, and none of them is counted in the 25.
 - **An import is not a migration of everything.** Every one of Kuma's 31
   selectable monitor types has an equivalent here, but a type having one
   is not a promise that every monitor of that type comes across: Vigil's

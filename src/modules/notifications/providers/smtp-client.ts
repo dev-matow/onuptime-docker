@@ -313,8 +313,12 @@ export async function smtpSend(
           true,
         );
       }
+      // AUTH PLAIN is NUL || authcid || NUL || passwd (RFC 4616).
+      // Written as escapes: a literal NUL in a source file is
+      // invisible to whoever reads it next and makes the whole file
+      // binary to grep, which is a real cost for one saved character.
       const token = Buffer.from(
-        ` ${options.username} ${options.password ?? ""}`,
+        `\0${options.username}\0${options.password ?? ""}`,
         "utf8",
       ).toString("base64");
       await chat.command(`AUTH PLAIN ${token}`, [235]);

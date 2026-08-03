@@ -416,6 +416,20 @@ function validateInput(
       if (field.required && !raw) {
         throw new AppError(`${field.label} is required.`);
       }
+      // A select's value must be one of its own options. The type
+      // implies that and nothing enforced it, and one provider uses the
+      // chosen value as a JSON KEY in the request it builds - so an
+      // arbitrary string posted here became an arbitrary field name on
+      // the wire. Providers re-check what they care about; this is the
+      // constraint the descriptor already declared.
+      if (
+        raw &&
+        field.type === "select" &&
+        field.options &&
+        !field.options.some((option) => option.value === raw)
+      ) {
+        throw new AppError(`${field.label} is not one of the offered values.`);
+      }
       if (raw) config[field.key] = raw;
     }
   }
@@ -855,8 +869,10 @@ export interface DispatchInput {
  * Resolved in a single statement, and every clause of it earns its
  * place now that the channel count is unbounded:
  *
- *  - the event class is matched with jsonb containment against a GIN
- *    index, not by fetching every channel and filtering in JavaScript;
+ *  - the event class is matched in the heap after the tenant index has
+ *    narrowed the set, not by fetching every channel and filtering in
+ *    JavaScript. A GIN index on `events` was tried and measured slower
+ *    on this product's shape; see the schema comment;
  *  - `secrets` is never selected, so a hundred matching channels move
  *    no credential material across the wire and decrypt nothing;
  *  - the scope test reads the channel's own `scoped_to_monitors` flag
@@ -970,8 +986,16 @@ export async function deliverChannelRow(
   if (!row.channelId) {
     return { status: "permanent", error: "The channel was deleted." };
   }
+  // Scoped to the row's organization as well as its id. Nothing can
+  // currently write a channelId from another tenant - `dispatchToChannels`
+  // is the only writer and it is tenant-scoped - but this is the one
+  // read in the file that did not carry the predicate, and every other
+  // statement here argues for why it should.
   const channel = await db.query.notificationChannels.findFirst({
-    where: eq(notificationChannels.id, row.channelId),
+    where: and(
+      eq(notificationChannels.id, row.channelId),
+      eq(notificationChannels.organizationId, row.organizationId),
+    ),
   });
   if (!channel) {
     return { status: "permanent", error: "The channel was deleted." };

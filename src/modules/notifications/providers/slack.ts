@@ -17,6 +17,14 @@ export const slackProvider: ChannelProvider = {
   kind: "chat",
   blurb: "Post to a Slack channel through an incoming webhook.",
   docsUrl: "https://api.slack.com/messaging/webhooks",
+  apiVersion: "Incoming Webhooks",
+  prerequisite: "A Slack app with Incoming Webhooks enabled for the workspace.",
+  capabilities: {
+    native: true,
+    lifecycle: false,
+    duplicateSuppression: false,
+    receipt: false,
+  },
   fields: [
     {
       key: "webhookUrl",

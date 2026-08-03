@@ -19,6 +19,14 @@ export const googleChatProvider: ChannelProvider = {
   kind: "chat",
   blurb: "Post to a Google Chat space through an incoming webhook.",
   docsUrl: "https://developers.google.com/workspace/chat/quickstart/webhooks",
+  apiVersion: "Chat API v1 incoming webhook",
+  prerequisite: "A Google Chat space where you may add webhooks.",
+  capabilities: {
+    native: true,
+    lifecycle: false,
+    duplicateSuppression: false,
+    receipt: true,
+  },
   fields: [
     {
       key: "webhookUrl",

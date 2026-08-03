@@ -105,6 +105,20 @@ export interface ResolvedAddress {
 
 export type EgressLookup = (hostname: string) => Promise<ResolvedAddress[]>;
 
+/**
+ * `RequestInit` narrowed to what the pinned transport can actually send.
+ *
+ * Text or bytes, and nothing else: the node path writes the body to a
+ * socket, so a `Blob` or a stream has no meaning here. It is widened
+ * from plain `string` because Web Push bodies are an encrypted binary
+ * record, and it is narrowed from `BodyInit` because a type that
+ * promises `FormData` and then throws at runtime is worse than one that
+ * never promised it.
+ */
+export type EgressRequestInit = Omit<RequestInit, "body"> & {
+  body?: string | Uint8Array | null;
+};
+
 const systemLookup: EgressLookup = (hostname) =>
   dns.lookup(hostname, { all: true, verbatim: true });
 
@@ -321,7 +335,7 @@ export interface EgressFetchResult {
  */
 export async function egressFetch(
   target: string,
-  init: RequestInit,
+  init: EgressRequestInit,
   options: EgressFetchOptions,
 ): Promise<EgressFetchResult> {
   const maxRedirects = options.maxRedirects ?? MAX_REDIRECT_HOPS;
@@ -347,7 +361,10 @@ export async function egressFetch(
       ...init,
       method,
       headers,
-      body,
+      // An injected `fetch` is a test seam or a caller's own client, and
+      // both accept bytes; the DOM type for `body` predates that and
+      // does not say so. The pinned transport below is typed honestly.
+      body: body as BodyInit | null,
       // Manual, always: an automatic redirect is a second request the
       // guard never saw, sent to a host the attacker chose.
       redirect: "manual",
@@ -426,10 +443,11 @@ export async function egressFetch(
  * certificate check — and the connector is handed the one address the
  * guard classified.
  *
- * Supports the subset the egress paths use: GET/HEAD/POST, plain
- * headers, a string body, an abort signal, and never following a
- * redirect (the loop above owns that). Anything else throws rather than
- * silently doing something different from `fetch`.
+ * Supports the subset the egress paths use: GET/HEAD/POST/PUT, plain
+ * headers, a text or byte body, an abort signal, and never following a
+ * redirect (the loop above owns that). It advertises itself as `fetch`
+ * so an injected transport is interchangeable with it, which is why the
+ * body is narrowed back at the call below rather than in the signature.
  */
 function pinnedFetch(pin: ResolvedAddress | null): typeof fetch {
   return (input, init) => {
@@ -444,19 +462,19 @@ function pinnedFetch(pin: ResolvedAddress | null): typeof fetch {
     // worth reporting.
     return pin === null
       ? fetch(target, init)
-      : pinnedRequest(new URL(target), init ?? {}, pin);
+      : pinnedRequest(new URL(target), (init ?? {}) as EgressRequestInit, pin);
   };
 }
 
 function pinnedRequest(
   url: URL,
-  init: RequestInit,
+  init: EgressRequestInit,
   pin: ResolvedAddress,
 ): Promise<Response> {
   const secure = url.protocol === "https:";
   const transport = secure ? https : http;
   const method = (init.method ?? "GET").toUpperCase();
-  const body = requestBody(init.body ?? null);
+  const body = init.body ?? null;
   const headers = requestHeaders(init.headers, body);
   const signal = init.signal ?? null;
 
@@ -516,15 +534,6 @@ function pinnedRequest(
     if (body !== null) request.write(body);
     request.end();
   });
-}
-
-function requestBody(body: BodyInit | null): string | Uint8Array | null {
-  if (body === null) return null;
-  if (typeof body === "string") return body;
-  if (body instanceof Uint8Array) return body;
-  throw new TypeError(
-    "The pinned transport only sends string or byte bodies; pass a fetchImpl for anything else.",
-  );
 }
 
 function requestHeaders(

@@ -20,6 +20,14 @@ export const discordProvider: ChannelProvider = {
   kind: "chat",
   blurb: "Post to a Discord channel through a webhook.",
   docsUrl: "https://support.discord.com/hc/en-us/articles/228383668",
+  apiVersion: "Webhooks (API v10)",
+  prerequisite: "Manage Webhooks permission on the target Discord channel.",
+  capabilities: {
+    native: true,
+    lifecycle: false,
+    duplicateSuppression: false,
+    receipt: false,
+  },
   fields: [
     {
       key: "webhookUrl",

@@ -27,6 +27,14 @@ export const gotifyProvider: ChannelProvider = {
   kind: "push",
   blurb: "Push to your own Gotify server.",
   docsUrl: "https://gotify.net/docs/pushmsg",
+  apiVersion: "Server API (POST /message)",
+  prerequisite: "A Gotify server you run, and an application token from it.",
+  capabilities: {
+    native: true,
+    lifecycle: false,
+    duplicateSuppression: false,
+    receipt: true,
+  },
   fields: [
     {
       key: "serverUrl",

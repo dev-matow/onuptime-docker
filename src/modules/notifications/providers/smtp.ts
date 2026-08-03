@@ -13,6 +13,21 @@ export const smtpProvider: ChannelProvider = {
   kind: "email",
   blurb: "Email through your own SMTP server or relay.",
   docsUrl: "/docs/notifications.html",
+  apiVersion: "ESMTP (RFC 5321), STARTTLS or implicit TLS",
+  prerequisite:
+    "An SMTP server or relay that accepts your credentials over TLS.",
+  capabilities: {
+    native: true,
+    lifecycle: false,
+    // False, and the distinction is the point of the flag. The
+    // `Message-ID` is the outbox row id, so a RECEIVING client can
+    // collapse the copy - but no relay deduplicates on it, and this
+    // flag means "the provider collapses it", which SMTP does not.
+    // Claiming otherwise put a "Collapses retries" badge next to a
+    // field the operator was filling in.
+    duplicateSuppression: false,
+    receipt: true,
+  },
   fields: [
     {
       key: "host",

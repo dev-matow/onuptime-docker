@@ -24,6 +24,14 @@ export const telegramProvider: ChannelProvider = {
   kind: "chat",
   blurb: "Send messages through your own Telegram bot.",
   docsUrl: "https://core.telegram.org/bots/api#sendmessage",
+  apiVersion: "Bot API",
+  prerequisite: "A bot from @BotFather that can post in the target chat.",
+  capabilities: {
+    native: true,
+    lifecycle: false,
+    duplicateSuppression: false,
+    receipt: true,
+  },
   fields: [
     {
       key: "botToken",

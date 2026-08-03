@@ -675,6 +675,84 @@ async function main() {
       enabled: true,
     })
     .returning();
+  // The 1.17.0 wave, so the settings screenshot shows what the product
+  // actually offers rather than four rows of chat webhooks: a pager with
+  // a lifecycle, a ticket queue, a self-hosted chat server, an SMS
+  // sender - and the Apprise bridge, named as a bridge.
+  const [pagerdutyChannel] = await db
+    .insert(notificationChannels)
+    .values({
+      organizationId,
+      name: "PagerDuty - Critical services",
+      provider: "pagerduty",
+      config: { region: "us" },
+      secrets: sealSecrets({ routingKey: `R${"0".repeat(31)}` }),
+      destination: "PagerDuty service (US)",
+      events: ["monitor", "incident"],
+      enabled: true,
+    })
+    .returning();
+  await db.insert(notificationChannels).values({
+    organizationId,
+    name: "Jira - Service desk",
+    provider: "jira",
+    config: {
+      siteUrl: "https://altitude.atlassian.net",
+      projectKey: "OPS",
+      issueType: "Task",
+      resolveTransition: "Done",
+      email: "ops@altitude.demo",
+    },
+    secrets: sealSecrets({ apiToken: `demo-not-real-${"j".repeat(20)}` }),
+    destination: "Jira OPS on altitude.atlassian.net",
+    events: ["incident"],
+    enabled: true,
+  });
+  await db.insert(notificationChannels).values({
+    organizationId,
+    name: "Matrix - Infra room",
+    provider: "matrix",
+    config: {
+      homeserverUrl: "https://matrix.altitude.demo",
+      roomId: "!infra:altitude.demo",
+    },
+    secrets: sealSecrets({
+      accessToken: `syt_demo_not_real_${"m".repeat(16)}`,
+    }),
+    destination: "Matrix room !infra:altitude.demo",
+    events: ["monitor", "incident"],
+    enabled: true,
+  });
+  // Named for what it is on every surface, including this one: a bridge
+  // to a server the customer runs, not a Vigil integration with the
+  // services behind it, and not counted among the native providers.
+  await db.insert(notificationChannels).values({
+    organizationId,
+    name: "Apprise bridge - our own server",
+    provider: "apprise",
+    config: {
+      serverUrl: "https://apprise.altitude.demo",
+      configKey: "ops",
+    },
+    secrets: "",
+    destination: "Apprise ops on apprise.altitude.demo",
+    events: ["monitor"],
+    enabled: true,
+  });
+  await db.insert(notificationChannels).values({
+    organizationId,
+    name: "Twilio - Duty phone",
+    provider: "twilio",
+    config: {
+      accountSid: `AC${"0".repeat(32)}`,
+      to: "+15550000042",
+      from: "+15550000001",
+    },
+    secrets: sealSecrets({ authToken: `demo-not-real-${"t".repeat(16)}` }),
+    destination: "SMS to +15550000042",
+    events: ["incident"],
+    enabled: false,
+  });
   // A SECOND Slack channel, scoped to one monitor. Two instances of one
   // provider with different routing is the configuration the old cap
   // and the old single-endpoint model could not express, so the demo
@@ -786,6 +864,32 @@ async function main() {
       attempts: 1,
       providerMessageId: "482",
       deliveredAt: new Date(now - 2 * HOUR + 1400),
+      createdAt: new Date(now - 2 * HOUR),
+    },
+    {
+      organizationId,
+      idempotencyKey: `demo:checkout:monitor.down:${pagerdutyChannel!.id}`,
+      channel: "channel",
+      channelId: pagerdutyChannel!.id,
+      provider: "pagerduty",
+      event: "monitor.down",
+      destination: "PagerDuty service (US)",
+      payload: {
+        kind: "channel",
+        event: "monitor.down",
+        title: "🔴 Monitor down - Checkout Service",
+        text: "Checkout Service is down",
+        severity: "critical",
+        organizationId,
+        data: {},
+        timestamp: new Date(now - 2 * HOUR).toISOString(),
+      },
+      state: "delivered",
+      attempts: 1,
+      // PagerDuty's receipt is the dedup key, which is what makes the
+      // recovery close this alert rather than open a second one.
+      providerMessageId: `vigil/${organizationId}/incident/checkout-demo`,
+      deliveredAt: new Date(now - 2 * HOUR + 700),
       createdAt: new Date(now - 2 * HOUR),
     },
     {

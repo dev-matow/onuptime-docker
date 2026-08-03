@@ -35,6 +35,15 @@ export const webhookProvider: ChannelProvider = {
   kind: "webhook",
   blurb: "POST the signed JSON payload to your own endpoint.",
   docsUrl: "/docs/notifications.html",
+  apiVersion: "Vigil payload v1",
+  prerequisite:
+    "An endpoint that can verify an HMAC-SHA-256 signature over the raw body.",
+  capabilities: {
+    native: true,
+    lifecycle: false,
+    duplicateSuppression: false,
+    receipt: false,
+  },
   fields: [
     {
       key: "url",

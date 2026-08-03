@@ -15,9 +15,18 @@ promise its transports cannot keep.
 Two different numbers, and conflating them is the mistake this section
 exists to prevent.
 
-**Ten provider types ship**, in both editions. That number is a fact
-about the registry, it is generated from the code, and CI fails if any
-page says a different one.
+**25 native provider types ship**, in both editions. Native means Vigil
+implements that service's own documented API - its request shape, its
+response shape, its error semantics - and pins the version it was
+written against. That number is a fact about the registry, it is
+generated from the code, and CI fails if any page says a different one.
+
+**There is also one bridge**, and it is not a twenty-sixth integration.
+The Apprise provider forwards to an Apprise API server _you_ run. What
+that server can reach is between you and Apprise: Vigil has not
+implemented, pinned or tested any of it. So the sentence everywhere is
+"25 native providers, plus additional services through your own Apprise
+server", and the two halves are never added together.
 
 **There is no limit on how many channels you configure.** Forty Slack
 channels, one per client, each pointing at a different workspace, is a
@@ -35,37 +44,149 @@ fan-out is published below rather than waved away.
 ## Channel providers
 
 A channel is a provider plus its settings, its encrypted credentials and
-the event classes it subscribes to. The ten types:
+the event classes it subscribes to.
 
-| Provider        | Transport                                | Credential               |
-| --------------- | ---------------------------------------- | ------------------------ |
-| Slack           | Incoming webhook (`hooks.slack.com`)     | the webhook URL          |
-| Discord         | Channel webhook                          | the webhook URL          |
-| Microsoft Teams | Workflows webhook, Adaptive Card payload | the workflow URL         |
-| Telegram        | Bot API `sendMessage`                    | bot token (+ chat id)    |
-| Google Chat     | Space incoming webhook                   | the webhook URL          |
-| Gotify          | `POST /message`, `X-Gotify-Key` header   | application token        |
-| ntfy            | JSON publish to the server root          | token or user + password |
-| Webhook         | Signed JSON POST (`X-Vigil-Signature`)   | HMAC signing secret      |
-| SMTP            | Own client: STARTTLS/TLS, AUTH PLAIN     | password (optional)      |
-| Resend          | `POST /emails`, honors `Idempotency-Key` | API key                  |
+Four columns beyond the name, and each one is a claim the code has to
+back. **API** is the version this provider is written against. **Closes**
+means recovery resolves what the outage opened rather than sending a
+second message. **Dedupes** means a redelivery of the same outbox row
+collapses at the provider, which is the honest half of at-least-once.
+**Receipt** means a success carries an id that lands in the ledger. The
+table is generated from the registry's `capabilities`, and a test fails
+if it stops matching.
+
+### Chat
+
+| Provider        | API                                   | Closes | Dedupes | Receipt |
+| --------------- | ------------------------------------- | ------ | ------- | ------- |
+| Slack           | Incoming Webhooks                     | no     | no      | no      |
+| Discord         | Webhooks (API v10)                    | no     | no      | no      |
+| Microsoft Teams | Workflows (Power Automate) trigger    | no     | no      | no      |
+| Telegram        | Bot API                               | no     | no      | yes     |
+| Google Chat     | Chat API v1 incoming webhook          | no     | no      | yes     |
+| Mattermost      | REST API v4 (`POST /api/v4/posts`)    | no     | no      | yes     |
+| Rocket.Chat     | REST API v1 (`chat.postMessage`)      | no     | no      | yes     |
+| Matrix          | Client-Server API v3                  | no     | yes     | yes     |
+| Zulip           | REST API v1 (`POST /api/v1/messages`) | no     | no      | yes     |
+| LINE            | Messaging API v2                      | no     | yes     | no      |
+
+### On-call and tickets
+
+| Provider                | API                    | Closes | Dedupes | Receipt |
+| ----------------------- | ---------------------- | ------ | ------- | ------- |
+| PagerDuty               | Events API v2          | yes    | yes     | yes     |
+| Jira Service Management | Jira Cloud REST API v3 | yes    | no      | yes     |
+
+### Push
+
+| Provider       | API                                              | Closes | Dedupes | Receipt |
+| -------------- | ------------------------------------------------ | ------ | ------- | ------- |
+| Pushover       | Messages API (`/1/messages.json`)                | no     | no      | yes     |
+| Gotify         | Server API (`POST /message`)                     | no     | no      | yes     |
+| ntfy           | Publish API (JSON)                               | no     | no      | yes     |
+| Pushbullet     | API v2 (`POST /v2/pushes`)                       | no     | no      | yes     |
+| Bark           | Bark API v2 (`POST /push`)                       | no     | no      | no      |
+| Web Push       | RFC 8291 aes128gcm, RFC 8292 VAPID               | no     | no      | no      |
+| Home Assistant | REST API (`POST /api/services/notify/{service}`) | no     | no      | no      |
+
+### SMS and messaging
+
+| Provider        | API                                          | Closes | Dedupes | Receipt |
+| --------------- | -------------------------------------------- | ------ | ------- | ------- |
+| Twilio SMS      | Programmable Messaging 2010-04-01            | no     | no      | yes     |
+| Twilio WhatsApp | Programmable Messaging 2010-04-01 (WhatsApp) | no     | no      | yes     |
+
+### Email
+
+| Provider | API                                        | Closes | Dedupes | Receipt |
+| -------- | ------------------------------------------ | ------ | ------- | ------- |
+| SMTP     | ESMTP (RFC 5321), STARTTLS or implicit TLS | no     | no      | yes     |
+| Resend   | API v1 (`POST /emails`)                    | no     | yes     | yes     |
+
+### Webhooks and buses
+
+| Provider   | API                                       | Closes | Dedupes | Receipt |
+| ---------- | ----------------------------------------- | ------ | ------- | ------- |
+| Webhook    | Vigil payload v1                          | no     | no      | no      |
+| Amazon SNS | Query API 2010-03-31, Signature Version 4 | no     | no      | yes     |
+
+### Bridges - not a Vigil integration with anything behind it
+
+| Provider                  | API                                                | Closes | Dedupes | Receipt |
+| ------------------------- | -------------------------------------------------- | ------ | ------- | ------- |
+| Apprise (your own server) | apprise-api (`POST /notify`, `POST /notify/{key}`) | no     | no      | no      |
 
 Notes that are contracts, not trivia:
 
+- **Every credential is the customer's own.** There is no Vigil-funded
+  relay, account, API budget or hosted service behind any provider, and
+  that includes the Apprise bridge - there is no managed Apprise.
 - **Teams** uses the Power Automate Workflows webhook - the retired
   Office 365 connector URLs stopped delivering in May 2026 and this
   provider never speaks MessageCard.
-- **Every credential is the customer's own.** There is no Vigil-funded
-  relay, account or hosted service behind any provider.
-- **The customer's own servers are fine.** Gotify, ntfy and the signed
-  webhook accept private addresses (a receiver on your own network is
-  the normal deployment); cloud metadata and link-local space are
-  refused wherever the URL points or resolves.
+- **Jira Service Management is not Opsgenie.** JSM's alerting came from
+  Opsgenie, Atlassian ended its sale in June 2025 and shuts it down on
+  5 April 2027, so this provider is built on the Jira Cloud platform
+  REST API instead: it opens one issue per outage, comments on it while
+  the outage continues, and transitions it on recovery if you name a
+  transition.
+- **LINE is the Messaging API, not LINE Notify.** LINE Notify was
+  discontinued on 31 March 2025.
+- **Twilio WhatsApp needs a template for out-of-hours alerts.** WhatsApp
+  will not deliver free-form text outside a 24-hour service window,
+  which is exactly when a 3am outage fires. Set a Content SID for an
+  approved template and Vigil sends it with the title, detail and link
+  as `{{1}}`, `{{2}}`, `{{3}}`. Without one, Twilio accepts the request
+  and WhatsApp drops the message.
+- **PagerDuty is never sent `acknowledge`.** Acknowledging means a human
+  picked the alert up, and Vigil does not know that. Trigger and resolve
+  only.
+- **Amazon SNS is signed here, not by an SDK.** Signature Version 4 is
+  implemented in `providers/sns.ts` so the request goes through the same
+  egress guard as every other delivery. The cost is that credentials are
+  a pasted access key rather than an instance role.
+- **Web Push is implemented, not imported.** The `web-push` package
+  performs its own HTTP, which would put one transport outside the
+  egress policy. The encryption is RFC 8291 and the auth is RFC 8292.
+- **Home Assistant is pinned to the `notify` domain.** The service-call
+  endpoint can invoke anything; a notification channel that could unlock
+  a door is not a notification channel.
+- **The customer's own servers are fine.** Gotify, ntfy, Matrix,
+  Mattermost, Rocket.Chat, Zulip, Bark, Home Assistant, Apprise and the
+  signed webhook accept private addresses, because a receiver on your
+  own network is the normal deployment; cloud metadata and link-local
+  space are refused wherever the URL points or resolves.
 - **Redirects are never followed.** A redirect would re-target a
   credentialed request, and for signed payloads would drop the method,
   body and signature.
 - **SMTP refuses to authenticate without TLS**, and certificate
   verification has no off switch.
+- **A 200 is not always a delivery.** Pushover, Zulip, Rocket.Chat, Bark
+  and Apprise answer 200 with the verdict in the body; those bodies are
+  checked, and a rejection is recorded as a permanent failure rather
+  than as a successful send.
+
+## The Apprise bridge, and its boundary
+
+Apprise is a Python library and an API server that speak to a very large
+number of services. Vigil can call one, and the rules are worth stating
+plainly because this is the easiest place in the product to overclaim.
+
+- **You host it.** Vigil ships no Apprise server, runs no shared relay,
+  and has no founder-operated instance. The URL you configure is yours.
+- **It is not counted as native.** 25 is the native number.
+- **Vigil has not tested the services behind it.** Not one. If your
+  Apprise server's Discord URL stops working, that is between you,
+  Apprise and Discord.
+- **Prefer a saved configuration key.** With `/notify/{KEY}`, the
+  Apprise URLs - which embed third-party tokens - stay on your server
+  and never reach Vigil at all. Inline URLs work too, and are stored
+  encrypted like every other credential, but keeping them on your own
+  server is strictly better.
+- **It gets no special treatment.** Same egress policy, same sealed
+  secrets, same outbox, same retries, same routing, same redaction, same
+  ledger row. It is a provider whose `capabilities.native` is false, and
+  that flag is what every published count is derived from.
 
 ## Routing
 
@@ -188,9 +309,13 @@ What the shape of that table means:
   thousand, because the list is paged in the database and the redacted
   destination is a stored column. Rendering it decrypts nothing at all,
   which is the property that made removing the cap safe.
-- **Planning is nearly flat.** One indexed query resolves the routes,
-  with the event class matched by jsonb containment against a GIN index
-  rather than by loading every channel and filtering in the process.
+- **Planning is nearly flat.** One indexed query resolves the routes:
+  the tenant index narrows to that organization's channels, and the
+  event class is matched in the heap afterwards. There is deliberately
+  no GIN index on the class column - one was added, measured, and found
+  to make routing slower on this product's shape (many organizations
+  owning few channels each), so it was dropped and the measurement is
+  recorded in the schema comment.
 - **Fan-out grows with the channel count, by construction.** One event
   addressed to a thousand channels is a thousand outbox rows, because
   every one of them is a durable promise to deliver. That is the
@@ -241,37 +366,69 @@ from a request that never arrived, so it retries, and a retry means the
 recipient can, in principle, get two copies.
 
 What it does about that is make the retry harmless rather than pretend
-the window does not exist. Every message carries an idempotency key
-derived from its cause, and that key is sent to the provider as an
-`Idempotency-Key` header. A provider that honours one collapses the
-duplicate on its side.
+the window does not exist. Where a provider offers a way to say "this is
+the same request as before", Vigil sends one, derived from the outbox row
+so the same row always produces the same value. Which providers those
+are is the `Dedupes` column in the tables above, and it is a registry
+flag rather than a sentence someone maintains.
 
-| Transport                         | Duplicate suppression                                                             |
-| --------------------------------- | --------------------------------------------------------------------------------- |
-| Resend (member email and channel) | Yes, honours `Idempotency-Key`                                                    |
-| SMTP                              | `Message-ID` is the outbox row id, so a receiving MTA can collapse the copy       |
-| Signed webhook                    | The receiver's problem, and the signed payload carries the key so they can        |
-| Chat and push providers           | None offered by the provider; the crash-retry window is the only duplicate source |
-| Log transport                     | Not applicable; it writes to the log                                              |
+The `Dedupes` column in the tables above is `yes` only where the
+provider itself collapses the repeat. Three near-misses are listed here,
+because they are useful and are NOT that:
+
+| Transport                         | How a redelivery is handled                                                                                                                                                    |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Resend (member email and channel) | Collapsed. `Idempotency-Key`, which Resend honours                                                                                                                             |
+| Matrix                            | Collapsed. The transaction id in the path; a repeat is a retransmission, not a second event                                                                                    |
+| LINE                              | Collapsed. `X-Line-Retry-Key`, and the `409` LINE answers with is recorded as delivered, because it means the first one arrived                                                |
+| PagerDuty                         | Collapsed. `dedup_key`, which also joins every event about one outage into one alert                                                                                           |
+| SMTP                              | **Not** collapsed. `Message-ID` is the outbox row id, so a receiving client may hide the copy; no relay deduplicates on it                                                     |
+| Amazon SNS                        | **Not** collapsed on a standard topic. A `.fifo` topic gets `MessageDeduplicationId` and SNS's five-minute window                                                              |
+| Jira Service Management           | **Not** collapsed. Jira offers no idempotency key on issue creation, so a lost response can produce a second comment, or a second ticket if the search index has not caught up |
+| Signed webhook                    | Not collapsed here. A retry re-sends identical bytes, so a receiver that dedupes on the body can                                                                               |
+| Other chat, push and SMS          | None offered by the provider; the crash-retry window is the only duplicate source                                                                                              |
+| Apprise bridge                    | None. What your Apprise server does with a repeat is your server's business                                                                                                    |
+| Log transport                     | Not applicable; it writes to the log                                                                                                                                           |
 
 So: **at most one message per logical notification where the provider
 cooperates, at least one everywhere.** That is the honest wording, and it
 is the wording the product uses.
 
+A note on what "cooperates" buys you at a pager. PagerDuty and Jira do
+something stronger than collapsing a retry: their key is derived from
+the CAUSE, not the delivery, so `monitor.down` and `incident.opened` for
+one outage land on one alert and one ticket, and the recovery closes it.
+That is why those two are the only providers with a `Closes` column
+entry, and why pointing them at the monitor class as well as the
+incident class does not double anything.
+
 ## Retries
 
-Six attempts, exponentially backed off from a second to a five-minute
-cap, jittered. Jitter is not decoration, without it, a provider outage
-that queues a thousand messages returns all thousand at the same instant
-and the recovery attempt is the next outage.
+Six attempts, exponentially backed off and jittered: 2 s, 4 s, 8 s,
+16 s, 32 s before jitter, which is a **total retry window of 31 to 62
+seconds**. Jitter is not decoration - without it, a provider outage that
+queues a thousand messages returns all thousand at the same instant and
+the recovery attempt is the next outage.
+
+Say the consequence out loud, because rounding it away is how this
+number came to be wrong on three pages at once: **a provider outage
+lasting longer than about a minute ends with its queued messages marked
+`failed`.** They are marked, not lost - the ledger names each one, its
+destination and the last error - but nothing retries them after that. If
+your provider is regularly out for longer than a minute, the outbox is
+doing what it says and the answer is a second channel, not a longer
+queue.
 
 A failure is classified before it is retried:
 
 - **retryable**: 429, any 5xx, a timeout, a DNS failure. Backed off and
   tried again.
 - **permanent**: a 4xx that names the message or the recipient. Marked
-  `failed` immediately, because retrying a rejected address for half an
-  hour hides a configuration error behind a queue that never drains.
+  `failed` immediately, because retrying a rejected address hides a
+  configuration error behind a queue that never drains. The one 4xx
+  that is not a failure is LINE's `409`, which means "I already
+  accepted this retry key" - so it is recorded as delivered, which is
+  what it is.
 
 After the sixth attempt a retryable failure becomes `failed` too. A
 message nobody will ever receive should say so where an operator can see
@@ -295,8 +452,8 @@ send real mail.
 
 ## Draining
 
-The worker drains the outbox every minute, in batches, sequentially
-within a batch. Backoff lives in each row's `next_attempt_at`, not in the
+The worker drains the outbox every minute, in batches, four deliveries
+in flight at a time within a batch. Backoff lives in each row's `next_attempt_at`, not in the
 schedule, so a tighter cron would only add empty wake-ups.
 
 Due-ness and leases use the **database's** clock, never a worker's. With

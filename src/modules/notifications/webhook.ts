@@ -118,10 +118,19 @@ const EVENT_LABELS: Record<string, string> = {
   "incident.resolved": "🟢 Incident resolved",
   "monitor.down": "🔴 Monitor down",
   "monitor.up": "🟢 Monitor recovered",
+  "recovery.succeeded": "🟢 Recovery succeeded",
+  "recovery.failed": "🔴 Recovery failed",
+  "probe.partial_failure": "🟠 Probes disagree",
+  "probe.insufficient_quorum": "🟠 Probe quorum not met",
   "webhook.test": "✅ Test notification from Vigil",
   "recovery.execute": "🔧 Recovery action triggered",
   "recovery.test": "🔧 Test recovery trigger from Vigil",
 };
+
+/** The label a chat message leads with; exported for the dispatcher. */
+export function eventLabel(event: WebhookEvent): string {
+  return EVENT_LABELS[event] ?? event;
+}
 
 /** One-line human rendering of a payload for chat destinations. */
 export function renderEventText(payload: WebhookPayload): string {

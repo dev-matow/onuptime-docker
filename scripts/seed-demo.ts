@@ -13,6 +13,8 @@ import {
   member,
   monitorChecks,
   monitors,
+  notificationChannels,
+  notificationOutbox,
   organization,
   statusPageMonitors,
   statusPages,
@@ -20,6 +22,7 @@ import {
   user,
 } from "@/db/schema";
 import { auth } from "@/lib/auth";
+import { sealSecrets } from "@/modules/notifications/secretbox";
 import { DEMO_ORG, DEMO_PASSWORD, DEMO_USERS } from "@/lib/demo";
 
 /**
@@ -35,6 +38,7 @@ import { DEMO_ORG, DEMO_PASSWORD, DEMO_USERS } from "@/lib/demo";
  */
 
 const DAY = 24 * 60 * 60 * 1000;
+const HOUR = 60 * 60 * 1000;
 const MIN = 60 * 1000;
 
 /** Deterministic pseudo-random so re-seeds produce comparable charts. */
@@ -649,6 +653,147 @@ async function main() {
     metadata: { slug: DEMO_ORG.slug, published: true },
     createdAt: new Date(now - 88 * DAY),
   });
+
+  // Notification channels, so the settings page and its screenshot show
+  // the editor with real rows. Credentials are obviously fake but sealed
+  // exactly as the product seals them; the delivery history is seeded in
+  // terminal states the outbox really produces.
+  const [slackChannel] = await db
+    .insert(notificationChannels)
+    .values({
+      organizationId,
+      name: "Ops room",
+      provider: "slack",
+      config: {},
+      secrets: sealSecrets({
+        webhookUrl:
+          "https://hooks.slack.com/services/T0DEMO/B0DEMO/demo-not-real",
+      }),
+      events: ["monitor", "incident"],
+      enabled: true,
+    })
+    .returning();
+  const [telegramChannel] = await db
+    .insert(notificationChannels)
+    .values({
+      organizationId,
+      name: "On-call chat",
+      provider: "telegram",
+      config: { chatId: "-1002000000042" },
+      secrets: sealSecrets({
+        botToken: "7000000000:demo-token-aaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      }),
+      events: [
+        "incident",
+      ],
+      enabled: true,
+    })
+    .returning();
+  await db.insert(notificationChannels).values({
+    organizationId,
+    name: "Phone push",
+    provider: "ntfy",
+    config: { serverUrl: "https://ntfy.sh", topic: "altitude-demo-alerts" },
+    secrets: "",
+    events: ["expiry"],
+    enabled: false,
+  });
+  await db.insert(notificationOutbox).values([
+    {
+      organizationId,
+      idempotencyKey: `demo:checkout:monitor.down:${slackChannel!.id}`,
+      channel: "channel",
+      channelId: slackChannel!.id,
+      provider: "slack",
+      event: "monitor.down",
+      destination: "hooks.slack.com/[redacted]",
+      payload: {
+        kind: "channel",
+        event: "monitor.down",
+        title: "🔴 Monitor down - Checkout Service",
+        text: "Checkout Service is down",
+        severity: "critical",
+        organizationId,
+        data: {},
+        timestamp: new Date(now - 2 * HOUR).toISOString(),
+      },
+      state: "delivered",
+      attempts: 1,
+      deliveredAt: new Date(now - 2 * HOUR + 900),
+      createdAt: new Date(now - 2 * HOUR),
+    },
+    {
+      organizationId,
+      idempotencyKey: `demo:checkout:incident.opened:${telegramChannel!.id}`,
+      channel: "channel",
+      channelId: telegramChannel!.id,
+      provider: "telegram",
+      event: "incident.opened",
+      destination: "Telegram chat -1002000000042",
+      payload: {
+        kind: "channel",
+        event: "incident.opened",
+        title: "🔴 Incident opened - Checkout Service is down",
+        text: "Severity: critical.",
+        severity: "critical",
+        organizationId,
+        data: {},
+        timestamp: new Date(now - 2 * HOUR).toISOString(),
+      },
+      state: "delivered",
+      attempts: 1,
+      providerMessageId: "482",
+      deliveredAt: new Date(now - 2 * HOUR + 1400),
+      createdAt: new Date(now - 2 * HOUR),
+    },
+    {
+      organizationId,
+      idempotencyKey: `demo:api:monitor.up:${slackChannel!.id}`,
+      channel: "channel",
+      channelId: slackChannel!.id,
+      provider: "slack",
+      event: "monitor.up",
+      destination: "hooks.slack.com/[redacted]",
+      payload: {
+        kind: "channel",
+        event: "monitor.up",
+        title: "🟢 Monitor recovered - Public API",
+        text: "Down for 12m.",
+        severity: "ok",
+        organizationId,
+        data: {},
+        timestamp: new Date(now - 26 * HOUR).toISOString(),
+      },
+      state: "delivered",
+      attempts: 2,
+      lastError: "503: upstream connect error",
+      deliveredAt: new Date(now - 26 * HOUR + 65_000),
+      createdAt: new Date(now - 26 * HOUR),
+    },
+    {
+      organizationId,
+      idempotencyKey: `demo:cert:monitor.down:${telegramChannel!.id}`,
+      channel: "channel",
+      channelId: telegramChannel!.id,
+      provider: "telegram",
+      event: "incident.resolved",
+      destination: "Telegram chat -1002000000042",
+      payload: {
+        kind: "channel",
+        event: "incident.resolved",
+        title: "🟢 Incident resolved - Public API latency",
+        text: "Down for 12m.",
+        severity: "ok",
+        organizationId,
+        data: {},
+        timestamp: new Date(now - 26 * HOUR).toISOString(),
+      },
+      state: "failed",
+      attempts: 6,
+      lastError: "429: Too Many Requests: retry after 31",
+      createdAt: new Date(now - 26 * HOUR),
+    },
+  ]);
 
   console.log(`
 Demo tenant ready, organization "${DEMO_ORG.name}" (${DEMO_ORG.slug})

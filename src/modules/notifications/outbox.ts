@@ -23,8 +23,10 @@ import { notificationOutbox } from "@/db/schema";
 /** What a transport reports back. `void` was the old contract, and the bug. */
 export type DeliveryOutcome =
   | { status: "delivered"; providerMessageId: string | null }
-  /** The provider or network might succeed later: 429, 5xx, timeout, DNS. */
-  | { status: "retryable"; error: string }
+  /** The provider or network might succeed later: 429, 5xx, timeout, DNS.
+   * `retryAfterMs` carries the provider's own Retry-After when it sent
+   * one; the backoff never schedules earlier than the provider asked. */
+  | { status: "retryable"; error: string; retryAfterMs?: number }
   /** It will never succeed: 400, an unroutable address, a rejected domain. */
   | { status: "permanent"; error: string };
 
@@ -37,7 +39,13 @@ export interface OutboxMessage {
    * the same key and the unique index rejects the second row.
    */
   idempotencyKey: string;
-  channel: "email" | "webhook";
+  channel: "email" | "webhook" | "channel";
+  /** For `channel` rows: which configured channel delivers this. */
+  channelId?: string;
+  /** Provider registry id, denormalized for the history view. */
+  provider?: string;
+  /** Notification event name, e.g. "monitor.down". */
+  event?: string;
   destination: string;
   payload: Record<string, unknown>;
 }
@@ -86,6 +94,9 @@ export async function enqueue(
       organizationId: message.organizationId,
       idempotencyKey: message.idempotencyKey,
       channel: message.channel,
+      channelId: message.channelId,
+      provider: message.provider,
+      event: message.event,
       destination: message.destination,
       payload: message.payload,
     })
@@ -205,6 +216,14 @@ export async function recordOutcome(
 
   const giveUp = outcome.status === "permanent" || attempts >= MAX_ATTEMPTS;
 
+  // A provider that said Retry-After gets at least that long, however
+  // short the computed backoff is - retrying into a stated rate limit
+  // burns an attempt to learn nothing.
+  const waitMs =
+    outcome.status === "retryable"
+      ? Math.max(backoffMs(attempts), outcome.retryAfterMs ?? 0)
+      : 0;
+
   await db
     .update(notificationOutbox)
     .set({
@@ -213,7 +232,30 @@ export async function recordOutcome(
       lastError: outcome.error.slice(0, 2_000),
       nextAttemptAt: giveUp
         ? row.nextAttemptAt
-        : new Date(now.getTime() + backoffMs(attempts)),
+        : new Date(now.getTime() + waitMs),
+      leasedUntil: null,
+    })
+    .where(eq(notificationOutbox.id, row.id));
+}
+
+/**
+ * Returns a leased row to the queue without spending an attempt.
+ *
+ * This is the rate limiter's verb, not the retry path's: a deferred
+ * message did nothing wrong, so it must not creep toward MAX_ATTEMPTS,
+ * it just was not this minute's turn. The delay is the database's
+ * clock, like every other timestamp here.
+ */
+export async function deferRow(
+  db: DbClient,
+  row: OutboxRow,
+  delaySeconds: number,
+): Promise<void> {
+  await db
+    .update(notificationOutbox)
+    .set({
+      state: "queued",
+      nextAttemptAt: sql`now() + make_interval(secs => ${delaySeconds})`,
       leasedUntil: null,
     })
     .where(eq(notificationOutbox.id, row.id));

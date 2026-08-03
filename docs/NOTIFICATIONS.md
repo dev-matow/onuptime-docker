@@ -10,6 +10,98 @@ Not "all alerts are delivered". Nothing that hands a message to a third
 party can promise that, and a product that says it anyway is making a
 promise its transports cannot keep.
 
+## Channel providers
+
+Since 1.15.0, alerts route through **notification channels**: one
+registry, one delivery pipeline, one routing model. A channel is a
+provider plus its settings, its encrypted credentials and the event
+classes it subscribes to. Ten providers ship, in both editions:
+
+| Provider        | Transport                                | Credential               |
+| --------------- | ---------------------------------------- | ------------------------ |
+| Slack           | Incoming webhook (`hooks.slack.com`)     | the webhook URL          |
+| Discord         | Channel webhook                          | the webhook URL          |
+| Microsoft Teams | Workflows webhook, Adaptive Card payload | the workflow URL         |
+| Telegram        | Bot API `sendMessage`                    | bot token (+ chat id)    |
+| Google Chat     | Space incoming webhook                   | the webhook URL          |
+| Gotify          | `POST /message`, `X-Gotify-Key` header   | application token        |
+| ntfy            | JSON publish to the server root          | token or user + password |
+| Webhook         | Signed JSON POST (`X-Vigil-Signature`)   | HMAC signing secret      |
+| SMTP            | Own client: STARTTLS/TLS, AUTH PLAIN     | password (optional)      |
+| Resend          | `POST /emails`, honors `Idempotency-Key` | API key                  |
+
+Notes that are contracts, not trivia:
+
+- **Teams** uses the Power Automate Workflows webhook - the retired
+  Office 365 connector URLs stopped delivering in May 2026 and this
+  provider never speaks MessageCard.
+- **Every credential is the customer's own.** There is no Vigil-funded
+  relay, account or hosted service behind any provider.
+- **The customer's own servers are fine.** Gotify, ntfy and the signed
+  webhook accept private addresses (a receiver on your own network is
+  the normal deployment); cloud metadata and link-local space are
+  refused wherever the URL points or resolves.
+- **Redirects are never followed.** A redirect would re-target a
+  credentialed request, and for signed payloads would drop the method,
+  body and signature.
+- **SMTP refuses to authenticate without TLS**, and certificate
+  verification has no off switch.
+
+## Event classes
+
+A channel subscribes to classes, not raw events, and every event belongs
+to exactly one class - so one logical event can never reach the same
+channel twice:
+
+| Class    | Events                                                            |
+| -------- | ----------------------------------------------------------------- |
+| monitor  | `monitor.down`, `monitor.up`                                      |
+| incident | `incident.opened`, `incident.updated`, `incident.resolved`        |
+| expiry   | monitor down/up for TLS/domain-expiry monitors                    |
+| recovery | `recovery.succeeded`, `recovery.failed` (commercial)              |
+| probes   | `probe.partial_failure`, `probe.insufficient_quorum` (commercial) |
+
+Expiry is a carve-out of monitor down/up by monitor kind, and it is
+exclusive: an expiring certificate pages the channel that asked for
+expiry warnings, not the one that asked for outages. Recovery notifies
+results only - success once verified, failure once the chain is
+exhausted; attempts in between are timeline entries. Probe quorum events
+are edge-triggered on the outcome class changing, so a monitor stuck in
+`partial_failure` for an hour is one message, not one per round.
+
+## Credentials at rest
+
+Channel secrets are encrypted (AES-256-GCM) under a key derived from
+`BETTER_AUTH_SECRET`. They are never returned to the browser - the
+editor shows only _which_ secret fields are set - and delivery errors
+are scrubbed of secret values and URL query strings before they are
+stored or logged. Consequence: rotating `BETTER_AUTH_SECRET` orphans
+stored channel credentials; deliveries then fail with a clear
+"re-enter this channel's credentials" error rather than garbage.
+
+Channels migrated from the pre-1.15 `webhook_endpoints` table are
+sealed by the worker at its first boot after the upgrade.
+
+## Rate limits
+
+At most 10 messages per channel per delivery tick. Rows beyond that are
+deferred to the next tick without spending a retry attempt. A provider's
+`Retry-After` (header, or Telegram's `retry_after` body parameter) is
+honored: the backoff never schedules earlier than the provider asked,
+capped at an hour. An organization can hold at most 20 channels.
+
+Test deliveries skip the outbox, because the operator is watching and
+wants the answer now, so they skip that per-channel limit too. They get
+their own: 30 per organization per hour. Without one the button is a
+send-on-demand primitive against any address the egress policy allows.
+
+The drain that runs inline right after a dispatch is bounded to the
+number of rows that dispatch queued. It happens inside a server action
+on the manual-incident paths, and a full batch of rows each allowed a
+ten-second provider timeout would be minutes of synchronous work in
+somebody's request. Anything it does not reach stays queued for the
+worker's minute tick, which is the outbox guarantee doing its job.
+
 ## Why there is an outbox
 
 Before 1.13.0 the flow was: decide, render, call the transport, mark the
@@ -53,11 +145,13 @@ derived from its cause, and that key is sent to the provider as an
 `Idempotency-Key` header. A provider that honours one collapses the
 duplicate on its side.
 
-| Transport     | Duplicate suppression                                                      |
-| ------------- | -------------------------------------------------------------------------- |
-| Resend        | Yes, honours `Idempotency-Key`                                             |
-| Log transport | Not applicable; it writes to the log                                       |
-| Webhooks      | The receiver's problem, and the signed payload carries the key so they can |
+| Transport                         | Duplicate suppression                                                             |
+| --------------------------------- | --------------------------------------------------------------------------------- |
+| Resend (member email and channel) | Yes, honours `Idempotency-Key`                                                    |
+| SMTP                              | `Message-ID` is the outbox row id, so a receiving MTA can collapse the copy       |
+| Signed webhook                    | The receiver's problem, and the signed payload carries the key so they can        |
+| Chat and push providers           | None offered by the provider; the crash-retry window is the only duplicate source |
+| Log transport                     | Not applicable; it writes to the log                                              |
 
 So: **at most one message per logical notification where the provider
 cooperates, at least one everywhere.** That is the honest wording, and it

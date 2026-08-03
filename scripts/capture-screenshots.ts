@@ -89,10 +89,7 @@ async function resolveIds() {
 
   const byName = async (name: string) =>
     db.query.monitors.findFirst({
-      where: and(
-        eq(monitors.organizationId, org.id),
-        eq(monitors.name, name),
-      ),
+      where: and(eq(monitors.organizationId, org.id), eq(monitors.name, name)),
       columns: { id: true },
     });
 
@@ -196,6 +193,12 @@ async function main() {
     "/settings/members",
     "roles.png",
     "The team page: owner, admin, responder and viewer on separate accounts",
+  );
+  await fullPage(
+    page,
+    "/settings/notifications",
+    "notifications.png",
+    "Notification channels: the provider editor, event-class routing and the delivery history",
   );
   await fullPage(
     page,

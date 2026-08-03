@@ -60,6 +60,7 @@ async function enqueueIncidentEmails(
       organizationId: incident.organizationId,
       idempotencyKey: `incident:${incident.id}:${event}:${to}`,
       channel: "email",
+      event: event === "opened" ? "incident.opened" : "incident.resolved",
       destination: to,
       payload: { ...email },
     });

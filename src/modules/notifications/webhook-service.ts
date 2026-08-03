@@ -1,110 +1,40 @@
-import { randomBytes } from "node:crypto";
-
-import { eq } from "drizzle-orm";
-
 import { redactTargetCredentials } from "@/modules/monitors/spec";
 import type { DbClient } from "@/db";
-import { webhookEndpoints } from "@/db/schema";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
-import { writeAudit } from "@/modules/audit";
-import { EgressBlockedError } from "@/modules/monitors/egress";
-import { isForbiddenEgressUrl } from "@/modules/monitors/net";
 import type { Incident } from "@/modules/incidents/service";
+import { runNotificationDelivery } from "@/worker/jobs/notification-delivery";
 
-import {
-  buildWebhookPayload,
-  deliverWebhook,
-  type DeliveryResult,
-  type WebhookEvent,
-} from "./webhook";
+import { dispatchToChannels } from "./channel-service";
+import type { WebhookEvent } from "./webhook";
 
-export type WebhookEndpointConfig = typeof webhookEndpoints.$inferSelect;
+/**
+ * Incident and monitor event dispatch, fanned out to every subscribed
+ * notification channel through the outbox.
+ *
+ * This file kept its name through 1.15.0 so its callers did not move,
+ * but the single `webhook_endpoints` row it used to deliver to is gone:
+ * migration 0022 turned those endpoints into notification channels, and
+ * delivery for every provider - the signed webhook included - now goes
+ * through the outbox worker with its leases, retries and ledger.
+ *
+ * `sendIncidentWebhook` therefore ENQUEUES rather than delivers, then
+ * kicks an inline, organization-scoped drain so a chat alert still
+ * lands within a second of the incident instead of on the next worker
+ * tick. The drain is best-effort: if it dies with the process, the rows
+ * are still queued and the worker's minute tick picks them up - that is
+ * the outbox guarantee doing its job.
+ */
 
-interface Actor {
-  organizationId: string;
-  userId: string;
-}
-
-function newSecret(): string {
-  return `whsec_${randomBytes(24).toString("hex")}`;
-}
-
-/** One endpoint per org, created lazily with a fresh secret. */
-export async function getOrCreateWebhook(
-  db: DbClient,
-  organizationId: string,
-): Promise<WebhookEndpointConfig> {
-  const existing = await db.query.webhookEndpoints.findFirst({
-    where: eq(webhookEndpoints.organizationId, organizationId),
-  });
-  if (existing) return existing;
-
-  const [created] = await db
-    .insert(webhookEndpoints)
-    .values({ organizationId, secret: newSecret() })
-    .onConflictDoNothing()
-    .returning();
-  if (created) return created;
-
-  const winner = await db.query.webhookEndpoints.findFirst({
-    where: eq(webhookEndpoints.organizationId, organizationId),
-  });
-  if (!winner) throw new Error("webhook endpoint disappeared mid-create");
-  return winner;
-}
-
-export async function updateWebhook(
-  db: DbClient,
-  actor: Actor,
-  input: { url: string; enabled: boolean; regenerateSecret?: boolean },
-): Promise<WebhookEndpointConfig> {
-  // Refused at save time as well as at delivery. Delivery is the only
-  // check that can be authoritative — the URL is a hostname and DNS
-  // belongs to whoever owns it — but an operator who pastes a metadata
-  // URL deserves to be told now rather than to save something that
-  // silently never fires.
-  if (isForbiddenEgressUrl(input.url)) {
-    throw new EgressBlockedError(
-      "This host cannot be used as a webhook endpoint.",
-    );
-  }
-
-  return db.transaction(async (tx) => {
-    const endpoint = await getOrCreateWebhook(tx, actor.organizationId);
-    const [updated] = await tx
-      .update(webhookEndpoints)
-      .set({
-        url: input.url,
-        enabled: input.enabled,
-        ...(input.regenerateSecret ? { secret: newSecret() } : {}),
-      })
-      .where(eq(webhookEndpoints.id, endpoint.id))
-      .returning();
-    if (!updated) throw new Error("webhook update returned no row");
-
-    await writeAudit(tx, {
-      organizationId: actor.organizationId,
-      actorId: actor.userId,
-      action: "webhook.updated",
-      targetType: "webhook",
-      targetId: endpoint.id,
-      metadata: {
-        enabled: input.enabled,
-        secretRotated: Boolean(input.regenerateSecret),
-      },
-    });
-    return updated;
-  });
-}
-
-/** Minimal monitor shape a webhook needs — satisfied by both the full
+/** Minimal monitor shape a dispatch needs — satisfied by both the full
  * worker Monitor and the trimmed monitor from getIncidentDetail. */
 export interface WebhookMonitor {
   id: string;
   name: string;
   url: string;
   currentStatus?: string;
+  /** Check type id; decides the expiry event class. */
+  checkType?: string;
 }
 
 function incidentData(incident: Incident, monitor?: WebhookMonitor) {
@@ -132,11 +62,23 @@ function incidentData(incident: Incident, monitor?: WebhookMonitor) {
   };
 }
 
+function describeDowntime(incident: Incident): string | null {
+  if (!incident.resolvedAt) return null;
+  const seconds = Math.round(
+    (incident.resolvedAt.getTime() - incident.startedAt.getTime()) / 1_000,
+  );
+  if (seconds < 1) return null;
+  if (seconds < 120) return `Down for ${seconds}s.`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 120) return `Down for ${minutes}m.`;
+  return `Down for ${Math.round((minutes / 60) * 10) / 10}h.`;
+}
+
 /**
- * Fires the org's webhook for an incident/monitor event, if enabled.
- * Called after the triggering mutation has committed, so a webhook
- * failure can never roll back or block incident processing. Awaited by
- * callers, but self-contained: it resolves regardless of endpoint health.
+ * Fans an incident/monitor event out to the organization's channels.
+ * Called after the triggering mutation has committed, so a provider
+ * failure can never roll back or block incident processing. Resolves
+ * regardless of channel health.
  */
 export async function sendIncidentWebhook(
   db: DbClient,
@@ -146,52 +88,56 @@ export async function sendIncidentWebhook(
     monitor?: WebhookMonitor;
   },
 ): Promise<void> {
-  const endpoint = await db.query.webhookEndpoints.findFirst({
-    where: eq(webhookEndpoints.organizationId, input.incident.organizationId),
-  });
-  if (!endpoint || !endpoint.enabled || !endpoint.url) return;
-
-  const payload = buildWebhookPayload({
-    event: input.event,
-    organizationId: input.incident.organizationId,
-    data: incidentData(input.incident, input.monitor),
-  });
-
-  const result = await deliverWebhook(
-    { url: endpoint.url, secret: endpoint.secret },
-    payload,
-    { channel: "webhook" },
-  );
-  if (result.delivered) {
-    logger.debug(
-      {
-        event: input.event,
-        incidentId: input.incident.id,
-        attempts: result.attempts,
-      },
-      "webhook delivered",
+  const { event, incident, monitor } = input;
+  try {
+    const queued = await dispatchToChannels(db, {
+      organizationId: incident.organizationId,
+      event,
+      causeKey: `incident:${incident.id}:${event}`,
+      subject: monitor?.name ?? incident.title,
+      detail: [
+        // When the subject is the monitor, the incident title is the
+        // detail; when the subject IS the title, repeating it is noise.
+        monitor ? incident.title : null,
+        `Severity: ${incident.severity}.`,
+        describeDowntime(incident),
+      ],
+      url: `${env.APP_URL}/incidents/${incident.id}`,
+      data: incidentData(incident, monitor),
+      monitorType: monitor?.checkType ?? null,
+    });
+    if (queued > 0) {
+      await drainAfterDispatch(db, incident.organizationId, queued);
+    }
+  } catch (error) {
+    // Dispatch failures must never affect incident processing; the
+    // worker tick re-drains whatever did get enqueued.
+    logger.warn(
+      { event, incidentId: incident.id, err: error },
+      "notification dispatch failed",
     );
   }
 }
 
-/** Delivers a `webhook.test` event on demand; returns the result for the UI. */
-export async function sendTestWebhook(
+/**
+ * The inline drain that makes alerts prompt. Scoped to the organization
+ * so one tenant's slow provider cannot stall another's dispatch path,
+ * and bounded to the number of rows the dispatch just queued so a
+ * server action can never inherit the whole batch's worth of provider
+ * timeouts. Anything it does not reach is still queued, and the
+ * worker's minute tick takes it.
+ */
+export async function drainAfterDispatch(
   db: DbClient,
   organizationId: string,
-): Promise<DeliveryResult> {
-  const endpoint = await getOrCreateWebhook(db, organizationId);
-  if (!endpoint.url) {
-    return { delivered: false, attempts: 0, error: "No webhook URL set." };
+  limit: number,
+): Promise<void> {
+  try {
+    await runNotificationDelivery(db, { organizationId, limit });
+  } catch (error) {
+    logger.warn(
+      { organizationId, err: error },
+      "inline notification drain failed; the worker tick will retry",
+    );
   }
-
-  const payload = buildWebhookPayload({
-    event: "webhook.test",
-    organizationId,
-    data: { message: "This is a test delivery from Vigil." },
-  });
-  return deliverWebhook(
-    { url: endpoint.url, secret: endpoint.secret },
-    payload,
-    { attempts: 1, channel: "webhook" },
-  );
 }

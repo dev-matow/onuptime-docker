@@ -6,6 +6,26 @@ free edition; entries for commercial-only features live in the other
 repository, because they are not in this one and listing them here would
 describe software you do not have.
 
+## 1.15.0 — 2026-08-03
+
+Ten notification channel providers, and all of them are in this
+repository: Slack, Discord, Microsoft Teams (the Workflows webhook;
+the retired connector format is never sent), Telegram, Google Chat,
+Gotify, ntfy, the signed webhook, SMTP and Resend. One editor, event
+class routing (monitor down/up, incident lifecycle, certificate and
+domain expiry), a send-test action, a delivery history with redacted
+errors, credentials encrypted at rest, per-channel rate limiting and
+Retry-After honored. The commercial edition routes two extra event
+classes (recovery results, probe quorum) to the same channels; the
+channels themselves are not held back.
+
+### Changed
+
+- The single organization webhook became a channel. The migration
+  moves a configured endpoint into the registry by host and keeps its
+  signing secret and wire format; the worker seals the migrated
+  credentials at its first boot.
+
 ## 1.14.0 — 2026-08-02
 
 The commercial edition added remote probe agents and a retention policy

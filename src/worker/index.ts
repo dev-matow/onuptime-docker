@@ -10,6 +10,7 @@ import {
   highFrequencyClaims,
 } from "@/modules/monitors/highfreq";
 import { findDueMonitors } from "@/modules/monitors/service";
+import { sealPlainChannelSecrets } from "@/modules/notifications/channel-service";
 
 
 import { runHighFrequencyRollupJob } from "./jobs/high-frequency";
@@ -47,6 +48,11 @@ async function main() {
   boss.on("error", (error) => log.error({ err: error }, "pg-boss error"));
 
   await boss.start();
+
+  // Channels migrated from webhook_endpoints carry `plain:` secret
+  // envelopes (migration 0023 has no encryption key); seal them before
+  // anything delivers. Idempotent, a no-op after the first boot.
+  await sealPlainChannelSecrets(db);
 
   // One tick in flight at a time, even with multiple workers.
   await boss.createQueue(QUEUES.monitorTick, { policy: "singleton" });

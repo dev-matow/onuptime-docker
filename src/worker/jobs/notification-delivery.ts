@@ -1,13 +1,16 @@
 import type { DbClient } from "@/db";
 import { logger } from "@/lib/logger";
 import { sendEmail, type EmailTransport } from "@/modules/notifications";
+import { deliverChannelRow } from "@/modules/notifications/channel-service";
 import {
   claimDue,
+  deferRow,
   MAX_ATTEMPTS,
   recordOutcome,
   type DeliveryOutcome,
   type OutboxRow,
 } from "@/modules/notifications/outbox";
+import type { ProviderNet } from "@/modules/notifications/providers";
 
 /**
  * Drains the notification outbox.
@@ -34,17 +37,33 @@ import {
  */
 const BATCH_SIZE = 25;
 
+/**
+ * At most this many messages per configured channel per tick. A
+ * provider outage that queued a burst then drains at a civil pace
+ * instead of hammering the provider the moment it recovers, and one
+ * noisy channel cannot monopolize the batch. Deferred rows spend no
+ * attempt - see `deferRow`.
+ */
+const CHANNEL_RATE_LIMIT_PER_TICK = 10;
+const DEFER_SECONDS = 60;
+
 export interface DeliveryTickResult {
   claimed: number;
   delivered: number;
   retrying: number;
   failed: number;
+  deferred: number;
 }
 
 async function deliver(
+  db: DbClient,
   row: OutboxRow,
   send: EmailTransport["send"],
+  net: ProviderNet,
 ): Promise<DeliveryOutcome> {
+  if (row.channel === "channel") {
+    return deliverChannelRow(db, row, net);
+  }
   if (row.channel === "email") {
     const payload = row.payload as {
       subject?: string;
@@ -94,6 +113,18 @@ export interface DeliveryOptions {
    * independently drivable.
    */
   send?: EmailTransport["send"];
+  /** Network seams for provider deliveries, for tests. */
+  net?: ProviderNet;
+  /**
+   * How many messages this pass may take, capped at `BATCH_SIZE`.
+   *
+   * The scheduled tick wants the whole batch. The inline drain that
+   * follows a dispatch does not: it runs inside a server action, and a
+   * full batch of rows each allowed a ten-second provider timeout is
+   * four minutes of synchronous work in somebody's request. It asks
+   * only for the budget its own dispatch created.
+   */
+  limit?: number;
 }
 
 export async function runNotificationDelivery(
@@ -101,18 +132,31 @@ export async function runNotificationDelivery(
   options: DeliveryOptions = {},
 ): Promise<DeliveryTickResult> {
   const send = options.send ?? sendEmail;
-  const claimed = await claimDue(db, BATCH_SIZE, options.organizationId);
+  const limit = Math.max(1, Math.min(options.limit ?? BATCH_SIZE, BATCH_SIZE));
+  const claimed = await claimDue(db, limit, options.organizationId);
   const result: DeliveryTickResult = {
     claimed: claimed.length,
     delivered: 0,
     retrying: 0,
     failed: 0,
+    deferred: 0,
   };
 
+  const perChannel = new Map<string, number>();
   for (const row of claimed) {
+    if (row.channelId) {
+      const sent = perChannel.get(row.channelId) ?? 0;
+      if (sent >= CHANNEL_RATE_LIMIT_PER_TICK) {
+        await deferRow(db, row, DEFER_SECONDS);
+        result.deferred++;
+        continue;
+      }
+      perChannel.set(row.channelId, sent + 1);
+    }
+
     let outcome: DeliveryOutcome;
     try {
-      outcome = await deliver(row, send);
+      outcome = await deliver(db, row, send, options.net ?? {});
     } catch (error) {
       // A transport that throws instead of returning an outcome is a
       // bug, but it must not take the batch down with it — the other

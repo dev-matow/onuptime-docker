@@ -230,6 +230,7 @@ describe("the transport's actual outcome is recorded", () => {
       delivered: 0,
       retrying: 1,
       failed: 0,
+      deferred: 0,
     });
     expect(result.retrying).toBe(1);
     expect(result.delivered).toBe(0);

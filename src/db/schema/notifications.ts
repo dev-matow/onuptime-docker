@@ -15,14 +15,25 @@ import {
 import { organization } from "./auth";
 
 /**
- * One outbound webhook endpoint per organization. Deliveries are signed
- * with `secret` (HMAC-SHA-256) and sent for every notification event
- * while `enabled`. Kept minimal on purpose — the event set is fixed in
- * code (see modules/notifications/webhook.ts), so there is nothing to
- * store per event.
+ * One configured notification destination: a provider id from the
+ * registry (modules/notifications/providers), its non-secret settings,
+ * its encrypted credentials, and which event classes it receives.
+ *
+ * Replaces `webhook_endpoints`, which allowed exactly one webhook per
+ * organization with a fixed event set. Migration 0022 moved every
+ * configured endpoint in here, classifying it by host (a
+ * hooks.slack.com URL becomes a slack channel, discord.com a discord
+ * channel, anything else a generic webhook) so nothing an operator had
+ * wired stopped firing.
+ *
+ * `secrets` is a sealed envelope (modules/notifications/secretbox), or
+ * `plain:<json>` briefly after migration until the worker's boot pass
+ * re-seals it, or `""` for providers with no credential. Secret values
+ * never appear in `config`, are never returned to the browser, and are
+ * scrubbed from delivery errors before they are stored.
  */
-export const webhookEndpoints = pgTable(
-  "webhook_endpoints",
+export const notificationChannels = pgTable(
+  "notification_channels",
   {
     id: uuid()
       .primaryKey()
@@ -30,17 +41,24 @@ export const webhookEndpoints = pgTable(
     organizationId: text()
       .notNull()
       .references(() => organization.id, { onDelete: "cascade" }),
-    url: text().notNull().default(""),
-    /** Signing secret; generated on first access, rotatable by the user. */
-    secret: text().notNull(),
-    enabled: boolean().notNull().default(false),
+    name: text().notNull(),
+    /** Registry id, e.g. "slack". Text, not an enum: the registry is the
+     * validator, and adding a provider must not need a migration. */
+    provider: text().notNull(),
+    /** Non-secret provider settings, validated by the provider's schema. */
+    config: jsonb().notNull().default({}),
+    /** Sealed credential envelope; see module docs on the formats. */
+    secrets: text().notNull().default(""),
+    /** Event class ids this channel receives (see EVENT_CLASSES). */
+    events: jsonb().notNull().default([]),
+    enabled: boolean().notNull().default(true),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp({ withTimezone: true })
       .notNull()
       .defaultNow()
       .$onUpdate(() => new Date()),
   },
-  (t) => [uniqueIndex().on(t.organizationId)],
+  (t) => [index().on(t.organizationId)],
 );
 
 /**
@@ -66,6 +84,10 @@ export const notificationState = pgEnum("notification_state", [
 export const notificationChannel = pgEnum("notification_channel", [
   "email",
   "webhook",
+  // A configured notification channel; the row's channelId names which
+  // one and the provider registry owns delivery. "webhook" remains only
+  // for rows written before 0022.
+  "channel",
 ]);
 
 /**
@@ -106,7 +128,22 @@ export const notificationOutbox = pgTable(
      */
     idempotencyKey: text().notNull(),
     channel: notificationChannel().notNull(),
-    /** Email address or webhook URL — what this row is addressed to. */
+    /**
+     * Which configured channel this row delivers through, for `channel`
+     * rows. SET NULL on delete: the delivery history outlives the
+     * channel that produced it, which is the point of a ledger.
+     */
+    channelId: uuid().references(() => notificationChannels.id, {
+      onDelete: "set null",
+    }),
+    /** Provider registry id at enqueue time, kept for the history view
+     * after the channel row is gone. Null on plain email rows. */
+    provider: text(),
+    /** Notification event, e.g. "monitor.down". Null on rows enqueued
+     * before 0022 and on member emails, which predate event routing. */
+    event: text(),
+    /** Email address, or the provider's redacted destination summary —
+     * what this row is addressed to, safe to render. */
     destination: text().notNull(),
     /** The rendered message. Stored so a retry re-sends what was decided,
      * not what the templates would render today. */

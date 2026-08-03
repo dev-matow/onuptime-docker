@@ -10,7 +10,10 @@ import {
   highFrequencyClaims,
 } from "@/modules/monitors/highfreq";
 import { findDueMonitors } from "@/modules/monitors/service";
-import { sealPlainChannelSecrets } from "@/modules/notifications/channel-service";
+import {
+  backfillChannelDestinations,
+  sealPlainChannelSecrets,
+} from "@/modules/notifications/channel-service";
 
 
 import { runHighFrequencyRollupJob } from "./jobs/high-frequency";
@@ -53,6 +56,10 @@ async function main() {
   // envelopes (migration 0023 has no encryption key); seal them before
   // anything delivers. Idempotent, a no-op after the first boot.
   await sealPlainChannelSecrets(db);
+  // Same reason, same constraint: 0024 added the denormalized
+  // destination column and could not compute it from SQL. Filling it
+  // here is what lets the settings list render without decrypting.
+  await backfillChannelDestinations(db);
 
   // One tick in flight at a time, even with multiple workers.
   await boss.createQueue(QUEUES.monitorTick, { policy: "singleton" });

@@ -62,8 +62,26 @@ export type OutboxRow = typeof notificationOutbox.$inferSelect;
  */
 export const MAX_ATTEMPTS = 6;
 
-/** How long a worker holds a claimed row before another may retry it. */
-const LEASE_MS = 60_000;
+/**
+ * How long a worker holds a claimed row before another may retry it.
+ *
+ * Must exceed the worst case for a whole batch, not for one message.
+ * The drain is sequential, so a row at the tail of a batch of 25 whose
+ * providers each burn the full 10s timeout is still in flight four
+ * minutes after the batch was claimed. At the old 60s a lease expired
+ * under a message that was still being sent, `claimDue` re-claimed it
+ * (`state = 'sending' and leased_until <= now()`), and the same
+ * notification went to the provider twice while `recordOutcome`
+ * overwrote the first result — so the ledger reported one attempt and
+ * hid the duplicate. Delivery is at-least-once by design, but a
+ * duplicate the ledger denies is a different and worse thing.
+ *
+ * Ten minutes is BATCH_SIZE x PROVIDER_TIMEOUT_MS with headroom.
+ * `renewLease` shortens the exposure further for a slow batch; this is
+ * the floor if a worker dies mid-batch, and the cost of it being
+ * generous is that a crashed worker's messages wait that long.
+ */
+const LEASE_MS = 600_000;
 
 /**
  * Exponential, capped, and jittered.
@@ -106,6 +124,40 @@ export async function enqueue(
     .onConflictDoNothing({ target: notificationOutbox.idempotencyKey })
     .returning();
   return row ?? null;
+}
+
+/**
+ * Enqueues a batch in one statement, with the same conflict rule as
+ * `enqueue`. Returns how many rows were actually new.
+ *
+ * The fan-out of one event to N channels was N inserts. That was
+ * invisible while an organization could own at most twenty channels
+ * and becomes the dominant cost the moment it cannot — a single
+ * incident on a thousand-channel tenant is a thousand round trips
+ * inside the transaction that opened it.
+ */
+export async function enqueueMany(
+  db: DbClient,
+  messages: OutboxMessage[],
+): Promise<number> {
+  if (messages.length === 0) return 0;
+  const rows = await db
+    .insert(notificationOutbox)
+    .values(
+      messages.map((message) => ({
+        organizationId: message.organizationId,
+        idempotencyKey: message.idempotencyKey,
+        channel: message.channel,
+        channelId: message.channelId,
+        provider: message.provider,
+        event: message.event,
+        destination: message.destination,
+        payload: message.payload,
+      })),
+    )
+    .onConflictDoNothing({ target: notificationOutbox.idempotencyKey })
+    .returning({ id: notificationOutbox.id });
+  return rows.length;
 }
 
 /**
@@ -183,6 +235,22 @@ export async function claimDue(
       )
       .returning();
   });
+}
+
+/**
+ * Extends the lease on a row about to be delivered.
+ *
+ * Called immediately before each send, so the clock starts at the send
+ * rather than at the batch claim. Without it the last row of a slow
+ * batch inherits whatever is left of a lease the first row started.
+ */
+export async function renewLease(db: DbClient, rowId: string): Promise<void> {
+  await db
+    .update(notificationOutbox)
+    .set({
+      leasedUntil: sql`now() + make_interval(secs => ${LEASE_MS / 1000})`,
+    })
+    .where(eq(notificationOutbox.id, rowId));
 }
 
 /**

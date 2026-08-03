@@ -6,6 +6,27 @@ free edition; entries for commercial-only features live in the other
 repository, because they are not in this one and listing them here would
 describe software you do not have.
 
+## 1.16.0 — 2026-08-03
+
+Unlimited notification channels, in this edition too.
+
+The cap of twenty channels per organization is gone and nothing replaced
+it. Several instances of one provider are supported and always were at
+the data layer: nothing about a channel has to be unique, and channels
+are identified by id alone. Channels can now be scoped to specific
+monitors, or left alone to act as workspace defaults.
+
+Listing channels no longer decrypts credentials — the redacted
+destination is a stored column — and dispatch resolves its routes in one
+indexed query and enqueues in one insert. The settings list costs the
+same at one channel and at a thousand; `npm run bench:channels`
+reproduces the measurement.
+
+### Upgrade
+
+`npm run db:migrate`, then start the worker once. Migration 0024 is
+additive and rewrites no secrets.
+
 ## 1.15.0 — 2026-08-03
 
 Ten notification channel providers, and all of them are in this

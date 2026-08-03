@@ -13,6 +13,7 @@ import {
   member,
   monitorChecks,
   monitors,
+  notificationChannelMonitors,
   notificationChannels,
   notificationOutbox,
   organization,
@@ -662,27 +663,67 @@ async function main() {
     .insert(notificationChannels)
     .values({
       organizationId,
-      name: "Ops room",
+      name: "Slack - Operations",
       provider: "slack",
       config: {},
       secrets: sealSecrets({
         webhookUrl:
           "https://hooks.slack.com/services/T0DEMO/B0DEMO/demo-not-real",
       }),
+      destination: "hooks.slack.com/[redacted]",
       events: ["monitor", "incident"],
       enabled: true,
     })
     .returning();
+  // A SECOND Slack channel, scoped to one monitor. Two instances of one
+  // provider with different routing is the configuration the old cap
+  // and the old single-endpoint model could not express, so the demo
+  // shows it rather than describing it.
+  const [slackClientChannel] = await db
+    .insert(notificationChannels)
+    .values({
+      organizationId,
+      name: "Slack - Checkout team",
+      provider: "slack",
+      config: {},
+      secrets: sealSecrets({
+        webhookUrl:
+          "https://hooks.slack.com/services/T0DEMO/B0CHECKOUT/demo-not-real",
+      }),
+      destination: "hooks.slack.com/[redacted]",
+      // Scope is stored, not inferred from the rows below: those cascade
+      // when a monitor is deleted, and a channel that lost its targets
+      // must go quiet rather than inherit the whole workspace.
+      scopedToMonitors: true,
+      events: ["monitor", "incident"],
+      enabled: true,
+    })
+    .returning();
+  await db.insert(notificationChannelMonitors).values({
+    channelId: slackClientChannel!.id,
+    monitorId: monitorIds["Checkout Service"]!,
+  });
+  await db.insert(notificationChannels).values({
+    organizationId,
+    name: "Webhook - Statuspage sync",
+    provider: "webhook",
+    config: { url: "https://ops.altitude.demo/hooks/vigil" },
+    secrets: sealSecrets({ secret: `whsec_${"d".repeat(48)}` }),
+    destination: "ops.altitude.demo/hooks/vigil",
+    events: ["incident"],
+    enabled: true,
+  });
   const [telegramChannel] = await db
     .insert(notificationChannels)
     .values({
       organizationId,
-      name: "On-call chat",
+      name: "Telegram - On-call",
       provider: "telegram",
       config: { chatId: "-1002000000042" },
       secrets: sealSecrets({
         botToken: "7000000000:demo-token-aaaaaaaaaaaaaaaaaaaaaaaaaaa",
       }),
+      destination: "Telegram chat -1002000000042",
       events: [
         "incident",
       ],
@@ -691,10 +732,11 @@ async function main() {
     .returning();
   await db.insert(notificationChannels).values({
     organizationId,
-    name: "Phone push",
+    name: "ntfy - Phone push",
     provider: "ntfy",
     config: { serverUrl: "https://ntfy.sh", topic: "altitude-demo-alerts" },
     secrets: "",
+    destination: "ntfy topic altitude-demo-alerts at ntfy.sh",
     events: ["expiry"],
     enabled: false,
   });

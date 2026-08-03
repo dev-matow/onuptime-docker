@@ -1,9 +1,14 @@
 import { randomBytes } from "node:crypto";
 
-import { and, desc, eq, like } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, like, or, sql } from "drizzle-orm";
 
 import type { DbClient } from "@/db";
-import { notificationChannels, notificationOutbox } from "@/db/schema";
+import {
+  monitors,
+  notificationChannelMonitors,
+  notificationChannels,
+  notificationOutbox,
+} from "@/db/schema";
 import { AppError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import { writeAudit } from "@/modules/audit";
@@ -11,7 +16,7 @@ import { EgressBlockedError } from "@/modules/monitors/egress";
 import { isForbiddenEgressUrl } from "@/modules/monitors/net";
 
 import { classifyEvent, eventSeverity, EVENT_CLASS_IDS } from "./events";
-import { enqueue, type DeliveryOutcome, type OutboxRow } from "./outbox";
+import { enqueueMany, type DeliveryOutcome, type OutboxRow } from "./outbox";
 import {
   getProvider,
   redactErrorText,
@@ -46,9 +51,25 @@ interface Actor {
   userId: string;
 }
 
-/** Fan-out bound. Also the abuse bound: channels are the only way this
- * product can be told to POST somewhere, and 20 per tenant is plenty. */
-export const MAX_CHANNELS_PER_ORG = 20;
+/**
+ * There is no cap on how many channels an organization may configure,
+ * and no uniqueness rule on provider, endpoint, address or name: forty
+ * Slack channels, one per client, all pointing at different workspaces,
+ * is a supported configuration and so is two pointing at the same one.
+ * Channels are identified by id and by nothing else.
+ *
+ * The cap that used to live here (20) was doing two jobs badly. As a
+ * product limit it was arbitrary; as abuse control it was the wrong
+ * instrument, because the thing worth bounding is how much a tenant can
+ * *send*, not how many rows it can own. That bound is enforced where the
+ * sending happens: the per-channel rate limit in the delivery tick and
+ * the throttle on test deliveries.
+ *
+ * Uncapped is a statement about this application, not about physics.
+ * Capacity still depends on the installation and on what each provider
+ * accepts; `docs/NOTIFICATIONS.md` says so and publishes the measured
+ * numbers rather than a promise.
+ */
 
 export interface ChannelInput {
   name: string;
@@ -58,9 +79,48 @@ export interface ChannelInput {
   secrets: Record<string, string>;
   events: string[];
   enabled: boolean;
+  /**
+   * Monitors this channel is scoped to. Empty means the organization
+   * default: every monitor, plus the events that have no monitor at all.
+   */
+  monitorIds?: string[];
 }
 
-/** What the browser may see: no secrets, only which keys are set. */
+/**
+ * One row of the settings list.
+ *
+ * Deliberately free of anything secret-derived, because building it must
+ * not open a sealed envelope. `destination` is the column written at
+ * save time, not a value computed from credentials on read.
+ */
+export interface ChannelSummary {
+  id: string;
+  name: string;
+  provider: string;
+  destination: string;
+  events: string[];
+  enabled: boolean;
+  /** True when the operator scoped this channel to specific monitors. */
+  scopedToMonitors: boolean;
+  /** How many monitors this channel targets. Zero WITH `scopedToMonitors`
+   * means every target was deleted, so the channel receives nothing. */
+  targetCount: number;
+  /** The most recent delivery on this channel, if there has been one. */
+  lastResult: {
+    state: string;
+    error: string | null;
+    at: Date;
+  } | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/**
+ * The editor's view of ONE channel. This is the only read path that
+ * opens a sealed envelope, and it opens exactly one — the list never
+ * does. Secret values are still withheld; only the key names are
+ * reported, so the editor can show "saved" without ever holding one.
+ */
 export interface ChannelView {
   id: string;
   name: string;
@@ -70,6 +130,8 @@ export interface ChannelView {
   events: string[];
   enabled: boolean;
   destination: string;
+  scopedToMonitors: boolean;
+  monitorIds: string[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -91,44 +153,229 @@ function toStringArray(value: unknown): string[] {
     : [];
 }
 
-function channelView(row: NotificationChannelRow): ChannelView {
-  const config = toStringRecord(row.config);
-  let secretKeys: string[] = [];
-  let destination = "";
-  try {
-    const secrets = openSecrets(row.secrets);
-    secretKeys = Object.keys(secrets);
-    destination =
-      getProvider(row.provider)?.destinationSummary(config, secrets) ?? "";
-  } catch {
-    // Undecryptable secrets (rotated BETTER_AUTH_SECRET). The view
-    // still renders; delivery reports the real error.
-    destination = "credentials need re-entering";
+/**
+ * The redacted destination line, computed from the provider. Called on
+ * WRITE only; the result is stored on the row.
+ */
+function computeDestination(
+  provider: string,
+  config: Record<string, string>,
+  secrets: SecretValues,
+): string {
+  return getProvider(provider)?.destinationSummary(config, secrets) ?? "";
+}
+
+export interface ListChannelsOptions {
+  /** Case-insensitive match over name and destination. */
+  search?: string;
+  provider?: string;
+  /** "enabled" | "disabled"; anything else means both. */
+  status?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface ChannelPage {
+  rows: ChannelSummary[];
+  /** Total matching the filters, for the pager. */
+  total: number;
+  /** Total this organization owns, ignoring filters. */
+  totalUnfiltered: number;
+}
+
+/**
+ * The settings list, filtered and paged in the database.
+ *
+ * Three properties this holds and the old implementation did not: it
+ * never decrypts (the destination is a column), it never fetches the
+ * secret blobs at all (the select names its columns), and it does a
+ * fixed amount of work per page rather than per channel the tenant
+ * owns. Those are what make an uncapped channel count survivable.
+ */
+export async function listChannels(
+  db: DbClient,
+  organizationId: string,
+  options: ListChannelsOptions = {},
+): Promise<ChannelPage> {
+  const limit = Math.min(Math.max(options.limit ?? 50, 1), 200);
+  const offset = Math.max(options.offset ?? 0, 0);
+
+  const filters = [eq(notificationChannels.organizationId, organizationId)];
+  if (options.provider) {
+    filters.push(eq(notificationChannels.provider, options.provider));
   }
+  if (options.status === "enabled" || options.status === "disabled") {
+    filters.push(
+      eq(notificationChannels.enabled, options.status === "enabled"),
+    );
+  }
+  const search = options.search?.trim();
+  if (search) {
+    const term = `%${search.replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
+    filters.push(
+      or(
+        ilike(notificationChannels.name, term),
+        ilike(notificationChannels.destination, term),
+      )!,
+    );
+  }
+  const where = and(...filters);
+
+  const [rows, [counted], [owned]] = await Promise.all([
+    db
+      .select({
+        id: notificationChannels.id,
+        name: notificationChannels.name,
+        provider: notificationChannels.provider,
+        destination: notificationChannels.destination,
+        scopedToMonitors: notificationChannels.scopedToMonitors,
+        events: notificationChannels.events,
+        enabled: notificationChannels.enabled,
+        createdAt: notificationChannels.createdAt,
+        updatedAt: notificationChannels.updatedAt,
+      })
+      .from(notificationChannels)
+      .where(where)
+      .orderBy(notificationChannels.createdAt, notificationChannels.id)
+      .limit(limit)
+      .offset(offset),
+    db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(notificationChannels)
+      .where(where),
+    db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(notificationChannels)
+      .where(eq(notificationChannels.organizationId, organizationId)),
+  ]);
+
+  const ids = rows.map((row) => row.id);
+  const [targets, recent] = await Promise.all([
+    targetCounts(db, ids),
+    lastResults(db, ids),
+  ]);
+
+  return {
+    rows: rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      provider: row.provider,
+      destination: row.destination,
+      scopedToMonitors: row.scopedToMonitors,
+      events: toStringArray(row.events),
+      enabled: row.enabled,
+      targetCount: targets.get(row.id) ?? 0,
+      lastResult: recent.get(row.id) ?? null,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    })),
+    total: counted?.count ?? 0,
+    totalUnfiltered: owned?.count ?? 0,
+  };
+}
+
+/** How many monitors each of these channels targets. One query. */
+async function targetCounts(
+  db: DbClient,
+  channelIds: string[],
+): Promise<Map<string, number>> {
+  if (channelIds.length === 0) return new Map();
+  const rows = await db
+    .select({
+      channelId: notificationChannelMonitors.channelId,
+      count: sql<number>`count(*)::int`,
+    })
+    .from(notificationChannelMonitors)
+    .where(inArray(notificationChannelMonitors.channelId, channelIds))
+    .groupBy(notificationChannelMonitors.channelId);
+  return new Map(rows.map((row) => [row.channelId, row.count]));
+}
+
+/**
+ * The newest outbox row per channel. `distinct on` rather than a
+ * correlated subquery per row, so the cost is one indexed pass however
+ * many channels are on the page.
+ */
+async function lastResults(
+  db: DbClient,
+  channelIds: string[],
+): Promise<Map<string, { state: string; error: string | null; at: Date }>> {
+  if (channelIds.length === 0) return new Map();
+  const { rows } = await db.execute<{
+    channel_id: string;
+    state: string;
+    last_error: string | null;
+    created_at: string;
+  }>(sql`
+    select distinct on (${notificationOutbox.channelId})
+      ${notificationOutbox.channelId} as channel_id,
+      ${notificationOutbox.state} as state,
+      ${notificationOutbox.lastError} as last_error,
+      ${notificationOutbox.createdAt} as created_at
+    from ${notificationOutbox}
+    where ${inArray(notificationOutbox.channelId, channelIds)}
+    order by ${notificationOutbox.channelId}, ${notificationOutbox.createdAt} desc
+  `);
+  return new Map(
+    rows.map((row) => [
+      row.channel_id,
+      {
+        state: row.state,
+        // Already redacted when recorded; sliced so one row cannot
+        // dominate the table.
+        error: row.last_error ? row.last_error.slice(0, 200) : null,
+        // `db.execute` hands back timestamptz as a STRING on this
+        // driver, not a Date. Annotating it Date typechecks and then
+        // fails at render time.
+        at: new Date(row.created_at),
+      },
+    ]),
+  );
+}
+
+/**
+ * One channel, for the editor. The only read path that decrypts, and it
+ * decrypts exactly one row.
+ */
+export async function getChannel(
+  db: DbClient,
+  organizationId: string,
+  id: string,
+): Promise<ChannelView | null> {
+  const row = await db.query.notificationChannels.findFirst({
+    where: and(
+      eq(notificationChannels.id, id),
+      eq(notificationChannels.organizationId, organizationId),
+    ),
+  });
+  if (!row) return null;
+
+  let secretKeys: string[] = [];
+  try {
+    secretKeys = Object.keys(openSecrets(row.secrets));
+  } catch {
+    // Undecryptable (rotated BETTER_AUTH_SECRET). The editor still
+    // opens so the operator can re-enter credentials.
+  }
+  const targets = await db
+    .select({ monitorId: notificationChannelMonitors.monitorId })
+    .from(notificationChannelMonitors)
+    .where(eq(notificationChannelMonitors.channelId, id));
+
   return {
     id: row.id,
     name: row.name,
     provider: row.provider,
-    config,
+    config: toStringRecord(row.config),
     secretKeysSet: secretKeys,
     events: toStringArray(row.events),
     enabled: row.enabled,
-    destination,
+    destination: row.destination,
+    scopedToMonitors: row.scopedToMonitors,
+    monitorIds: targets.map((t) => t.monitorId),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
-}
-
-export async function listChannels(
-  db: DbClient,
-  organizationId: string,
-): Promise<ChannelView[]> {
-  const rows = await db
-    .select()
-    .from(notificationChannels)
-    .where(eq(notificationChannels.organizationId, organizationId))
-    .orderBy(notificationChannels.createdAt);
-  return rows.map(channelView);
 }
 
 /**
@@ -200,22 +447,57 @@ function validateInput(
   return { config, secrets };
 }
 
+/**
+ * Replaces a channel's monitor targeting inside the caller's
+ * transaction. Every id is checked against the actor's organization
+ * first, so a target cannot be smuggled across a tenant boundary by
+ * posting somebody else's monitor id.
+ */
+async function replaceTargets(
+  tx: DbClient,
+  organizationId: string,
+  channelId: string,
+  monitorIds: string[] | undefined,
+): Promise<void> {
+  if (monitorIds === undefined) return;
+  await tx
+    .delete(notificationChannelMonitors)
+    .where(eq(notificationChannelMonitors.channelId, channelId));
+  const wanted = [...new Set(monitorIds)];
+  // The flag and the rows are written together, in the caller's
+  // transaction, because they are one fact: an empty list means "this
+  // channel is a workspace default", and a non-empty one means "scoped,
+  // to these". Nothing later re-derives it from the row count.
+  await tx
+    .update(notificationChannels)
+    .set({ scopedToMonitors: wanted.length > 0 })
+    .where(eq(notificationChannels.id, channelId));
+  if (wanted.length === 0) return;
+
+  const owned = await tx
+    .select({ id: monitors.id })
+    .from(monitors)
+    .where(
+      and(
+        eq(monitors.organizationId, organizationId),
+        inArray(monitors.id, wanted),
+      ),
+    );
+  if (owned.length !== wanted.length) {
+    throw new AppError("A selected monitor does not exist in this workspace.");
+  }
+  await tx
+    .insert(notificationChannelMonitors)
+    .values(wanted.map((monitorId) => ({ channelId, monitorId })));
+}
+
 export async function createChannel(
   db: DbClient,
   actor: Actor,
   input: ChannelInput,
 ): Promise<ChannelView> {
   const { config, secrets } = validateInput(input, {});
-  return db.transaction(async (tx) => {
-    const existing = await tx
-      .select({ id: notificationChannels.id })
-      .from(notificationChannels)
-      .where(eq(notificationChannels.organizationId, actor.organizationId));
-    if (existing.length >= MAX_CHANNELS_PER_ORG) {
-      throw new AppError(
-        `An organization can have at most ${MAX_CHANNELS_PER_ORG} channels.`,
-      );
-    }
+  const id = await db.transaction(async (tx) => {
     const [row] = await tx
       .insert(notificationChannels)
       .values({
@@ -224,21 +506,92 @@ export async function createChannel(
         provider: input.provider,
         config,
         secrets: sealSecrets(secrets),
+        destination: computeDestination(input.provider, config, secrets),
         events: input.events,
         enabled: input.enabled,
       })
-      .returning();
+      .returning({ id: notificationChannels.id });
     if (!row) throw new AppError("Channel creation returned no row.");
+    await replaceTargets(tx, actor.organizationId, row.id, input.monitorIds);
     await writeAudit(tx, {
       organizationId: actor.organizationId,
       actorId: actor.userId,
       action: "notification_channel.created",
       targetType: "notification_channel",
       targetId: row.id,
-      metadata: { provider: input.provider, events: input.events },
+      metadata: {
+        provider: input.provider,
+        events: input.events,
+        monitorTargets: input.monitorIds?.length ?? 0,
+      },
     });
-    return channelView(row);
+    return row.id;
   });
+  const view = await getChannel(db, actor.organizationId, id);
+  if (!view) throw new AppError("Channel disappeared after creation.");
+  return view;
+}
+
+/**
+ * Copies a channel, credentials included, under a new name.
+ *
+ * The point of the feature is a second destination that differs in one
+ * field — the same Slack app posting to a different workspace, the same
+ * SMTP relay with a different recipient list — so the copy carries the
+ * sealed envelope across rather than making the operator re-enter a
+ * credential they cannot read back out of the form.
+ */
+export async function duplicateChannel(
+  db: DbClient,
+  actor: Actor,
+  id: string,
+): Promise<ChannelView> {
+  const current = await requireChannel(db, actor.organizationId, id);
+  const newId = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .insert(notificationChannels)
+      .values({
+        organizationId: actor.organizationId,
+        name: `${current.name} (copy)`.slice(0, 100),
+        provider: current.provider,
+        config: current.config,
+        secrets: current.secrets,
+        destination: current.destination,
+        scopedToMonitors: current.scopedToMonitors,
+        events: current.events,
+        // A copy arrives disabled. Duplicating a live channel would
+        // otherwise double every alert the instant it is saved, before
+        // the operator has changed the one field they meant to change.
+        enabled: false,
+      })
+      .returning({ id: notificationChannels.id });
+    if (!row) throw new AppError("Channel duplication returned no row.");
+
+    const targets = await tx
+      .select({ monitorId: notificationChannelMonitors.monitorId })
+      .from(notificationChannelMonitors)
+      .where(eq(notificationChannelMonitors.channelId, id));
+    if (targets.length > 0) {
+      await tx
+        .insert(notificationChannelMonitors)
+        .values(
+          targets.map((t) => ({ channelId: row.id, monitorId: t.monitorId })),
+        );
+    }
+
+    await writeAudit(tx, {
+      organizationId: actor.organizationId,
+      actorId: actor.userId,
+      action: "notification_channel.duplicated",
+      targetType: "notification_channel",
+      targetId: row.id,
+      metadata: { provider: current.provider, copiedFrom: id },
+    });
+    return row.id;
+  });
+  const view = await getChannel(db, actor.organizationId, newId);
+  if (!view) throw new AppError("Channel disappeared after duplication.");
+  return view;
 }
 
 async function requireChannel(
@@ -276,19 +629,30 @@ export async function updateChannel(
     // Undecryptable stored secrets: the update must supply fresh ones.
   }
   const { config, secrets } = validateInput(input, stored);
-  return db.transaction(async (tx) => {
+  await db.transaction(async (tx) => {
     const [row] = await tx
       .update(notificationChannels)
       .set({
         name: input.name.trim(),
         config,
         secrets: sealSecrets(secrets),
+        destination: computeDestination(current.provider, config, secrets),
         events: input.events,
         enabled: input.enabled,
       })
-      .where(eq(notificationChannels.id, id))
-      .returning();
+      // Scoped to the organization as well as the id. `requireChannel`
+      // already proved ownership, but this is the statement that
+      // actually writes, and a predicate that cannot be satisfied by
+      // another tenant's row is worth more than an earlier check.
+      .where(
+        and(
+          eq(notificationChannels.id, id),
+          eq(notificationChannels.organizationId, actor.organizationId),
+        ),
+      )
+      .returning({ id: notificationChannels.id });
     if (!row) throw new AppError("Channel update returned no row.");
+    await replaceTargets(tx, actor.organizationId, id, input.monitorIds);
     await writeAudit(tx, {
       organizationId: actor.organizationId,
       actorId: actor.userId,
@@ -299,9 +663,50 @@ export async function updateChannel(
         provider: current.provider,
         events: input.events,
         enabled: input.enabled,
+        monitorTargets: input.monitorIds?.length ?? null,
       },
     });
-    return channelView(row);
+  });
+  const view = await getChannel(db, actor.organizationId, id);
+  if (!view) throw new AppError("Channel disappeared after update.");
+  return view;
+}
+
+/**
+ * Enables or disables many channels at once, tenant-scoped in the
+ * predicate. Returns how many rows actually changed.
+ */
+export async function setChannelsEnabled(
+  db: DbClient,
+  actor: Actor,
+  ids: string[],
+  enabled: boolean,
+): Promise<number> {
+  if (ids.length === 0) return 0;
+  return db.transaction(async (tx) => {
+    const rows = await tx
+      .update(notificationChannels)
+      .set({ enabled })
+      .where(
+        and(
+          eq(notificationChannels.organizationId, actor.organizationId),
+          inArray(notificationChannels.id, ids),
+        ),
+      )
+      .returning({ id: notificationChannels.id });
+    if (rows.length > 0) {
+      await writeAudit(tx, {
+        organizationId: actor.organizationId,
+        actorId: actor.userId,
+        action: enabled
+          ? "notification_channel.bulk_enabled"
+          : "notification_channel.bulk_disabled",
+        targetType: "notification_channel",
+        targetId: rows[0]!.id,
+        metadata: { count: rows.length, ids: rows.map((r) => r.id) },
+      });
+    }
+    return rows.length;
   });
 }
 
@@ -312,9 +717,22 @@ export async function deleteChannel(
 ): Promise<void> {
   const current = await requireChannel(db, actor.organizationId, id);
   await db.transaction(async (tx) => {
+    // Tenant-scoped in the delete predicate itself, and inside a
+    // transaction with the audit row, so a channel cannot vanish
+    // without the record of who removed it. Routes in
+    // `notification_channel_monitors` go with it by cascade; outbox
+    // rows do not — `channel_id` is ON DELETE SET NULL, because the
+    // ledger has to outlive the thing it describes. A delivery
+    // in flight for this channel finds no row and is marked
+    // permanently failed rather than retried forever.
     await tx
       .delete(notificationChannels)
-      .where(eq(notificationChannels.id, id));
+      .where(
+        and(
+          eq(notificationChannels.id, id),
+          eq(notificationChannels.organizationId, actor.organizationId),
+        ),
+      );
     await writeAudit(tx, {
       organizationId: actor.organizationId,
       actorId: actor.userId,
@@ -421,6 +839,73 @@ export interface DispatchInput {
   data: Record<string, unknown>;
   /** Check type id, for the expiry carve-out. */
   monitorType?: string | null;
+  /**
+   * The monitor this event is about, if it is about one. Channels
+   * scoped to specific monitors match only when it is theirs; channels
+   * with no scoping match either way. An event with no monitor (a
+   * manually reported incident) reaches organization defaults only,
+   * because a channel that asked for one monitor did not ask for this.
+   */
+  monitorId?: string | null;
+}
+
+/**
+ * The channels one event is addressed to.
+ *
+ * Resolved in a single statement, and every clause of it earns its
+ * place now that the channel count is unbounded:
+ *
+ *  - the event class is matched with jsonb containment against a GIN
+ *    index, not by fetching every channel and filtering in JavaScript;
+ *  - `secrets` is never selected, so a hundred matching channels move
+ *    no credential material across the wire and decrypt nothing;
+ *  - the scope test reads the channel's own `scoped_to_monitors` flag
+ *    and, only for a scoped one, whether it names this monitor. It does
+ *    NOT ask whether the channel has any targeting rows: those cascade
+ *    when a monitor is deleted, and inferring scope from their absence
+ *    made a client's channel silently inherit every other client's
+ *    alerts the moment that client's monitors went. A channel matched
+ *    by both a default and a target still comes back as ONE row, so
+ *    deduplication is a property of the statement rather than a pass
+ *    afterwards.
+ */
+export async function resolveRoutes(
+  db: DbClient,
+  input: Pick<
+    DispatchInput,
+    "organizationId" | "event" | "monitorType" | "monitorId"
+  >,
+): Promise<
+  { id: string; provider: string; destination: string; name: string }[]
+> {
+  const cls = classifyEvent(input.event, input.monitorType);
+  if (cls === "none") return [];
+  const monitorId = input.monitorId ?? null;
+
+  const { rows } = await db.execute<{
+    id: string;
+    provider: string;
+    destination: string;
+    name: string;
+  }>(sql`
+    select c.id, c.provider, c.destination, c.name
+    from ${notificationChannels} c
+    where c.organization_id = ${input.organizationId}
+      and c.enabled = true
+      and c.events @> ${JSON.stringify([cls])}::jsonb
+      and (
+        c.scoped_to_monitors = false
+        or (
+          ${monitorId}::uuid is not null
+          and exists (
+            select 1 from ${notificationChannelMonitors} m
+            where m.channel_id = c.id and m.monitor_id = ${monitorId}::uuid
+          )
+        )
+      )
+    order by c.created_at, c.id
+  `);
+  return rows;
 }
 
 /** How many outbox rows one dispatch produced. */
@@ -428,19 +913,7 @@ export async function dispatchToChannels(
   db: DbClient,
   input: DispatchInput,
 ): Promise<number> {
-  const cls = classifyEvent(input.event, input.monitorType);
-  const channels = await db
-    .select()
-    .from(notificationChannels)
-    .where(
-      and(
-        eq(notificationChannels.organizationId, input.organizationId),
-        eq(notificationChannels.enabled, true),
-      ),
-    );
-  const matching = channels.filter((c) =>
-    toStringArray(c.events).includes(cls),
-  );
+  const matching = await resolveRoutes(db, input);
   if (matching.length === 0) return 0;
 
   const message: ChannelMessage = {
@@ -458,31 +931,30 @@ export async function dispatchToChannels(
     timestamp: new Date().toISOString(),
   };
 
-  let queued = 0;
-  for (const channel of matching) {
-    const provider = getProvider(channel.provider);
-    if (!provider) continue;
-    let destination = channel.name;
-    try {
-      destination = provider.destinationSummary(
-        toStringRecord(channel.config),
-        openSecrets(channel.secrets),
-      );
-    } catch {
-      // Undecryptable secrets still queue; delivery reports the error.
-    }
-    const row = await enqueue(db, {
-      organizationId: input.organizationId,
-      idempotencyKey: `${input.causeKey}:channel:${channel.id}`,
-      channel: "channel",
-      channelId: channel.id,
-      provider: channel.provider,
-      event: input.event,
-      destination,
-      payload: message as unknown as Record<string, unknown>,
-    });
-    if (row) queued++;
-  }
+  // One insert for the whole fan-out rather than one per channel. At
+  // the old cap that was twenty round trips and nobody noticed; with
+  // the cap gone it would be one per channel per event, which is the
+  // shape that turns a busy incident into a database problem.
+  //
+  // `enqueueMany` keeps the same conflict rule as `enqueue`, so a
+  // replayed dispatch still inserts nothing and a channel matched
+  // twice still gets one message. `destination` is the stored column,
+  // so this path opens no envelope either.
+  const queued = await enqueueMany(
+    db,
+    matching
+      .filter((channel) => getProvider(channel.provider))
+      .map((channel) => ({
+        organizationId: input.organizationId,
+        idempotencyKey: `${input.causeKey}:channel:${channel.id}`,
+        channel: "channel" as const,
+        channelId: channel.id,
+        provider: channel.provider,
+        event: input.event,
+        destination: channel.destination || channel.name,
+        payload: message as unknown as Record<string, unknown>,
+      })),
+  );
   return queued;
 }
 
@@ -614,4 +1086,53 @@ export async function sealPlainChannelSecrets(db: DbClient): Promise<number> {
     logger.info({ sealed }, "sealed migrated notification channel secrets");
   }
   return sealed;
+}
+
+/**
+ * Fills the `destination` column on rows written before 0024.
+ *
+ * This is the one place that decrypts in bulk, and it runs once per
+ * upgrade rather than once per page view — which is the whole point of
+ * the column. Migration 0024 could not do it: the key lives in the
+ * process environment, not in the database.
+ *
+ * Until this has run the settings list shows the provider label instead
+ * of a destination, which is why the read path can promise never to
+ * decrypt: the fallback is a missing detail, not a decryption.
+ */
+export async function backfillChannelDestinations(
+  db: DbClient,
+): Promise<number> {
+  const rows = await db
+    .select()
+    .from(notificationChannels)
+    .where(eq(notificationChannels.destination, ""));
+  let filled = 0;
+  for (const row of rows) {
+    try {
+      const destination = computeDestination(
+        row.provider,
+        toStringRecord(row.config),
+        openSecrets(row.secrets),
+      );
+      if (!destination) continue;
+      await db
+        .update(notificationChannels)
+        .set({ destination })
+        .where(eq(notificationChannels.id, row.id));
+      filled++;
+    } catch (error) {
+      // An undecryptable row keeps an empty destination and renders as
+      // its provider label. It cannot deliver either, and the delivery
+      // error is the one that tells the operator why.
+      logger.warn(
+        { channelId: row.id, err: error },
+        "could not backfill channel destination",
+      );
+    }
+  }
+  if (filled > 0) {
+    logger.info({ filled }, "backfilled notification channel destinations");
+  }
+  return filled;
 }

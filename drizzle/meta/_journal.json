@@ -169,6 +169,20 @@
       "when": 1785715746389,
       "tag": "0023_drop_webhook_endpoints",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1785771546996,
+      "tag": "0024_unlimited_channels",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1785774292498,
+      "tag": "0025_scoped_channels",
+      "breakpoints": true
     }
   ]
 }

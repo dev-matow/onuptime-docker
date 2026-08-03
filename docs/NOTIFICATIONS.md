@@ -10,12 +10,32 @@ Not "all alerts are delivered". Nothing that hands a message to a third
 party can promise that, and a product that says it anyway is making a
 promise its transports cannot keep.
 
+## Provider types, and how many channels you may have
+
+Two different numbers, and conflating them is the mistake this section
+exists to prevent.
+
+**Ten provider types ship**, in both editions. That number is a fact
+about the registry, it is generated from the code, and CI fails if any
+page says a different one.
+
+**There is no limit on how many channels you configure.** Forty Slack
+channels, one per client, each pointing at a different workspace, is a
+supported configuration; so are two pointing at the same one. Nothing in
+the application counts them, and no edition or licence changes that.
+Channels are identified by id, and nothing about a channel has to be
+unique - not its provider, endpoint, address or name.
+
+"Unlimited" is a statement about _this application's_ limits, and only
+that. It does not promise infinite throughput and it does not remove
+anyone else's rate limits: Slack, Telegram and the rest still enforce
+theirs, your server still has one CPU, and the measured cost of a large
+fan-out is published below rather than waved away.
+
 ## Channel providers
 
-Since 1.15.0, alerts route through **notification channels**: one
-registry, one delivery pipeline, one routing model. A channel is a
-provider plus its settings, its encrypted credentials and the event
-classes it subscribes to. Ten providers ship, in both editions:
+A channel is a provider plus its settings, its encrypted credentials and
+the event classes it subscribes to. The ten types:
 
 | Provider        | Transport                                | Credential               |
 | --------------- | ---------------------------------------- | ------------------------ |
@@ -47,11 +67,14 @@ Notes that are contracts, not trivia:
 - **SMTP refuses to authenticate without TLS**, and certificate
   verification has no off switch.
 
-## Event classes
+## Routing
 
-A channel subscribes to classes, not raw events, and every event belongs
-to exactly one class - so one logical event can never reach the same
-channel twice:
+A channel is addressed by two independent things, and an event reaches
+it only if both agree.
+
+**Event classes.** A channel subscribes to classes, not raw events, and
+every event belongs to exactly one class - so one logical event can
+never reach the same channel twice:
 
 | Class    | Events                                                            |
 | -------- | ----------------------------------------------------------------- |
@@ -60,6 +83,19 @@ channel twice:
 | expiry   | monitor down/up for TLS/domain-expiry monitors                    |
 | recovery | `recovery.succeeded`, `recovery.failed` (commercial)              |
 | probes   | `probe.partial_failure`, `probe.insufficient_quorum` (commercial) |
+
+**Scope.** A channel with no monitor targeting is an organization
+default: it hears about every monitor, and about the events that belong
+to no monitor at all, such as a manually reported incident. A channel
+targeted at specific monitors hears about those and nothing else. The
+workspace itself is the third scope and needs no setting, because an
+organization _is_ the client boundary and channels already belong to
+one.
+
+A channel matched by more than one rule is still sent one message. That
+is a property of the query, which returns each channel once, and of the
+idempotency key, which is derived from the event and the channel id -
+so even a replayed dispatch inserts nothing the second time.
 
 Expiry is a carve-out of monitor down/up by monitor kind, and it is
 exclusive: an expiring certificate pages the channel that asked for
@@ -84,11 +120,40 @@ sealed by the worker at its first boot after the upgrade.
 
 ## Rate limits
 
-At most 10 messages per channel per delivery tick. Rows beyond that are
-deferred to the next tick without spending a retry attempt. A provider's
-`Retry-After` (header, or Telegram's `retry_after` body parameter) is
-honored: the backoff never schedules earlier than the provider asked,
-capped at an hour. An organization can hold at most 20 channels.
+Three limits, and the one operators care about is the third.
+
+**Per channel:** at most 10 messages per channel per delivery tick. Rows
+beyond that are deferred to the next tick without spending a retry
+attempt.
+
+**Per provider:** a provider's `Retry-After` (header, or Telegram's
+`retry_after` body parameter) is honored, so the backoff never schedules
+earlier than the provider asked, capped at an hour.
+
+**Vigil's own drain, which is the binding one for a large fan-out:** the
+worker claims up to **250 messages per tick** and runs one tick a
+minute, four deliveries in flight at a time. So an event addressed to N
+channels needs about `ceil(N / 250)` ticks: one for up to 250 channels,
+four for a thousand. That number is Vigil's, not a provider's, and it is
+stated here because saying only "it depends on your providers" would be
+untrue: for a fan-out wider than 250, this is the limit you hit first.
+
+A tick whose providers are all slow can take longer than its minute, in
+which case the next one does not start on top of it. The concurrency of
+four is set by the database connection pool, not by throughput: the pool
+is shared with the application, and a drain that took most of it would
+show up as a slow dashboard during a large fan-out.
+
+The scheduled pass is global and ordered by due time, so a very large
+fan-out on one tenant does share the drain with other tenants. A caller
+that needs to bound that runs an organization-scoped pass, which is what
+the inline drain after a dispatch does.
+
+Rate limiting is deliberately the only abuse control here. The channel
+count is not one: bounding how many rows a tenant may own is a poor
+proxy for bounding how much it may send, and it punished the legitimate
+agency with forty clients while doing nothing about a single channel
+pointed at a victim.
 
 Test deliveries skip the outbox, because the operator is watching and
 wants the answer now, so they skip that per-channel limit too. They get
@@ -101,6 +166,42 @@ on the manual-incident paths, and a full batch of rows each allowed a
 ten-second provider timeout would be minutes of synchronous work in
 somebody's request. Anything it does not reach stays queued for the
 worker's minute tick, which is the outbox guarantee doing its job.
+
+## What a large number of channels costs
+
+Measured, not asserted. `npm run bench:channels` writes
+`docs/evidence/channel-bench/channel-fanout.json` and these figures come
+out of it; the numbers below are the median of five runs on one
+organization with a mix of Slack, Telegram and webhook channels.
+
+| Channels | Settings list (one page) | Dispatch planning | Fan-out into the outbox | Worker heap |
+| -------- | ------------------------ | ----------------- | ----------------------- | ----------- |
+| 0        | 0.93 ms                  | 0.18 ms           | 0.2 ms                  | 19.4 MB     |
+| 1        | 1.76 ms                  | 0.42 ms           | 1.24 ms                 | 22.3 MB     |
+| 10       | 1.69 ms                  | 0.55 ms           | 2.22 ms                 | 30.4 MB     |
+| 100      | 1.33 ms                  | 0.49 ms           | 9.68 ms                 | 30.7 MB     |
+| 1,000    | 1.23 ms                  | 1.21 ms           | 87.26 ms                | 49.9 MB     |
+
+What the shape of that table means:
+
+- **Listing is flat.** It costs the same at one channel and at a
+  thousand, because the list is paged in the database and the redacted
+  destination is a stored column. Rendering it decrypts nothing at all,
+  which is the property that made removing the cap safe.
+- **Planning is nearly flat.** One indexed query resolves the routes,
+  with the event class matched by jsonb containment against a GIN index
+  rather than by loading every channel and filtering in the process.
+- **Fan-out grows with the channel count, by construction.** One event
+  addressed to a thousand channels is a thousand outbox rows, because
+  every one of them is a durable promise to deliver. That is the
+  guarantee, not an inefficiency. It is one batched insert, not one per
+  channel.
+
+None of this measures delivery. No provider is contacted anywhere in
+that benchmark. How fast messages actually leave is governed by the
+three limits above: Vigil's 250-per-minute drain first for a wide
+fan-out, then the per-channel limit, then whatever each provider
+enforces.
 
 ## Why there is an outbox
 

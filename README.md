@@ -69,7 +69,7 @@ Worth knowing before you deploy:
   host_ could not reach it. The failure window filters blips, but this is
   not multi-region confirmation and never claims to be. Run Vigil outside
   the blast radius of what it watches.
-- **Ten channel providers plus member email**: Slack, Discord, Microsoft Teams, Telegram, Google Chat, Gotify, ntfy, signed webhooks, SMTP and Resend.
+- **Ten provider types, unlimited channels, plus member email**: Slack, Discord, Microsoft Teams, Telegram, Google Chat, Gotify, ntfy, signed webhooks, SMTP and Resend.
   Uptime Kuma 2.4.0 ships 94 notification
   providers. This is the gap that is still real: if you page through
   PagerDuty, Opsgenie, Telegram or any of the other ninety, Kuma routes

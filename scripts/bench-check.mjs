@@ -97,6 +97,73 @@ for (const name of files) {
   runs.set(n, { name, raw });
 }
 
+/* ── the channel fan-out artefact ──────────────────────────────────── */
+// A third shape, in a third directory, and NOT edition-marked: channels
+// ship in both editions, so both have to be able to prove the numbers.
+//
+// This one exists because "unlimited channels" is a claim, and a claim
+// about scale that nobody can reproduce is marketing. The artefact is
+// what `docs/NOTIFICATIONS.md` quotes; the required fields below are the
+// ones without which a reader could not tell what was measured.
+const CHANNEL_BENCH = join(ROOT, "docs", "evidence", "channel-bench");
+
+const CHANNEL_REQUIRED = [
+  ["sizes", "the measurements themselves"],
+  ["method", "how the run was configured"],
+  ["environment.commit", "which code produced it"],
+  ["environment.node", "runtime"],
+  ["environment.postgres", "the database it wrote to"],
+  ["environment.cpuModel", "the machine"],
+  ["caveats", "what the number does NOT say"],
+];
+
+let channelFiles = [];
+try {
+  channelFiles = readdirSync(CHANNEL_BENCH).filter((name) =>
+    name.endsWith(".json"),
+  );
+} catch {
+  fail(`no channel benchmark directory at ${CHANNEL_BENCH}`);
+}
+if (channelFiles.length === 0)
+  fail(`no channel benchmark artefacts in ${CHANNEL_BENCH}`);
+
+for (const name of channelFiles) {
+  const raw = JSON.parse(readFileSync(join(CHANNEL_BENCH, name), "utf8"));
+  for (const [path, why] of CHANNEL_REQUIRED) {
+    if (pick(raw, path) === undefined || pick(raw, path) === null) {
+      fail(`${name}: missing \`${path}\`: ${why}`);
+    }
+  }
+
+  // The sizes the docs table is built from. A run that skipped the big
+  // one is the run that would have found the problem.
+  const measured = new Set((raw.sizes ?? []).map((row) => row.channels));
+  for (const size of [0, 1, 10, 100, 1000]) {
+    if (!measured.has(size)) {
+      fail(`${name}: no measurement at ${size} channels`);
+    }
+  }
+  for (const row of raw.sizes ?? []) {
+    for (const field of ["listPageMs", "resolveRoutesMs", "dispatchMs"]) {
+      if (typeof row[field] !== "number") {
+        fail(`${name}: ${row.channels} channels has no ${field}`);
+      }
+    }
+  }
+
+  // The two caveats that stop this being read as a delivery-rate claim.
+  // "Unlimited" is about the application's own limits; the providers
+  // still have theirs, and the artefact has to say so.
+  const caveats = (raw.caveats ?? []).join(" ").toLowerCase();
+  if (!caveats.includes("no provider is contacted")) {
+    fail(`${name}: caveats do not say that no provider was contacted`);
+  }
+  if (!caveats.includes("provider's own limits")) {
+    fail(`${name}: caveats do not rule out reading this as throughput`);
+  }
+}
+
 /* ── the probe artefacts ───────────────────────────────────────────── */
 
 /* ── the published table ───────────────────────────────────────────── */

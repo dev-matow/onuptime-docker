@@ -105,6 +105,7 @@ export async function sendIncidentWebhook(
       url: `${env.APP_URL}/incidents/${incident.id}`,
       data: incidentData(incident, monitor),
       monitorType: monitor?.checkType ?? null,
+      monitorId: monitor?.id ?? null,
     });
     if (queued > 0) {
       await drainAfterDispatch(db, incident.organizationId, queued);

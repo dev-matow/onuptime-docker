@@ -6,6 +6,7 @@ import {
   jsonb,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -13,6 +14,7 @@ import {
 } from "drizzle-orm/pg-core";
 
 import { organization } from "./auth";
+import { monitors } from "./monitors";
 
 /**
  * One configured notification destination: a provider id from the
@@ -49,6 +51,39 @@ export const notificationChannels = pgTable(
     config: jsonb().notNull().default({}),
     /** Sealed credential envelope; see module docs on the formats. */
     secrets: text().notNull().default(""),
+    /**
+     * The redacted "where does this go" line, computed at write time.
+     *
+     * Denormalized on purpose. It used to be derived on read by opening
+     * the sealed envelope and asking the provider, which meant listing
+     * N channels cost N AES-GCM decrypts — fine at the old cap of 20,
+     * and the reason the cap looked harmless. With the cap gone, the
+     * settings page for a thousand channels would have decrypted a
+     * thousand credentials to draw a table. Writing it once at save
+     * means the read path never touches a secret at all.
+     *
+     * Empty on rows written before 0024; the worker backfills them at
+     * boot and the list shows the provider label until it does.
+     */
+    destination: text().notNull().default(""),
+    /**
+     * Whether this channel is scoped to specific monitors.
+     *
+     * Stored rather than inferred from "does it have any rows in
+     * notification_channel_monitors", and the difference is a real bug
+     * this column exists to have fixed. Those rows cascade when a
+     * monitor is deleted, so a channel scoped to one client's monitors
+     * had its last row removed by an unrelated admin action and, under
+     * the inferred rule, silently became an organization default -
+     * that client's Slack then received every other client's alerts.
+     * An alert audience must never widen because something else was
+     * deleted.
+     *
+     * With the flag, the same event leaves the channel matching
+     * nothing, which is visible in the list and fixable, rather than
+     * wrong and quiet.
+     */
+    scopedToMonitors: boolean().notNull().default(false),
     /** Event class ids this channel receives (see EVENT_CLASSES). */
     events: jsonb().notNull().default([]),
     enabled: boolean().notNull().default(true),
@@ -58,7 +93,60 @@ export const notificationChannels = pgTable(
       .defaultNow()
       .$onUpdate(() => new Date()),
   },
-  (t) => [index().on(t.organizationId)],
+  (t) => [
+    // The dispatch predicate starts here: one tenant's channels.
+    //
+    // There is deliberately NO index on `events`. A GIN index over it
+    // was added with this feature and then measured, which is the only
+    // reason this comment can say anything: on the shape this product
+    // actually has - many organizations owning a few channels each -
+    // it made routing SLOWER (3.99 ms against 1.11 ms at 500 tenants),
+    // because the planner bitmap-ands a whole-index GIN scan across
+    // every tenant against this one, reintroducing the cost per
+    // channel that the index was supposed to remove. It wins only when
+    // a single organization owns a very large number of channels, and
+    // it charges write amplification on every save either way.
+    //
+    // A tenant owns few channels, so filtering the class in the heap
+    // after this index has narrowed to the tenant is cheap.
+    index().on(t.organizationId),
+  ],
+);
+
+/**
+ * Which monitors a channel is scoped to. Read together with
+ * `notification_channels.scoped_to_monitors`, which says whether the
+ * scoping is meant at all: no rows and the flag false is a workspace
+ * default, no rows and the flag TRUE is a channel whose monitors have
+ * all been deleted and which therefore receives nothing.
+ *
+ * A join table rather than a column on either side because the relation
+ * is genuinely many-to-many: one channel can watch several monitors, and
+ * one monitor can notify several channels. Both foreign keys cascade, so
+ * deleting a monitor or a channel cannot leave a route pointing at
+ * nothing — the dangling-route case is prevented by the database rather
+ * than by remembering to clean up.
+ *
+ * The other two scopes in the product need no storage. An organization
+ * IS the workspace/client boundary (the agency edition gives each client
+ * its own organization), and channels are already organization-scoped;
+ * event classes live on the channel row.
+ */
+export const notificationChannelMonitors = pgTable(
+  "notification_channel_monitors",
+  {
+    channelId: uuid()
+      .notNull()
+      .references(() => notificationChannels.id, { onDelete: "cascade" }),
+    monitorId: uuid()
+      .notNull()
+      .references(() => monitors.id, { onDelete: "cascade" }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.channelId, t.monitorId] }),
+    // The dispatch side asks "which channels target this monitor".
+    index("notification_channel_monitors_monitor_idx").on(t.monitorId),
+  ],
 );
 
 /**
@@ -179,5 +267,12 @@ export const notificationOutbox = pgTable(
       .on(t.nextAttemptAt)
       .where(sql`${t.state} in ('queued', 'sending')`),
     index().on(t.organizationId, t.createdAt.desc()),
+    // "What happened last on this channel", which the settings list
+    // shows per row. Without it that column is a sort of the tenant's
+    // whole delivery history once per page render.
+    index("notification_outbox_channel_recent_idx").on(
+      t.channelId,
+      t.createdAt.desc(),
+    ),
   ],
 );

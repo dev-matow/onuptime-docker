@@ -15,7 +15,6 @@ import {
   sealPlainChannelSecrets,
   testChannel,
   updateChannel,
-  MAX_CHANNELS_PER_ORG,
 } from "@/modules/notifications/channel-service";
 import { openSecrets } from "@/modules/notifications/secretbox";
 import { sendIncidentWebhook } from "@/modules/notifications/webhook-service";
@@ -141,14 +140,41 @@ describe("channel CRUD", () => {
     ).rejects.toThrow(/unknown event class/i);
   });
 
-  it("bounds channels per organization", async () => {
+  it("imposes no cap, and no uniqueness on provider, endpoint or name", async () => {
+    // The inverse of the assertion this test used to make. 60 channels
+    // is past three times the old limit of 20; 40 of them are the same
+    // provider and 20 of those are byte-identical in name AND endpoint,
+    // which is the configuration a uniqueness constraint would reject.
     const actor = await createTestOrg();
-    for (let i = 0; i < MAX_CHANNELS_PER_ORG; i++) {
-      await createChannel(db, actor, slackInput({ name: `c${i}` }));
+    for (let i = 0; i < 20; i++) {
+      await createChannel(
+        db,
+        actor,
+        slackInput({ name: "Slack - Operations" }),
+      );
     }
-    await expect(
-      createChannel(db, actor, slackInput({ name: "one too many" })),
-    ).rejects.toThrow(/at most/i);
+    for (let i = 0; i < 20; i++) {
+      await createChannel(
+        db,
+        actor,
+        slackInput({ name: `Slack - Client ${i}` }),
+      );
+    }
+    for (let i = 0; i < 20; i++) {
+      await createChannel(db, actor, {
+        name: "Telegram - On-call",
+        provider: "telegram",
+        config: { chatId: "-1001234567890" },
+        secrets: { botToken: "1234567890:AAfake-token-abcdefghijklmnopqrs" },
+        events: ["incident"],
+        enabled: true,
+      });
+    }
+    const page = await listChannels(db, actor.organizationId, { limit: 200 });
+    expect(page.totalUnfiltered).toBe(60);
+    // All 60 are distinct rows with distinct ids: identity is the id and
+    // nothing else.
+    expect(new Set(page.rows.map((r) => r.id)).size).toBe(60);
   });
 
   it("scopes reads, updates and deletes to the tenant", async () => {
@@ -162,7 +188,9 @@ describe("channel CRUD", () => {
     await expect(deleteChannel(db, mallory, channel.id)).rejects.toThrow(
       /not found/i,
     );
-    expect(await listChannels(db, mallory.organizationId)).toHaveLength(0);
+    expect(
+      (await listChannels(db, mallory.organizationId)).totalUnfiltered,
+    ).toBe(0);
   });
 });
 

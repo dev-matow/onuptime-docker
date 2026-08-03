@@ -656,7 +656,8 @@ describe("uptime excludes observations that measured nothing", () => {
       .where(eq(monitorChecks.monitorId, monitor.id));
 
     const list = await listMonitors(db, actor.organizationId);
-    expect(list[0]?.uptime24hPct).toBe(50);
+    // Same open final segment, same tolerance, same reasoning.
+    expect(list[0]?.uptime24hPct).toBeCloseTo(50, 1);
   });
 });
 
@@ -705,7 +706,15 @@ describe("listMonitors", () => {
     const list = await listMonitors(db, actor.organizationId);
     expect(list).toHaveLength(1);
     expect(list[0]?.id).toBe(monitor.id);
-    expect(list[0]?.uptime24hPct).toBe(75);
+    // Close-to, not exactly, and the reason is the methodology rather
+    // than sloppiness: the last sample's segment is open and runs to
+    // `now()`, so every millisecond between seeding these rows and
+    // running the query lengthens the DOWN segment. On a quiet machine
+    // that rounds to 75.00 and on a loaded CI runner it reported 74.99,
+    // which is the test measuring the runner instead of the property.
+    // A count-based regression would read 75 vs 50 vs 100, nowhere near
+    // this tolerance, so the pin still catches what it exists to catch.
+    expect(list[0]?.uptime24hPct).toBeCloseTo(75, 1);
     expect(list[0]?.avgResponseMs).toBe(100);
   });
 

@@ -7,6 +7,7 @@ import {
   deferRow,
   MAX_ATTEMPTS,
   recordOutcome,
+  renewLease,
   type DeliveryOutcome,
   type OutboxRow,
 } from "@/modules/notifications/outbox";
@@ -32,10 +33,44 @@ import type { ProviderNet } from "@/modules/notifications/providers";
  *
  * Bounded rather than "everything due": an unbounded drain after a long
  * provider outage would open a thousand concurrent HTTP requests and
- * turn the recovery into a second outage. Sequential within the batch
- * for the same reason — one slow provider must not be amplified.
+ * turn the recovery into a second outage.
+ *
+ * The number went up with the channel cap. At 25 a minute, an event
+ * fanned out to a thousand channels finished paging forty minutes after
+ * the incident, and one tenant's fan-out sat in front of every other
+ * tenant's alerts, because the scheduled pass is global and ordered by
+ * due time. That was survivable when an organization could own twenty
+ * channels and is not now that it can own any number.
+ *
+ * 250 with a concurrency of 8 rather than 250 sequential: the batch is
+ * the unit of work, and the bound that matters for a provider is the
+ * per-channel limit below, not the size of the batch. `docs/
+ * NOTIFICATIONS.md` publishes the resulting rate rather than implying
+ * the only limits are the providers' own.
  */
-const BATCH_SIZE = 25;
+const BATCH_SIZE = 250;
+
+/**
+ * How many deliveries are in flight at once within a batch.
+ *
+ * Sequential was the old shape and it made the batch size a latency
+ * multiplier: 25 rows against a provider taking its full timeout was
+ * four minutes of wall clock for 25 messages.
+ *
+ * Four, and the number is tied to the connection pool rather than
+ * chosen for throughput. Each delivery takes a connection three times
+ * (renew the lease, load the channel, record the outcome) and the pool
+ * is `max: 10`, shared with the web application and every other worker
+ * job. At eight this loop could hold most of the pool at once; the
+ * first full-suite run after raising it produced an unrelated test
+ * failing to get a connection, which is the same starvation an operator
+ * would see as a slow dashboard during a large fan-out. Four leaves
+ * more than half the pool for everything else and still drains a batch
+ * four times faster than sequentially.
+ *
+ * Raise this only together with the pool.
+ */
+const DELIVERY_CONCURRENCY = 4;
 
 /**
  * At most this many messages per configured channel per tick. A
@@ -142,7 +177,11 @@ export async function runNotificationDelivery(
     deferred: 0,
   };
 
+  // The per-channel limit is decided up front, over the whole batch,
+  // because it is a property of the batch and not of whichever order
+  // the workers happen to pick rows up in.
   const perChannel = new Map<string, number>();
+  const sendable: OutboxRow[] = [];
   for (const row of claimed) {
     if (row.channelId) {
       const sent = perChannel.get(row.channelId) ?? 0;
@@ -153,9 +192,16 @@ export async function runNotificationDelivery(
       }
       perChannel.set(row.channelId, sent + 1);
     }
+    sendable.push(row);
+  }
 
+  async function deliverOne(row: OutboxRow): Promise<void> {
     let outcome: DeliveryOutcome;
     try {
+      // Restart the lease clock at the send, so a row waiting behind
+      // seven slow ones does not inherit what is left of a lease taken
+      // when the batch was claimed.
+      await renewLease(db, row.id);
       outcome = await deliver(db, row, send, options.net ?? {});
     } catch (error) {
       // A transport that throws instead of returning an outcome is a
@@ -171,7 +217,7 @@ export async function runNotificationDelivery(
 
     if (outcome.status === "delivered") {
       result.delivered++;
-      continue;
+      return;
     }
 
     // Mirrors `recordOutcome`'s rule: a retryable failure that has used
@@ -194,6 +240,23 @@ export async function runNotificationDelivery(
       "notification delivery attempt failed",
     );
   }
+
+  // A fixed pool rather than `Promise.all` over the batch: the point of
+  // the bound is that a recovering provider sees a civil number of
+  // connections, and `all` over 250 rows is exactly the flood the batch
+  // size exists to prevent.
+  const queue = [...sendable];
+  const workers = Array.from(
+    { length: Math.min(DELIVERY_CONCURRENCY, queue.length) },
+    async () => {
+      for (;;) {
+        const row = queue.shift();
+        if (!row) return;
+        await deliverOne(row);
+      }
+    },
+  );
+  await Promise.all(workers);
 
   return result;
 }

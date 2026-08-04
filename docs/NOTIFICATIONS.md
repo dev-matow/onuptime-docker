@@ -409,11 +409,61 @@ indistinguishable at every call site. `incidents.notified_at` had already
 been stamped by then. An operator asking "was I paged?" could not be
 answered from the database.
 
-Now the decision and the delivery are two separate durable facts.
-`notification_outbox` rows are written **in the same transaction as the
-thing that caused them**, the incident opening, the escalation step
-firing. So the intent commits with its cause or not at all, and a worker
-that dies between them comes back to find the message still queued.
+Now the decision and the delivery are two separate durable facts, and
+they are joined by a third: the **dispatch intent**.
+
+The sentence "rows are written in the same transaction as the thing that
+caused them" was in this document from 1.13.0 and, until 1.18.2, no
+caller did it. Every incident path committed the state change and then,
+afterwards, worked out who to tell: resolve the channel routes, fetch the
+members, walk the status pages, insert a row per recipient. All of that
+is work against a database that can refuse, in a process that can be
+killed, and none of it was covered by the commit that made the incident
+real.
+
+The worst case was not "a message was late". `claimIncidentNotification`
+stamps `notified_at` and is exactly-once by design; it committed BEFORE
+the notifications were assembled. A worker killed in between left an
+incident that was open, marked notified, and silent - and because the
+repair path (`findUnhandledAutoIncident`) requires `notified_at is
+null`, nothing would ever notice. Nobody was paged for that outage, by
+anything, ever.
+
+A transition now writes exactly one extra row inside its own
+transaction: `notification_intents`, holding the rendered messages it
+owes under a key derived from the transition. A worker expands that
+intent into outbox rows afterwards, and expansion is idempotent because
+every row it writes carries a key derived from the cause. So:
+
+| The process dies…                  | What is left                                                                 |
+| ---------------------------------- | ---------------------------------------------------------------------------- |
+| before the transition commits      | nothing at all: no incident, no intent, no messages                          |
+| after it commits, before expansion | a pending intent; the next tick expands it                                   |
+| part-way through expansion         | some messages and a pending intent; re-expansion writes only what is missing |
+
+The payload is **rendered at the transition**, not read back at
+expansion. An expansion that re-read the incident would describe it as it
+is by then, so a page delivered after the outage ended would carry
+`"status": "resolved"` in a message whose entire job is to say the
+monitor is down.
+
+A pending intent is counted in the queue-health card along with queued
+messages, because to anyone waiting to be told they are the same thing.
+
+### Ordering within one transition
+
+One transition can produce several messages: `monitor.down` and
+`incident.opened`, the responder email, one mail per status-page
+subscriber. They are inserted in one transaction with one
+`next_attempt_at`, and the fair ranking breaks that tie on `id`, which
+`uuidv7()` makes monotonic, so they are _claimed_ in the order they were
+written.
+
+**Delivery order is not guaranteed and the product does not claim it.**
+A batch is handed to several workers at once, and any message that
+retries lands behind messages decided later. Nothing depends on the
+order: every message states its own event rather than implying it from
+what arrived before.
 
 ## The six states
 
@@ -523,6 +573,7 @@ because they are useful and are NOT that:
 | Signed webhook                    | Not collapsed here. A retry re-sends identical bytes, so a receiver that dedupes on the body can                                                                               |
 | Other chat, push and SMS          | None offered by the provider; the crash-retry window is the only duplicate source                                                                                              |
 | Apprise bridge                    | None. What your Apprise server does with a repeat is your server's business                                                                                                    |
+| Escalation SMS and voice          | **Not** collapsed by Twilio. The outbox key is `escalation:<incident>:<step>:<recipient>`, so a re-run of the ladder job enqueues nothing; only a crash-retry can repeat one   |
 | Log transport                     | Not applicable; it writes to the log                                                                                                                                           |
 
 So: **at most one message per logical notification where the provider
@@ -641,6 +692,36 @@ outbox promised to deliver. The sweep is bounded (5,000 a pass) so a
 first run on a long-lived installation converges over a few nights
 rather than holding locks for minutes, and it logs whether there is
 more to do.
+
+## Status-page subscriber mail
+
+Subscriber mail goes through the outbox like everything else, and until
+1.18.2 it was the one path that did not: a `Promise.allSettled` over a
+transport that could not reject, with no key, no retry, no attempt
+evidence, no dead letter and no ledger entry, for the one audience in
+this product that is not staff.
+
+Two things about a queued subscriber message are deliberately different
+from every other row in the table.
+
+**The message is rendered at delivery, not at enqueue.** The unsubscribe
+link is a bearer token that never expires, and a queued row is kept for
+the retention period, rendered in the operator's delivery history, and
+present in every backup. The row stores the page and the subscriber id;
+the link is minted when the message is sent, so it also honours a
+`BETTER_AUTH_SECRET` rotation instead of shipping a signature that will
+no longer verify.
+
+**Consent is re-checked at delivery.** Unsubscribing DELETEs the
+subscriber row. That window was milliseconds when this was a direct
+send; through a queue it is up to the retry horizon. A message whose
+subscriber is gone is recorded as `failed` with "The subscriber
+unsubscribed before this could be delivered", not delivered anyway.
+
+`destination` holds a masked address (`a****@example.com`) rather than
+the real one. Member emails are addressed to staff of the organization
+reading the ledger; a status-page subscriber gave an address to a public
+page, not to an operator console.
 
 ## What `notified_at` means now
 

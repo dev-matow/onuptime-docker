@@ -6,6 +6,71 @@ free edition; entries for commercial-only features live in the other
 repository, because they are not in this one and listing them here would
 describe software you do not have.
 
+## 1.18.2 — 2026-08-04
+
+An incident transition and the record that its consequences are owed now
+commit together. Everything below follows from that one change.
+
+### Fixed
+
+- **A worker that died after claiming an incident's notification left it
+  open, marked notified, and silent - permanently.** The claim is
+  exactly-once by design and committed on its own; the notifications
+  were assembled afterwards, and a process killed in that tail had
+  already spent the claim. The repair path added in 1.18.1 requires an
+  unspent claim, so nothing could ever page for that outage.
+  Reproduced against the live schema before it was changed. The claim
+  and a durable dispatch intent now commit in one transaction.
+- **The all-clear could be lost the same way, and worse.** Every repair
+  predicate in the incident module reads `status <> 'resolved'`, so a
+  resolved incident is invisible to all of them: subscribers told an
+  outage had started were never told it ended, and nothing would
+  notice. The resolve now writes what it owes inside the transaction
+  that closes the incident.
+- **Two operators posting updates during one outage produced one
+  broadcast.** The key identifying the transition was read from the
+  timeline AFTER the commit, so both callers computed the same one and
+  the outbox dropped the second. Reproduced on two connections. It is
+  now the id of the row the transaction itself inserted.
+- **Deleting a monitor mid-outage told nobody.** 1.18.1 closed the
+  orphaned incident; it announced nothing, so status-page subscribers
+  were left believing the outage was live, permanently.
+- **An operator resolving an incident by hand sent no all-clear to the
+  people who had been paged.** Only the automatic path sent one.
+- **`savePostmortem` wrote by id alone**, the one statement in the
+  incident module without a tenant predicate.
+
+### Changed
+
+- **Status-page subscriber emails go through the outbox.** They were the
+  last direct transport in the product: no key, no retry, no attempt
+  evidence, no dead letter, no ledger entry, for the one audience that
+  is not staff. One row per (page, subscriber), so one failure cannot
+  affect another. The message is rendered at DELIVERY rather than at
+  enqueue, because the unsubscribe link is a bearer token that never
+  expires and a queued row is kept for the retention period, shown in
+  the operator UI and present in every backup. Unsubscribing between the
+  incident and the send is now honoured; the address is masked in the
+  ledger.
+- **Resolved is terminal at the database.** A `BEFORE UPDATE` trigger
+  refuses to move a resolved incident's status or resolution time. It
+  freezes those two columns only: a blanket rule would break monitor
+  deletion, because `monitor_id` is `ON DELETE SET NULL` and a
+  referential SET NULL is an UPDATE that fires row triggers.
+- The queue-health card counts pending dispatch intents with queued
+  messages. A queue stuck at the expansion step used to read as empty.
+
+### Migrations
+
+`0027` adds `notification_intents`, `incidents.status_revision` and the
+terminality trigger. `0028` adds two outbox channel values. Both are
+additive and safe to apply to a live 1.18.1 database.
+
+Upgrading fixes the windows; it does not reach back through them. An
+incident that was already claimed-and-lost on 1.18.1 has `notified_at`
+spent and no intent, and nothing can tell that apart from one that was
+genuinely notified, so it stays un-paged.
+
 ## 1.18.1 — 2026-08-04
 
 A flaky test turned out to be hiding six real ones.

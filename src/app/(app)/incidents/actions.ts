@@ -9,7 +9,6 @@ import {
   toActionError,
   type ActionResult,
 } from "@/lib/action-result";
-import { logger } from "@/lib/logger";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { requirePermission } from "@/lib/session";
 import { draftPostmortem, suggestStatusUpdate } from "@/modules/ai/incident-ai";
@@ -29,65 +28,32 @@ import {
   postIncidentUpdate,
   savePostmortem,
 } from "@/modules/incidents/service";
-import { sendIncidentWebhook } from "@/modules/notifications/webhook-service";
-import { notifyStatusPageSubscribers } from "@/modules/notifications/subscriber-emails";
-import type { WebhookEvent } from "@/modules/notifications/webhook";
+import { dispatchIntentsNow } from "@/modules/notifications/flush";
 
 /** Cost guard: 10 AI generations per organization per hour. */
 const AI_RATE_LIMIT = { limit: 10, windowMs: 60 * 60 * 1000 };
 
 /**
- * Fires the org webhook after a manual incident mutation has already
- * committed. Isolated in try/catch so a webhook problem can never turn a
- * successful action into a failed one.
+ * Nudges this organization's committed dispatch intents out of the door
+ * without waiting for the worker's minute tick.
+ *
+ * This file used to build the notification itself, after the mutation
+ * had committed: re-read the incident, work out the transition key from
+ * the newest timeline entry, resolve the channels, mail the subscribers.
+ * Two things were wrong with that and only one of them was the crash
+ * window. The transition key was read AFTER the commit, so two operators
+ * posting updates at the same moment both saw the same newest entry,
+ * built the same key, and the outbox's unique index dropped one of them
+ * — two updates during an outage, one broadcast, carrying the first
+ * one's text under a key naming the second one's event. Reproduced on
+ * two connections before it was moved.
+ *
+ * The service layer now writes the intent inside the transaction that
+ * made the change, where the id of the row it just inserted is a fact
+ * rather than a guess. All that is left out here is speed.
  */
-const SUBSCRIBER_KIND: Record<
-  WebhookEvent,
-  "opened" | "updated" | "resolved" | null
-> = {
-  "incident.opened": "opened",
-  "incident.updated": "updated",
-  "incident.resolved": "resolved",
-  "monitor.down": null,
-  "monitor.up": null,
-  "webhook.test": null,
-  "recovery.execute": null,
-  "recovery.test": null,
-};
-
-async function dispatchIncidentWebhook(
-  organizationId: string,
-  incidentId: string,
-  event: WebhookEvent,
-): Promise<void> {
-  try {
-    const detail = await getIncidentDetail(db, organizationId, incidentId);
-    // The newest timeline entry identifies this transition, so a second
-    // update on the same incident is a second notification rather than
-    // one the outbox's idempotency key silently swallows. The timeline
-    // is ordered newest-first by `getIncidentDetail`.
-    const transitionKey =
-      event === "incident.updated" ? detail.timeline[0]?.id : undefined;
-    await sendIncidentWebhook(db, {
-      event,
-      incident: detail.incident,
-      monitor: detail.monitor ?? undefined,
-      ...(transitionKey ? { transitionKey } : {}),
-    });
-    // Status-page subscribers hear about the same public lifecycle events.
-    const kind = SUBSCRIBER_KIND[event];
-    if (kind) {
-      await notifyStatusPageSubscribers(db, {
-        incident: detail.incident,
-        kind,
-      });
-    }
-  } catch (error) {
-    logger.warn(
-      { err: error, incidentId, event },
-      "incident webhook dispatch failed",
-    );
-  }
+async function flushIncidentDispatch(organizationId: string): Promise<void> {
+  await dispatchIntentsNow(db, organizationId);
 }
 
 export async function createIncidentAction(
@@ -101,11 +67,7 @@ export async function createIncidentAction(
     }
     const incident = await createIncident(db, ctx, parsed.data);
     revalidatePath("/incidents");
-    await dispatchIncidentWebhook(
-      ctx.organizationId,
-      incident.id,
-      "incident.opened",
-    );
+    await flushIncidentDispatch(ctx.organizationId);
     return actionOk({ id: incident.id });
   } catch (error) {
     return toActionError(error);
@@ -128,13 +90,7 @@ export async function changeIncidentStatusAction(
     );
     await changeIncidentStatus(db, ctx, incidentId, parsed.data);
     revalidateIncident(incidentId);
-    await dispatchIncidentWebhook(
-      ctx.organizationId,
-      incidentId,
-      parsed.data.status === "resolved"
-        ? "incident.resolved"
-        : "incident.updated",
-    );
+    await flushIncidentDispatch(ctx.organizationId);
     return actionOk(undefined);
   } catch (error) {
     return toActionError(error);
@@ -172,14 +128,10 @@ export async function postIncidentUpdateAction(
       parsed.data.internal,
     );
     revalidateIncident(incidentId);
-    // Internal notes are operator-only — they don't broadcast.
-    if (!parsed.data.internal) {
-      await dispatchIncidentWebhook(
-        ctx.organizationId,
-        incidentId,
-        "incident.updated",
-      );
-    }
+    // Whether an internal note broadcasts is decided inside the
+    // transaction that writes it, not here: "this note is private" and
+    // "nothing was queued about it" have to be the same commit.
+    await flushIncidentDispatch(ctx.organizationId);
     return actionOk(undefined);
   } catch (error) {
     return toActionError(error);
@@ -198,11 +150,7 @@ export async function changeIncidentSeverityAction(
     }
     await changeIncidentSeverity(db, ctx, incidentId, parsed.data.severity);
     revalidateIncident(incidentId);
-    await dispatchIncidentWebhook(
-      ctx.organizationId,
-      incidentId,
-      "incident.updated",
-    );
+    await flushIncidentDispatch(ctx.organizationId);
     return actionOk(undefined);
   } catch (error) {
     return toActionError(error);

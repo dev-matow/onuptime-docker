@@ -12,12 +12,12 @@ import {
   resolveMonitorIncidents,
   type Incident,
 } from "@/modules/incidents/service";
+import { dispatchIntentsNow } from "@/modules/notifications/flush";
 import {
-  notifyIncidentOpened,
-  notifyIncidentResolved,
-} from "@/modules/notifications/incident-emails";
-import { notifyStatusPageSubscribers } from "@/modules/notifications/subscriber-emails";
-import { sendIncidentWebhook } from "@/modules/notifications/webhook-service";
+  openedIntent,
+  recordDispatchIntent,
+} from "@/modules/notifications/intents";
+import { describeMonitorTarget } from "@/modules/monitors/spec";
 
 import type { CheckResult } from "./check";
 import { evaluateMonitor } from "./evaluate";
@@ -89,30 +89,60 @@ function describeDelay(seconds: number): string {
 }
 
 /**
- * Webhooks, subscribers and the human page for a newly opened monitor
- * incident. Callers must hold the `notifiedAt` claim
- * (claimIncidentNotification) so this fires exactly once per incident.
+ * Claims the right to page for a newly opened incident and, in the same
+ * transaction, records what that page owes: both channel events, the
+ * status-page audience and the responder email.
+ *
+ * The claim and the consequences are one commit. They used to be two,
+ * and the order made the failure permanent: `notified_at` was spent
+ * first, then the notifications were assembled in a second transaction
+ * that could die — and once the claim is spent, `findUnhandledAutoIncident`
+ * can no longer see the incident, so nothing repairs it. An outage went
+ * completely unannounced with every marker saying it had been handled.
+ *
+ * Returns the claimed incident, or null if somebody else claimed it
+ * first — the open path, recovery exhaustion and the escalation failsafe
+ * all race here and exactly one wins.
  *
  * `pagedElsewhere` is how an edition takes over reaching a person — an
  * on-call ladder scheduled by an incident handler pages on its own
  * timetable, and the responder email must not also go out. Default false
  * is the safe direction: when in doubt, someone is emailed.
  */
-export async function sendOpenedNotifications(
+export async function claimOpenedNotifications(
   incident: Incident,
   monitor: Monitor,
   pagedElsewhere = false,
-): Promise<void> {
-  await sendIncidentWebhook(db, { event: "monitor.down", incident, monitor });
-  await sendIncidentWebhook(db, {
-    event: "incident.opened",
-    incident,
-    monitor,
-  });
-  await notifyStatusPageSubscribers(db, { incident, kind: "opened" });
-  if (!pagedElsewhere) {
-    await notifyIncidentOpened(db, incident, monitor);
-  }
+): Promise<Incident | null> {
+  const claimed = await claimIncidentNotification(
+    db,
+    incident.id,
+    async (tx, row) => {
+      await recordDispatchIntent(tx, {
+        organizationId: monitor.organizationId,
+        causeKey: `incident:${row.id}:incident.opened`,
+        kind: "incident",
+        incidentId: row.id,
+        payload: openedIntent({
+          incident: row,
+          monitor: {
+            id: monitor.id,
+            name: monitor.name,
+            url: monitor.url,
+            currentStatus: monitor.currentStatus,
+            checkType: monitor.checkType,
+            failureWindowSeconds: monitor.failureWindowSeconds,
+          },
+          monitorTarget: describeMonitorTarget(monitor),
+          ...(pagedElsewhere ? { pagedElsewhere } : {}),
+        }),
+      });
+    },
+  );
+  // Best-effort freshness only. Everything owed is already committed, so
+  // if this dies with the process the worker's next tick expands it.
+  if (claimed) await dispatchIntentsNow(db, monitor.organizationId);
+  return claimed;
 }
 
 export async function applyOutcome(
@@ -194,16 +224,14 @@ export async function applyOutcome(
         // decides. Two workers reaching here for one incident - the one
         // that opened it and one repairing after a crash - both attempt
         // it, and only the one whose UPDATE matched `notified_at is
-        // null` pages. Sending before claiming, which is what this did,
-        // meant the repair path could page a second time.
-        const claimed = await claimIncidentNotification(db, incident.id);
-        if (claimed) {
-          await sendOpenedNotifications(
-            incident,
-            updated,
-            scheduled.pagesAHuman,
-          );
-        }
+        // null` pages. The claim and what it owes now commit together,
+        // so losing the race and losing the process have the same
+        // outcome: nothing half-done.
+        await claimOpenedNotifications(
+          incident,
+          updated,
+          scheduled.pagesAHuman,
+        );
       }
 
       log.info(
@@ -217,27 +245,20 @@ export async function applyOutcome(
       );
     }
   } else if (reconciliation.resolveIncidents) {
+    // The all-clear is written inside `resolveMonitorIncidents`, in the
+    // transaction that closes the incident — this loop used to send it
+    // afterwards in four more transactions, and a crash between them
+    // lost it with nothing able to notice. All that is left out here is
+    // the log line and a nudge to expand promptly.
     const resolved = await resolveMonitorIncidents(db, updated);
     for (const incident of resolved) {
       log.info(
         { monitorId: monitor.id, incidentId: incident.id },
         "incident auto-resolved",
       );
-      // An incident nobody was alerted about (quiet recovery) resolves
-      // quietly too — the timeline and recovery record still tell all.
-      if (!incident.notifiedAt) continue;
-      await notifyIncidentResolved(db, incident, updated);
-      await sendIncidentWebhook(db, {
-        event: "monitor.up",
-        incident,
-        monitor: updated,
-      });
-      await sendIncidentWebhook(db, {
-        event: "incident.resolved",
-        incident,
-        monitor: updated,
-      });
-      await notifyStatusPageSubscribers(db, { incident, kind: "resolved" });
+    }
+    if (resolved.length > 0) {
+      await dispatchIntentsNow(db, updated.organizationId);
     }
   }
 

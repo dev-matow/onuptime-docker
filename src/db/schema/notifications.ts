@@ -15,6 +15,7 @@ import {
 } from "drizzle-orm/pg-core";
 
 import { organization } from "./auth";
+import { incidents } from "./incidents";
 import { monitors } from "./monitors";
 
 /**
@@ -216,6 +217,14 @@ export const notificationChannel = pgEnum("notification_channel", [
   // one and the provider registry owns delivery. "webhook" remains only
   // for rows written before 0022.
   "channel",
+  // The escalation ladder's own transports. They used to be direct
+  // calls with no key, no retry and no record - so a job pg-boss
+  // re-ran after its expiry placed a second phone call to the same
+  // on-call engineer, and a Twilio blip meant nobody was called at all.
+  // Only the commercial edition writes them; a Core installation has
+  // no on-call ladder to produce one.
+  "sms",
+  "voice",
 ]);
 
 /**
@@ -459,5 +468,111 @@ export const notificationAttempts = pgTable(
     index("notification_attempts_unfinished_idx")
       .on(t.startedAt)
       .where(sql`${t.outcome} = 'claimed'`),
+  ],
+);
+
+/**
+ * `pending` until a worker has turned it into outbox rows, `expanded`
+ * once it has, `failed` when expansion has been tried and refused
+ * enough times that a human should look.
+ *
+ * There is no `sending`: expansion is a database-only operation with
+ * no provider in it, so the only way to be mid-expansion is to be
+ * inside a transaction that either commits or does not.
+ */
+export const notificationIntentState = pgEnum("notification_intent_state", [
+  "pending",
+  "expanded",
+  "failed",
+]);
+
+/**
+ * A dispatch INTENT: the durable record that a transition owes
+ * notifications, written in the same transaction as the transition
+ * itself.
+ *
+ * The outbox already promised this. Its own docstring says rows are
+ * written in the transaction that decided them - and no caller did
+ * that. Every incident path committed the state change and then, in a
+ * later transaction, worked out who to tell: resolve the routes, fetch
+ * the members, walk the status pages, insert a row per recipient. All
+ * of that is I/O against a database that can refuse, in a process that
+ * can be killed, and none of it was covered by the commit that made
+ * the incident real. A worker that died in the middle left an incident
+ * open, `notified_at` already claimed, and nobody notified - by
+ * anybody, ever, because the claim is exactly-once and it had already
+ * been spent.
+ *
+ * One row here closes that. The transition commits with the intent or
+ * neither happens; a worker expands the intent into per-channel and
+ * per-recipient outbox rows afterwards, and expansion is idempotent
+ * because every row it writes carries a key derived from the cause. Re-
+ * expanding after a crash inserts what is missing and nothing else.
+ *
+ * The payload is RENDERED at transition time, not read back later.
+ * That is deliberate: an expansion that re-read the incident would
+ * describe the state at expansion time, so a page delivered after the
+ * incident resolved would say "resolved" in a message whose whole job
+ * is to say "down". What the intent stores is what the transition
+ * decided to say.
+ *
+ * This is still at-least-once and the product still says so. The intent
+ * removes a window where a notification was LOST; it does not remove
+ * the window where a provider accepted a message the outbox never got
+ * to record.
+ */
+export const notificationIntents = pgTable(
+  "notification_intents",
+  {
+    id: uuid()
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    organizationId: text()
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    /**
+     * The transition this intent is owed for - `incident:<id>:opened`,
+     * `incident:<id>:updated:<eventId>`, `recovery:<attemptId>:
+     * succeeded`. Unique, so a transaction retried by the driver, a job
+     * delivered twice, or a repair pass re-entering after a crash all
+     * record the same intent once.
+     */
+    causeKey: text().notNull(),
+    /** What produced it, for the operator view and for nothing else -
+     * expansion switches on the payload, not on this. */
+    kind: text().notNull(),
+    /** The incident, when there is one. Cascades: an intent for an
+     * incident that no longer exists has nothing left to say. */
+    incidentId: uuid().references(() => incidents.id, { onDelete: "cascade" }),
+    /** The rendered consequences. See `DispatchIntentPayload`. */
+    payload: jsonb().notNull(),
+    state: notificationIntentState().notNull().default("pending"),
+    /**
+     * Counted when an expansion FAILS, not when one starts.
+     *
+     * The opposite rule to `notification_outbox`, and for the opposite
+     * reason. An outbox attempt reaches a provider, so a crashed worker
+     * may already have sent something and the attempt has to be spent
+     * before it is known. An expansion touches nothing but this
+     * database: a crashed one committed no rows at all, so charging it
+     * an attempt would retire an intent that never got a chance.
+     */
+    attempts: integer().notNull().default(0),
+    lastError: text(),
+    expandedAt: timestamp({ withTimezone: true }),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("notification_intents_cause_key").on(t.causeKey),
+    // The expansion sweep's only predicate: oldest first, pending only.
+    index("notification_intents_pending_idx")
+      .on(t.createdAt)
+      .where(sql`${t.state} = 'pending'`),
+    // Scoped expansion - the inline pass a server action runs so its
+    // own alert leaves within a second instead of on the next tick.
+    index("notification_intents_org_idx").on(
+      t.organizationId,
+      t.createdAt.desc(),
+    ),
   ],
 );

@@ -2,7 +2,11 @@ import { and, eq, gte, inArray, lt, or, sql, type SQL } from "drizzle-orm";
 
 import type { DbClient } from "@/db";
 import { env } from "@/lib/env";
-import { notificationAttempts, notificationOutbox } from "@/db/schema";
+import {
+  notificationAttempts,
+  notificationIntents,
+  notificationOutbox,
+} from "@/db/schema";
 
 /**
  * The transactional outbox: deciding to notify, and actually notifying,
@@ -77,7 +81,7 @@ export interface OutboxMessage {
    * the same key and the unique index rejects the second row.
    */
   idempotencyKey: string;
-  channel: "email" | "webhook" | "channel";
+  channel: "email" | "webhook" | "channel" | "sms" | "voice";
   /** For `channel` rows: which configured channel delivers this. */
   channelId?: string;
   /** Provider registry id, denormalized for the history view. */
@@ -471,7 +475,11 @@ export async function claimDue(
       );
     }
 
-    return rows.map((row) => ({ row, fence: row.fence, attempt: row.attempts }));
+    return rows.map((row) => ({
+      row,
+      fence: row.fence,
+      attempt: row.attempts,
+    }));
   });
 }
 
@@ -1002,6 +1010,17 @@ export interface QueueHealth {
   /** Attempts that never reported an outcome, in the window. The
    * duplicate-risk counter, and normally zero. */
   unknownAttempts: number;
+  /**
+   * Transitions whose notifications are committed but not yet turned
+   * into messages. Counted with the queue rather than beside it: to
+   * anyone waiting to be told, an intent that has not expanded and a
+   * message that has not sent are the same thing.
+   */
+  pendingIntents: number;
+  /** Intents that could not be expanded at all. An expansion touches
+   * nothing but this database, so this is never a provider's fault and
+   * is never normal. */
+  failedIntents: number;
   windowHours: number;
 }
 
@@ -1010,12 +1029,13 @@ export async function queueHealth(
   organizationId: string,
   windowHours = 24,
 ): Promise<QueueHealth> {
-  const [{ rows: states }, { rows: unknowns }] = await Promise.all([
-    db.execute<{
-      state: string;
-      count: number;
-      oldest: string | null;
-    }>(sql`
+  const [{ rows: states }, { rows: unknowns }, { rows: intents }] =
+    await Promise.all([
+      db.execute<{
+        state: string;
+        count: number;
+        oldest: string | null;
+      }>(sql`
       select state, count(*)::int as count, min(created_at)::text as oldest
       from ${notificationOutbox}
       where organization_id = ${organizationId}
@@ -1025,19 +1045,39 @@ export async function queueHealth(
         )
       group by state
     `),
-    db.execute<{ count: number }>(sql`
+      db.execute<{ count: number }>(sql`
       select count(*)::int as count
       from ${notificationAttempts}
       where organization_id = ${organizationId}
         and outcome = 'unknown'
         and started_at >= now() - make_interval(hours => ${windowHours})
     `),
-  ]);
+      // Committed transitions whose messages do not exist yet. A pending
+      // intent is invisible in every other number on this page, and it
+      // is the one state where somebody is owed a notification that has
+      // not been written down as a message anywhere.
+      db.execute<{
+        pending: number;
+        failed: number;
+        oldest: string | null;
+      }>(sql`
+      select
+        count(*) filter (where state = 'pending')::int as pending,
+        count(*) filter (where state = 'failed')::int as failed,
+        min(created_at) filter (where state = 'pending')::text as oldest
+      from ${notificationIntents}
+      where organization_id = ${organizationId}
+    `),
+    ]);
 
   const by = new Map(states.map((row) => [row.state, row]));
   const oldest = ["queued", "sending"]
     .map((state) => by.get(state)?.oldest)
     .filter((value): value is string => Boolean(value))
+    // An unexpanded intent is older than anything it will produce, so it
+    // belongs in the "oldest waiting" figure - otherwise a queue stuck
+    // at the expansion step reads as perfectly healthy.
+    .concat(intents[0]?.oldest ? [intents[0].oldest] : [])
     .sort()[0];
 
   return {
@@ -1048,6 +1088,8 @@ export async function queueHealth(
     deadLettered: by.get("dead_letter")?.count ?? 0,
     oldestQueuedAt: oldest ? new Date(oldest) : null,
     unknownAttempts: unknowns[0]?.count ?? 0,
+    pendingIntents: intents[0]?.pending ?? 0,
+    failedIntents: intents[0]?.failed ?? 0,
     windowHours,
   };
 }

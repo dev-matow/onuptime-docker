@@ -4,6 +4,11 @@ import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { sendEmail, type EmailTransport } from "@/modules/notifications";
 import { deliverChannelRow } from "@/modules/notifications/channel-service";
+import { expandPendingIntents } from "@/modules/notifications/intent-expansion";
+import {
+  deliverSubscriberEmail,
+  isSubscriberPayload,
+} from "@/modules/notifications/subscriber-emails";
 import {
   claimDue,
   deferRow,
@@ -87,6 +92,12 @@ export interface DeliveryTickResult {
   /** Claims whose fence had moved by the time they reported. Normally
    * zero; above zero means leases are expiring under live work. */
   superseded: number;
+  /** Dispatch intents turned into outbox rows before the drain. */
+  expanded: number;
+  /** Intents that could not be expanded. Never normal: an expansion
+   * touches nothing but this database, so a failure is a bug or an
+   * outage, not a provider. */
+  intentsFailed: number;
 }
 
 async function deliver(
@@ -99,6 +110,22 @@ async function deliver(
     return deliverChannelRow(db, row, net);
   }
   if (row.channel === "email") {
+    // Status-page subscriber mail is rendered at DELIVERY, not at
+    // enqueue, and it is the only email that is. Two reasons, both about
+    // what a queued row is allowed to contain: the unsubscribe link is a
+    // non-expiring bearer token, and a row sits in this table for up to
+    // the retention period, is rendered in the operator's delivery
+    // history and is in every backup. Minting it here also means the
+    // link honours a secret rotation instead of shipping a signature
+    // that will no longer verify.
+    //
+    // The re-read is not only about the token. `unsubscribeByToken`
+    // DELETEs the row, so between enqueue and delivery - milliseconds
+    // before this was a queue, up to six hours now - somebody can
+    // unsubscribe. Rendering here is what makes that stick.
+    if (isSubscriberPayload(row.payload)) {
+      return deliverSubscriberEmail(db, row, send);
+    }
     const payload = row.payload as {
       subject?: string;
       text?: string;
@@ -159,6 +186,17 @@ export interface DeliveryOptions {
    * only for the budget its own dispatch created.
    */
   limit?: number;
+  /**
+   * Bound this pass to whatever its own intent expansion produced, when
+   * the caller cannot know that number in advance.
+   *
+   * The inline path after a transition is the only user: it commits an
+   * intent, then asks for the messages that intent turns into and
+   * nothing else. Without it the request would inherit the tenant's
+   * whole backlog; with a fixed number it would either truncate a large
+   * fan-out or over-claim a small one.
+   */
+  inlineBound?: boolean;
 }
 
 export async function runNotificationDelivery(
@@ -167,7 +205,29 @@ export async function runNotificationDelivery(
 ): Promise<DeliveryTickResult> {
   const send = options.send ?? sendEmail;
   const cap = batchSize();
-  const limit = Math.max(1, Math.min(options.limit ?? cap, cap));
+
+  // First: turn committed dispatch intents into outbox rows. A tick
+  // that drained without expanding would deliver everything except the
+  // notifications whose transitions committed since the last one.
+  const expansion = await expandPendingIntents(db, {
+    ...(options.organizationId
+      ? { organizationId: options.organizationId }
+      : {}),
+  });
+
+  // An inline pass takes only what its own expansion produced. That is
+  // the path running inside a server action or a check worker: it asks
+  // for the budget its own transition created and leaves the rest of the
+  // tenant's backlog to the tick, which is what stops one request
+  // inheriting a batch of ten-second provider timeouts.
+  //
+  // Stated by the caller rather than inferred from `organizationId`
+  // being set. Inferring it made every scoped drain in the product
+  // silently take one row.
+  const claimBudget =
+    options.limit ??
+    (options.inlineBound ? Math.max(expansion.queued, 1) : cap);
+  const limit = Math.max(1, Math.min(claimBudget, cap));
 
   // Before claiming anything: retire whatever ran out of horizon while
   // it was waiting. Cheap, indexed, and it keeps the deadline honest
@@ -183,6 +243,8 @@ export async function runNotificationDelivery(
     deferred: 0,
     expired,
     superseded: 0,
+    expanded: expansion.expanded,
+    intentsFailed: expansion.failed,
   };
 
   // The per-channel limit is decided up front, over the whole batch,

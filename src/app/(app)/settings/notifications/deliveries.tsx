@@ -103,10 +103,17 @@ function when(value: Date | string | null): string {
  * no per-row status can show. `unknownAttempts` is second - it is the
  * only honest surface for "a message may have gone twice", and it is
  * normally zero, so a non-zero value is worth seeing without hunting.
+ *
+ * Pending dispatch intents are counted in the queue rather than beside
+ * it. To anyone waiting to be told, a transition whose messages have not
+ * been written yet and a message that has not been sent are the same
+ * thing, and showing them apart would let a queue stuck at the expansion
+ * step read as empty.
  */
 function QueueHealthCard({ health }: { health: QueueHealth }) {
-  const pressure = health.queued + health.sending;
-  const unhappy = health.failed + health.expired + health.deadLettered;
+  const pressure = health.queued + health.sending + health.pendingIntents;
+  const unhappy =
+    health.failed + health.expired + health.deadLettered + health.failedIntents;
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
       <div>
@@ -114,6 +121,9 @@ function QueueHealthCard({ health }: { health: QueueHealth }) {
         <p className="text-muted-foreground text-xs">
           In the queue
           {health.sending > 0 ? ` · ${health.sending} sending` : ""}
+          {health.pendingIntents > 0
+            ? ` · ${health.pendingIntents} not yet expanded`
+            : ""}
         </p>
       </div>
       <div>

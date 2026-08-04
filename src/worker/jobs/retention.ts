@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { monitorChecks } from "@/db/schema";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
+import { pruneExpandedIntents } from "@/modules/notifications/intents";
 import {
   pruneNotificationHistory,
   sweepStaleAttempts,
@@ -65,6 +66,21 @@ export async function pruneOldChecks(): Promise<void> {
       },
       "pruned notification history",
     );
+  }
+
+  // Expanded dispatch intents, on the same clock as the deliveries they
+  // produced. A PENDING intent is never pruned however old it is: it is
+  // a notification still owed, and deleting it would be the same loss
+  // the intent exists to prevent, arriving on a timer.
+  const intents = await pruneExpandedIntents(
+    db,
+    new Date(
+      Date.now() - env.NOTIFICATION_RETENTION_DAYS * 24 * 60 * 60 * 1000,
+    ),
+    PRUNE_BATCH,
+  );
+  if (intents > 0) {
+    logger.info({ intents }, "pruned expanded dispatch intents");
   }
 
   // Attempts whose worker never came back. Turning them into `unknown`

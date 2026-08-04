@@ -5,7 +5,14 @@ import { incidentEvents, incidents, monitors, user } from "@/db/schema";
 import { ConflictError, NotFoundError } from "@/lib/errors";
 import { writeAudit } from "@/modules/audit";
 import type { Monitor } from "@/modules/monitors/service";
+import { describeMonitorTarget } from "@/modules/monitors/spec";
 import { describeFailureWindow } from "@/modules/notifications/email-templates";
+import type { WebhookMonitor } from "@/modules/notifications/incident-payload";
+import {
+  operatorIntent,
+  recordDispatchIntent,
+  resolvedIntent,
+} from "@/modules/notifications/intents";
 
 import {
   canTransition,
@@ -16,6 +23,38 @@ import type { CreateIncidentInput } from "./schemas";
 
 export type Incident = typeof incidents.$inferSelect;
 export type IncidentEvent = typeof incidentEvents.$inferSelect;
+
+/**
+ * The monitor an incident is about, read inside the caller's
+ * transaction so the notification describes the monitor as it was when
+ * the transition happened.
+ *
+ * Null for a manually reported incident, and also for one whose monitor
+ * has since been deleted — `monitor_id` is ON DELETE SET NULL, and a
+ * notification about a monitor that no longer exists names the incident
+ * instead.
+ */
+async function monitorForIncident(
+  tx: DbClient,
+  incident: Pick<Incident, "monitorId">,
+): Promise<Monitor | null> {
+  if (!incident.monitorId) return null;
+  const row = await tx.query.monitors.findFirst({
+    where: eq(monitors.id, incident.monitorId),
+  });
+  return row ?? null;
+}
+
+/** The subset a notification payload may describe. */
+function webhookMonitor(monitor: Monitor): WebhookMonitor {
+  return {
+    id: monitor.id,
+    name: monitor.name,
+    url: monitor.url,
+    currentStatus: monitor.currentStatus,
+    checkType: monitor.checkType,
+  };
+}
 
 interface Actor {
   organizationId: string;
@@ -136,6 +175,18 @@ export async function createIncident(
       targetType: "incident",
       targetId: incident.id,
       metadata: { title: incident.title, severity: incident.severity },
+    });
+
+    // Committed with the incident, not after it. The action used to
+    // return, revalidate the page and only then re-read the incident to
+    // work out who to tell; a crash in that gap announced nothing and
+    // left no record that an announcement was owed.
+    await recordDispatchIntent(tx, {
+      organizationId: actor.organizationId,
+      causeKey: `incident:${incident.id}:incident.opened`,
+      kind: "incident",
+      incidentId: incident.id,
+      payload: operatorIntent({ incident, event: "incident.opened" }),
     });
     return incident;
   });
@@ -260,6 +311,11 @@ export async function changeIncidentStatus(
       .set({
         status: input.status,
         resolvedAt: input.status === "resolved" ? new Date() : null,
+        // The generation background work fences itself against. Bumped
+        // by status transitions and by nothing else, so an
+        // acknowledgement or a severity change cannot cancel a recovery
+        // chain that is still legitimately in flight.
+        statusRevision: sql`${incidents.statusRevision} + 1`,
       })
       .where(
         and(
@@ -281,13 +337,17 @@ export async function changeIncidentStatus(
       );
     }
 
-    await tx.insert(incidentEvents).values({
-      incidentId,
-      type: "status_change",
-      status: input.status,
-      message: input.message,
-      createdBy: actor.userId,
-    });
+    const [event] = await tx
+      .insert(incidentEvents)
+      .values({
+        incidentId,
+        type: "status_change",
+        status: input.status,
+        message: input.message,
+        createdBy: actor.userId,
+      })
+      .returning();
+    if (!event) throw new Error("insert returned no row");
 
     if (input.status === "resolved") {
       await writeAudit(tx, {
@@ -298,6 +358,50 @@ export async function changeIncidentStatus(
         targetId: incidentId,
       });
     }
+
+    const monitor = await monitorForIncident(tx, updated);
+    const resolving = input.status === "resolved";
+    const payload = operatorIntent({
+      incident: updated,
+      ...(monitor ? { monitor: webhookMonitor(monitor) } : {}),
+      event: resolving ? "incident.resolved" : "incident.updated",
+      // The id of the timeline entry THIS transaction just wrote, not
+      // the newest one visible afterwards.
+      //
+      // The action used to compute this key by re-reading the timeline
+      // after the commit, and under two concurrent updates both callers
+      // read the same newest entry, built the same key, and the outbox's
+      // unique index dropped one of them. Two operator updates during an
+      // outage produced ONE broadcast - carrying the first one's text
+      // under a key naming the second one's event. Reproduced on two
+      // connections against the live schema before this line was
+      // written.
+      ...(resolving ? {} : { transitionKey: event.id }),
+    });
+    if (resolving && monitor && updated.notifiedAt) {
+      // The all-clear for the people who were paged.
+      //
+      // Only the automatic resolve path sent this. An operator closing
+      // an incident by hand told the channels and the status page and
+      // left every responder who had been paged at 3am with no message
+      // saying it was over. `notifiedAt` is the test for "somebody was
+      // paged", exactly as it is on the automatic path - an incident
+      // nobody was alerted about resolves quietly here too.
+      payload.memberEmail = resolvedIntent({
+        incident: updated,
+        monitor: webhookMonitor(monitor),
+        monitorTarget: describeMonitorTarget(monitor),
+      }).memberEmail;
+    }
+    await recordDispatchIntent(tx, {
+      organizationId: actor.organizationId,
+      causeKey: resolving
+        ? `incident:${incidentId}:incident.resolved`
+        : `incident:${incidentId}:incident.updated:${event.id}`,
+      kind: "incident",
+      incidentId,
+      payload,
+    });
     return updated;
   });
 }
@@ -336,6 +440,26 @@ export async function postIncidentUpdate(
       })
       .returning();
     if (!event) throw new Error("insert returned no row");
+
+    // Internal notes are operator-only — they don't broadcast. The
+    // decision is made here rather than in the action so that "this
+    // note is private" and "nothing was queued about it" are the same
+    // transaction.
+    if (!internal) {
+      const monitor = await monitorForIncident(tx, incident);
+      await recordDispatchIntent(tx, {
+        organizationId: actor.organizationId,
+        causeKey: `incident:${incidentId}:incident.updated:${event.id}`,
+        kind: "incident",
+        incidentId,
+        payload: operatorIntent({
+          incident,
+          ...(monitor ? { monitor: webhookMonitor(monitor) } : {}),
+          event: "incident.updated",
+          transitionKey: event.id,
+        }),
+      });
+    }
     return event;
   });
 }
@@ -380,11 +504,29 @@ export async function changeIncidentSeverity(
       );
     }
 
-    await tx.insert(incidentEvents).values({
+    const [event] = await tx
+      .insert(incidentEvents)
+      .values({
+        incidentId,
+        type: "severity_change",
+        message: `Severity changed from ${incident.severity} to ${severity}`,
+        createdBy: actor.userId,
+      })
+      .returning();
+    if (!event) throw new Error("insert returned no row");
+
+    const monitor = await monitorForIncident(tx, updated);
+    await recordDispatchIntent(tx, {
+      organizationId: actor.organizationId,
+      causeKey: `incident:${incidentId}:incident.updated:${event.id}`,
+      kind: "incident",
       incidentId,
-      type: "severity_change",
-      message: `Severity changed from ${incident.severity} to ${severity}`,
-      createdBy: actor.userId,
+      payload: operatorIntent({
+        incident: updated,
+        ...(monitor ? { monitor: webhookMonitor(monitor) } : {}),
+        event: "incident.updated",
+        transitionKey: event.id,
+      }),
     });
     return updated;
   });
@@ -411,7 +553,18 @@ export async function savePostmortem(
     const [updated] = await tx
       .update(incidents)
       .set({ postmortem: content })
-      .where(eq(incidents.id, incidentId))
+      .where(
+        and(
+          eq(incidents.id, incidentId),
+          // The one statement in this file that wrote by id alone,
+          // directly beneath three comments arguing that the predicate
+          // which DECIDES has to carry the tenant. `findIncidentOrThrow`
+          // above already proved ownership and nothing could reach this
+          // without it, which is exactly the argument that was wrong
+          // everywhere else it was made.
+          eq(incidents.organizationId, actor.organizationId),
+        ),
+      )
       .returning();
     if (!updated) throw new NotFoundError("Incident not found.");
 
@@ -599,16 +752,42 @@ export async function findUnhandledAutoIncident(
   return row ?? null;
 }
 
+/**
+ * Claims the exclusive right to page for this incident, AND records what
+ * that page owes, in one transaction.
+ *
+ * The claim is exactly-once by design: `notified_at is null` is the
+ * predicate, and whoever's UPDATE matches it is the sender. That was
+ * correct and it was also, on its own, the single worst crash window in
+ * the product. The claim committed in its own statement and the
+ * notifications were worked out afterwards — resolve routes, fetch
+ * members, walk status pages, insert rows — so a worker that died in
+ * that tail left an incident open, `notified_at` already spent, and
+ * nobody notified. `findUnhandledAutoIncident` requires `notified_at is
+ * null`, so the repair path could no longer see it either. Nobody was
+ * ever paged for that outage, by anything, and no counter anywhere went
+ * up. Reproduced against the live schema before this was changed.
+ *
+ * `onClaim` runs inside the claim's transaction and is where the caller
+ * writes its dispatch intent. If it throws, the claim rolls back with it
+ * and the next caller can win it — which is the behaviour that makes the
+ * exactly-once claim safe to spend.
+ */
 export async function claimIncidentNotification(
   db: DbClient,
   incidentId: string,
+  onClaim?: (tx: DbClient, incident: Incident) => Promise<void>,
 ): Promise<Incident | null> {
-  const [claimed] = await db
-    .update(incidents)
-    .set({ notifiedAt: new Date() })
-    .where(and(eq(incidents.id, incidentId), isNull(incidents.notifiedAt)))
-    .returning();
-  return claimed ?? null;
+  return db.transaction(async (tx) => {
+    const [claimed] = await tx
+      .update(incidents)
+      .set({ notifiedAt: new Date() })
+      .where(and(eq(incidents.id, incidentId), isNull(incidents.notifiedAt)))
+      .returning();
+    if (!claimed) return null;
+    if (onClaim) await onClaim(tx, claimed);
+    return claimed;
+  });
 }
 
 /** Auto-resolves open monitor incidents once the monitor recovers. */
@@ -647,7 +826,11 @@ export async function resolveMonitorIncidents(
       // rather than merely intended.
       const [updated] = await tx
         .update(incidents)
-        .set({ status: "resolved", resolvedAt: new Date() })
+        .set({
+          status: "resolved",
+          resolvedAt: new Date(),
+          statusRevision: sql`${incidents.statusRevision} + 1`,
+        })
         .where(
           and(eq(incidents.id, incident.id), ne(incidents.status, "resolved")),
         )
@@ -670,6 +853,31 @@ export async function resolveMonitorIncidents(
         targetId: incident.id,
         metadata: { monitorId: monitor.id },
       });
+
+      // The all-clear commits with the resolution.
+      //
+      // It used to be sent afterwards, from the caller, in four more
+      // transactions. A crash in that tail was unrecoverable in the
+      // worst way available: every repair predicate in this module reads
+      // `status <> 'resolved'`, so a resolved incident is invisible to
+      // all of them. Subscribers who were told an outage had started
+      // were never told it had ended, and nothing would ever notice.
+      //
+      // An incident nobody was alerted about resolves quietly — the
+      // timeline and the recovery record still tell the whole story.
+      if (updated.notifiedAt) {
+        await recordDispatchIntent(tx, {
+          organizationId: monitor.organizationId,
+          causeKey: `incident:${updated.id}:incident.resolved`,
+          kind: "incident",
+          incidentId: updated.id,
+          payload: resolvedIntent({
+            incident: updated,
+            monitor: webhookMonitor(monitor),
+            monitorTarget: describeMonitorTarget(monitor),
+          }),
+        });
+      }
       resolved.push(updated);
     }
     return resolved;

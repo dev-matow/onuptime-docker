@@ -12,7 +12,8 @@ import {
   sendEmail,
   setEmailTransport,
 } from "@/modules/notifications";
-import { notifyStatusPageSubscribers } from "@/modules/notifications/subscriber-emails";
+import { enqueueSubscriberEmails } from "@/modules/notifications/subscriber-emails";
+import { runNotificationDelivery } from "@/worker/jobs/notification-delivery";
 import { setStatusPageMonitors } from "@/modules/status-pages/service";
 import {
   confirmSubscription,
@@ -166,7 +167,49 @@ describe("listConfirmedSubscribers", () => {
   });
 });
 
-describe("notifyStatusPageSubscribers", () => {
+/**
+ * Enqueue and then drain, which is what the product now does across two
+ * transactions and a worker tick.
+ *
+ * These assertions are unchanged from when this was a direct transport,
+ * and that is the point: WHO hears about an incident is a product rule
+ * and it did not move. What moved is that each recipient is now a
+ * durable row with its own key, its own retries and its own ledger
+ * entry, so the same expectations are met by a mechanism that survives
+ * the process dying halfway through the list.
+ */
+async function notifySubscribers(input: {
+  incident: {
+    id: string;
+    organizationId: string;
+    title: string;
+    monitorId: string | null;
+    source: string;
+  };
+  kind: "opened" | "updated" | "resolved";
+  latestUpdate?: string;
+  /** Reuse a key to assert idempotency; omit for a fresh transition. */
+  causeKey?: string;
+}): Promise<void> {
+  await db.transaction(async (tx) => {
+    await enqueueSubscriberEmails(tx, input.incident.organizationId, {
+      kind: input.kind,
+      causeKey:
+        input.causeKey ??
+        `incident:${input.incident.id}:subscribers:${input.kind}:${randomUUID()}`,
+      incidentId: input.incident.id,
+      incidentTitle: input.incident.title,
+      monitorId: input.incident.monitorId,
+      source: input.incident.source,
+      ...(input.latestUpdate ? { latestUpdate: input.latestUpdate } : {}),
+    });
+  });
+  await runNotificationDelivery(db, {
+    organizationId: input.incident.organizationId,
+  });
+}
+
+describe("subscriber notifications", () => {
   it("emails only confirmed subscribers of a published public page", async () => {
     const actor = await createTestOrg();
     const page = await createStatusPage(actor);
@@ -176,7 +219,7 @@ describe("notifyStatusPageSubscribers", () => {
     await confirmSubscription(db, a.token);
     await confirmSubscription(db, b.token);
 
-    await notifyStatusPageSubscribers(db, {
+    await notifySubscribers({
       incident: {
         id: randomUUID(),
         organizationId: actor.organizationId,
@@ -209,7 +252,7 @@ describe("notifyStatusPageSubscribers", () => {
     const incident = await openMonitorIncident(db, hidden, "refused");
     if (!incident) throw new Error("incident was not opened");
 
-    await notifyStatusPageSubscribers(db, { incident, kind: "opened" });
+    await notifySubscribers({ incident, kind: "opened" });
     expect(sent).toHaveLength(0);
 
     // …and goes out once the operator puts it on the page.
@@ -217,7 +260,7 @@ describe("notifyStatusPageSubscribers", () => {
       statusPageId: page.id,
       monitors: [{ monitorId: hidden.id }],
     });
-    await notifyStatusPageSubscribers(db, { incident, kind: "opened" });
+    await notifySubscribers({ incident, kind: "opened" });
     expect(sent.map((m) => m.to)).toEqual(["sub@example.com"]);
   });
 
@@ -254,7 +297,7 @@ describe("notifyStatusPageSubscribers", () => {
 
     const incident = await openMonitorIncident(db, monitor, "down");
     if (!incident) throw new Error("incident was not opened");
-    await notifyStatusPageSubscribers(db, { incident, kind: "opened" });
+    await notifySubscribers({ incident, kind: "opened" });
 
     expect(sent.map((m) => m.to).sort()).toEqual([
       "first@example.com",
@@ -286,7 +329,7 @@ describe("notifyStatusPageSubscribers", () => {
 
     const incident = await openMonitorIncident(db, monitor, "refused");
     if (!incident) throw new Error("incident was not opened");
-    await notifyStatusPageSubscribers(db, { incident, kind: "opened" });
+    await notifySubscribers({ incident, kind: "opened" });
 
     expect(sent.map((m) => m.to)).toEqual(["listed@example.com"]);
   });
@@ -317,7 +360,7 @@ describe("notifyStatusPageSubscribers", () => {
     expect(orphaned?.monitorId).toBeNull();
     expect(orphaned?.source).toBe("monitor");
 
-    await notifyStatusPageSubscribers(db, {
+    await notifySubscribers({
       incident: orphaned!,
       kind: "resolved",
     });
@@ -330,7 +373,7 @@ describe("notifyStatusPageSubscribers", () => {
     const s = await subscribeToStatusPage(db, page.id, "priv@example.com");
     await confirmSubscription(db, s.token);
 
-    await notifyStatusPageSubscribers(db, {
+    await notifySubscribers({
       incident: {
         id: randomUUID(),
         organizationId: actor.organizationId,
@@ -349,7 +392,7 @@ describe("notifyStatusPageSubscribers", () => {
     const s = await subscribeToStatusPage(db, page.id, "np@example.com");
     await confirmSubscription(db, s.token);
 
-    await notifyStatusPageSubscribers(db, {
+    await notifySubscribers({
       incident: {
         id: randomUUID(),
         organizationId: actor.organizationId,

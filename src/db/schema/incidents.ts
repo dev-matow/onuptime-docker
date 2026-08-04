@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   boolean,
   index,
+  integer,
   pgEnum,
   pgTable,
   uniqueIndex,
@@ -53,6 +54,31 @@ export const incidents = pgTable(
      * or the escalation failsafe) sends exactly once.
      */
     notifiedAt: timestamp({ withTimezone: true }),
+    /**
+     * How many times this incident's STATUS has moved. The generation
+     * token background work fences itself against.
+     *
+     * A recovery chain observes an incident, then probes a target for
+     * up to the check's full timeout, then writes. An operator
+     * resolving the incident inside that window used to change nothing:
+     * the job came back and finalised its attempt, notified channels
+     * about a recovery of an incident that was already closed, and
+     * scheduled the next attempt against it. Re-reading the row is not
+     * enough on its own either - "still not resolved" is true again if
+     * the monitor flapped down a second time, and that is a DIFFERENT
+     * outage than the one the job was scheduled for.
+     *
+     * So a job carries the revision it saw, and a write that finds a
+     * different one stands down. Bumped by status transitions only -
+     * not by acknowledgement, severity or the notification claim -
+     * because those do not make an in-flight recovery wrong, and a
+     * token that moves for unrelated reasons is a token that cancels
+     * legitimate work.
+     *
+     * Zero on every row written before 0027, which is correct: nothing
+     * scheduled before the upgrade carries a fence to compare it to.
+     */
+    statusRevision: integer().notNull().default(0),
     /** Acknowledgement halts escalation. Set by the acking operator. */
     acknowledgedAt: timestamp({ withTimezone: true }),
     acknowledgedBy: text().references(() => user.id, { onDelete: "set null" }),

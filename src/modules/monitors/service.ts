@@ -22,8 +22,13 @@ import {
 import { ConflictError, NotFoundError } from "@/lib/errors";
 import { writeAudit } from "@/modules/audit";
 import { stampFact } from "@/modules/ledger/service";
+import {
+  recordDispatchIntent,
+  resolvedIntent,
+} from "@/modules/notifications/intents";
 
 import type { CheckResult } from "./check";
+import { describeMonitorTarget } from "./spec";
 import { nextEvaluationAt, type RecentObservation } from "./scheduling";
 import { MEASURED, round2, uptimeSegments, type UptimeResult } from "./uptime";
 import type { CreateMonitorInput, UpdateMonitorInput } from "./schemas";
@@ -589,7 +594,11 @@ export async function deleteMonitor(
     // silently.
     const orphaned = await tx
       .update(incidents)
-      .set({ status: "resolved", resolvedAt: new Date() })
+      .set({
+        status: "resolved",
+        resolvedAt: new Date(),
+        statusRevision: sql`${incidents.statusRevision} + 1`,
+      })
       .where(
         and(
           eq(incidents.monitorId, monitorId),
@@ -598,7 +607,7 @@ export async function deleteMonitor(
           ne(incidents.status, "resolved"),
         ),
       )
-      .returning({ id: incidents.id });
+      .returning();
     for (const incident of orphaned) {
       await tx.insert(incidentEvents).values({
         incidentId: incident.id,
@@ -607,6 +616,34 @@ export async function deleteMonitor(
         message: `Resolved because the monitor "${monitor.name}" was deleted.`,
         internal: false,
         createdBy: actor.userId,
+      });
+      // And tell whoever was told it started.
+      //
+      // Closing the incident here fixed one bug and left another
+      // untouched: nothing was ever announced. Channels heard no
+      // `incident.resolved`, and status-page subscribers who had been
+      // emailed "we are investigating" were left believing the outage
+      // was still live - permanently, because after this transaction
+      // there is no monitor to recover and no path that re-examines a
+      // resolved incident. An operator tidying up a decommissioned
+      // service silently stranded its public audience.
+      if (!incident.notifiedAt) continue;
+      await recordDispatchIntent(tx, {
+        organizationId: actor.organizationId,
+        causeKey: `incident:${incident.id}:incident.resolved`,
+        kind: "incident",
+        incidentId: incident.id,
+        payload: resolvedIntent({
+          incident,
+          monitor: {
+            id: monitor.id,
+            name: monitor.name,
+            url: monitor.url,
+            currentStatus: monitor.currentStatus,
+            checkType: monitor.checkType,
+          },
+          monitorTarget: describeMonitorTarget(monitor),
+        }),
       });
     }
 

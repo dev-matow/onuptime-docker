@@ -32,7 +32,7 @@ import { QUEUES, type MonitorCheckJob } from "../queues";
  */
 const log = logger.child({ job: "monitor-check" });
 
-export { sendOpenedNotifications } from "@/modules/monitors/outcome";
+export { claimOpenedNotifications } from "@/modules/monitors/outcome";
 
 export interface MonitorCheckDeps {
   boss?: {

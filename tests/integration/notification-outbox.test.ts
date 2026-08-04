@@ -12,7 +12,7 @@ import {
   type EmailMessage,
   type EmailTransport,
 } from "@/modules/notifications";
-import { notifyIncidentOpened } from "@/modules/notifications/incident-emails";
+import { enqueueMemberEmails } from "@/modules/notifications/incident-emails";
 import {
   backoffMs,
   claimDue,
@@ -133,8 +133,16 @@ describe("enqueueing is idempotent", () => {
     );
     if (!incident) throw new Error("incident was not opened");
 
-    await notifyIncidentOpened(db, incident, monitor);
-    await notifyIncidentOpened(db, incident, monitor);
+    // The same intent expanded twice, which is exactly what a crash
+    // between the outbox insert and the "expanded" marker produces.
+    const email = {
+      event: "incident.opened" as const,
+      causeKey: `incident:${incident.id}:opened`,
+      subject: `${monitor.name} is down`,
+      text: "Vigil marked it down.",
+    };
+    await enqueueMemberEmails(db, actor.organizationId, email);
+    await enqueueMemberEmails(db, actor.organizationId, email);
 
     const rows = await rowsFor(actor.organizationId);
     // One member in a fresh test org, so one message — not two.
@@ -233,6 +241,10 @@ describe("the transport's actual outcome is recorded", () => {
       expired: 0,
       superseded: 0,
       deferred: 0,
+      // A tick expands dispatch intents before it drains; this row was
+      // enqueued directly, so there is nothing to expand.
+      expanded: 0,
+      intentsFailed: 0,
     });
     expect(result.retrying).toBe(1);
     expect(result.delivered).toBe(0);

@@ -33,7 +33,31 @@ export interface MonitorCheckJob {
   monitorId: string;
 }
 
-export interface RecoveryExecuteJob {
+/**
+ * The incident generation a recovery job observed when it was
+ * scheduled, compared against `incidents.status_revision` before the job
+ * writes anything that matters.
+ *
+ * A recovery chain reads an incident, probes a target for up to that
+ * check's full timeout, and then acts. An operator who resolves the
+ * incident inside that window used to change nothing about what
+ * happened next: the trigger still fired against a target that was fine,
+ * the timeline of a closed incident still grew, channels were still told
+ * about the recovery of an outage that had ended, and the next attempt
+ * was still scheduled. Re-reading is not sufficient on its own either -
+ * "still not resolved" becomes true again if the monitor flaps down a
+ * second time, and that is a different outage than the one this job was
+ * scheduled for.
+ *
+ * Optional, because a job enqueued by 1.18.1 and still in the queue
+ * during the upgrade has no fence to carry. Those run unfenced, exactly
+ * as they did before, and drain within one recovery chain.
+ */
+export interface RecoveryFence {
+  incidentRevision?: number;
+}
+
+export interface RecoveryExecuteJob extends RecoveryFence {
   incidentId: string;
   monitorId: string;
   attemptNumber: number;
@@ -43,7 +67,7 @@ export interface RecoveryVerifyJob extends RecoveryExecuteJob {
   attemptId: string;
 }
 
-export interface RecoveryEscalateJob {
+export interface RecoveryEscalateJob extends RecoveryFence {
   incidentId: string;
   monitorId: string;
 }

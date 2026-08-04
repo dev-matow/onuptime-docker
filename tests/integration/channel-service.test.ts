@@ -17,7 +17,11 @@ import {
   updateChannel,
 } from "@/modules/notifications/channel-service";
 import { openSecrets } from "@/modules/notifications/secretbox";
-import { sendIncidentWebhook } from "@/modules/notifications/webhook-service";
+import { dispatchIntentsNow } from "@/modules/notifications/flush";
+import {
+  operatorIntent,
+  recordDispatchIntent,
+} from "@/modules/notifications/intents";
 import { createIncident } from "@/modules/incidents/service";
 import { runNotificationDelivery } from "@/worker/jobs/notification-delivery";
 
@@ -453,11 +457,19 @@ describe("dispatch and delivery", () => {
   });
 });
 
-describe("sendIncidentWebhook (the dispatcher entry)", () => {
+/**
+ * The dispatcher entry used to be `sendIncidentWebhook`, called after
+ * the mutation had committed. There is no such function now: a
+ * transition records an intent inside its own transaction and the
+ * expansion turns it into rows. These two tests assert the same two
+ * things they always did - the rows appear, and nothing throws - through
+ * the path that replaced it.
+ */
+describe("intent expansion (the dispatcher entry)", () => {
   it("enqueues for subscribed channels and drains inline", async () => {
     const actor = await createTestOrg();
     await createChannel(db, actor, slackInput({ events: ["incident"] }));
-    const incident = await createIncident(db, actor, {
+    await createIncident(db, actor, {
       title: "Manual incident",
       severity: "major",
     });
@@ -465,8 +477,10 @@ describe("sendIncidentWebhook (the dispatcher entry)", () => {
     // The inline drain runs with the real fetch seam, which this test
     // cannot intercept, so the row may end delivered=false; what must
     // hold is that dispatch created the row and never threw.
+    // `createIncident` already recorded the intent; expanding it is
+    // what creates the row.
     await expect(
-      sendIncidentWebhook(db, { event: "incident.opened", incident }),
+      dispatchIntentsNow(db, actor.organizationId),
     ).resolves.toBeUndefined();
 
     const rows = await db
@@ -483,8 +497,17 @@ describe("sendIncidentWebhook (the dispatcher entry)", () => {
       title: "Quiet incident",
       severity: "minor",
     });
+    await db.transaction(async (tx) => {
+      await recordDispatchIntent(tx, {
+        organizationId: actor.organizationId,
+        causeKey: `incident:${incident.id}:quiet`,
+        kind: "incident",
+        incidentId: incident.id,
+        payload: operatorIntent({ incident, event: "incident.opened" }),
+      });
+    });
     await expect(
-      sendIncidentWebhook(db, { event: "incident.opened", incident }),
+      dispatchIntentsNow(db, actor.organizationId),
     ).resolves.toBeUndefined();
     const rows = await db
       .select()

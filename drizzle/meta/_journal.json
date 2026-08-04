@@ -190,6 +190,20 @@
       "when": 1785793963080,
       "tag": "0026_durable_delivery",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1785803086495,
+      "tag": "0027_dispatch_intents",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1785803602997,
+      "tag": "0028_escalation_transports",
+      "breakpoints": true
     }
   ]
 }

@@ -6,6 +6,52 @@ free edition; entries for commercial-only features live in the other
 repository, because they are not in this one and listing them here would
 describe software you do not have.
 
+## 1.18.3 — 2026-08-04
+
+Findings from an adversarial security review. Four defects, three of them
+on paths reachable without an account. All four are in this edition.
+
+### Fixed
+
+- **The outbound egress guard failed open when its own DNS lookup
+  failed.** A lookup that threw became an empty address list; the
+  classification loop then had nothing to refuse, no address was pinned,
+  and the request was handed to the global `fetch`, which resolves a
+  second time with no classification and no pin. The premise in the code
+  was that the transport "will fail identically"; it is a separate
+  getaddrinfo and is free to succeed, so one dropped UDP packet was
+  enough - and an attacker-controlled nameserver did not have to stop at
+  one. This affected every HTTP-family check, every HTTP notification
+  provider and webhook delivery, including the `monitor` channel whose
+  shipped policy forbids private space. A hostname that does not resolve
+  is now refused, carrying the resolver's own error, so a domain that
+  stopped resolving is still reported as down.
+- **A notification worker that had lost its lease still sent.**
+  `renewLease` is fenced but returned nothing, so an update matching zero
+  rows - somebody else owns this delivery now - looked exactly like
+  success. The fence then refused to record the outcome, which protects
+  the ledger and not the person whose phone rang twice. The shipped
+  defaults reach this unaided: a 250-row batch at 4 concurrent with a 10s
+  timeout runs past the 600s lease. Losing the lease now skips the send.
+- **The status-page password gate was unthrottled.** It verifies with
+  `scryptSync`, which is synchronous and ~32ms, on a public endpoint that
+  needs no account - about thirty requests a second to saturate a process
+  and stall everything else. Now capped per page, well above anyone
+  typing a shared password, and a refusal is indistinguishable from a
+  wrong password so it reveals nothing about which pages exist.
+- **The rate limiter never released a key.** Its keys arrive with the
+  request - a push token, an email address, a page slug - and nothing
+  removed them, so guessing tokens grew the map for the life of the
+  process (500k keys measured at 132 MB). Bounded and swept now. The push
+  endpoint also hashes the token before using it as a key, which the
+  probe endpoint already did.
+
+### Changed
+
+- `next` 16.2.10 -> 16.2.12, clearing seven advisories. `shadcn` moved to
+  `devDependencies`: nothing imports it at runtime, and it was the only
+  reason `undici` was in a production install.
+
 ## 1.18.2 — 2026-08-04
 
 An incident transition and the record that its consequences are owed now

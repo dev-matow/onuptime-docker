@@ -744,6 +744,40 @@ describe("DNS rebinding", () => {
     expect(lookup).toHaveBeenCalledTimes(1);
   });
 
+  it("refuses to send when its own resolver failed, rather than letting the transport resolve", async () => {
+    // The fail-open this closes: a lookup that threw became an empty
+    // address list, the classification loop over zero addresses refused
+    // nothing, and the request went out through the GLOBAL fetch — which
+    // resolves a second time, with no classification and no pin.
+    //
+    // The premise in the code was "the transport is about to fail on it
+    // exactly as ours did." It is a second, independent getaddrinfo, so
+    // it is free to succeed. This test does not need hostile DNS to show
+    // that: `localhost` resolves to loopback for the transport whatever
+    // our resolver did, and `DENY_PRIVATE` is the shipped default for
+    // monitors, so a request arriving here is loopback reached from the
+    // channel that forbids it.
+    const server = await startServer((_request, response) => {
+      response.writeHead(200);
+      response.end("reached");
+    });
+    const lookup = vi.fn<EgressLookup>(async () => {
+      throw new Error("EAI_AGAIN localhost");
+    });
+
+    await expect(
+      egressFetch(
+        `http://localhost:${server.port}/`,
+        {},
+        {
+          policy: DENY_PRIVATE,
+          lookup,
+        },
+      ),
+    ).rejects.toThrow(/EAI_AGAIN/);
+    expect(server.received).toHaveLength(0);
+  });
+
   it("keeps the original Host header on the pinned connection", async () => {
     // The reason the address is pinned through `lookup` rather than by
     // rewriting the URL to the IP: `Host` is what every name-based

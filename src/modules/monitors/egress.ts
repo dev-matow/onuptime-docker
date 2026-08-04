@@ -212,14 +212,22 @@ export function egressBlockReason(classification: AddressClass): string {
  * answers `[93.184.216.34, 127.0.0.1]` is asking the connector to pick,
  * and the connector picks by availability, not by policy.
  *
- * A hostname that does not resolve is *not* a refusal. There is no
- * address, so there is nothing to connect to and nothing to protect
- * against — and the transport below resolves through the same
- * `dns.lookup` this just used, so it will fail identically with the
- * real error instead of a synthetic one. (`refusesPrivate` in
- * `types/probes/guard.ts` makes the opposite choice, because the probes
- * behind it open their own sockets and so perform a second lookup this
- * one never sees.)
+ * A hostname that does not resolve stops here, and the resolver's own
+ * error is what comes out — not a synthetic one, so a monitor on a
+ * domain that stopped resolving still reports the DNS failure it always
+ * did and is still judged `down`.
+ *
+ * It used to continue instead, on the premise that "the transport below
+ * resolves through the same `dns.lookup`, so it will fail identically."
+ * That premise was wrong, and it was the one thing holding the guard
+ * shut: a failed lookup became an empty address list, the loop below
+ * refused nothing because it had nothing to refuse, and the request went
+ * out through the *global* `fetch` — a second, independent getaddrinfo,
+ * free to succeed where ours failed, with no classification and no pin.
+ * One dropped UDP packet was enough; hostile DNS was not required.
+ * `refusesPrivate` in `types/probes/guard.ts` already reasoned it out
+ * correctly for the identical question: our resolver failing says
+ * nothing about what the next one will do.
  */
 export async function authorizeEgress(
   url: URL,
@@ -240,7 +248,12 @@ export async function authorizeEgress(
   const literal = parseAddress(hostname);
   const addresses: ResolvedAddress[] = literal
     ? [{ address: hostname, family: literal.family }]
-    : await (options.lookup ?? systemLookup)(hostname).catch(() => []);
+    : await (options.lookup ?? systemLookup)(hostname);
+  if (addresses.length === 0) {
+    // A resolver that succeeds with no answer is the same position as one
+    // that threw: no address was classified, so no socket may be opened.
+    throw new EgressBlockedError("Target did not resolve to any address");
+  }
 
   for (const { address } of addresses) {
     // An address the classifier cannot read is refused rather than
@@ -457,12 +470,19 @@ function pinnedFetch(pin: ResolvedAddress | null): typeof fetch {
         : input instanceof URL
           ? input.href
           : input.url;
-    // No pin means the hostname never resolved. The system resolver is
-    // about to fail on it exactly as ours did, and its error is the one
-    // worth reporting.
-    return pin === null
-      ? fetch(target, init)
-      : pinnedRequest(new URL(target), (init ?? {}) as EgressRequestInit, pin);
+    // Unreachable: `authorizeEgress` throws rather than return a null pin.
+    // Kept as a refusal anyway, because this is the line that decides
+    // whether an unclassified address gets a socket, and the day someone
+    // reintroduces a "just fall back to fetch" path it should fail here
+    // rather than silently resolve a second time.
+    if (pin === null) {
+      throw new EgressBlockedError("Target did not resolve to any address");
+    }
+    return pinnedRequest(
+      new URL(target),
+      (init ?? {}) as EgressRequestInit,
+      pin,
+    );
   };
 }
 

@@ -29,6 +29,24 @@ import {
 } from "@/modules/status-pages/subscribers";
 
 /**
+ * How much scrypt one page may be made to do.
+ *
+ * `unlockStatusPage` verifies with `scryptSync`, which is deliberately
+ * expensive and, being sync, occupies the event loop while it runs — 32ms
+ * measured on this machine. Unthrottled, that is roughly thirty requests
+ * a second to saturate a Node process and stall every other request in
+ * the deployment, from an endpoint that needs no account and no session.
+ * The sibling subscribe action below has always been limited; this one
+ * was not, and it is the more expensive of the two.
+ *
+ * Per page, because that is what bounds the CPU: a per-address limit is
+ * whatever the caller's address happens to be. Thirty attempts a minute
+ * is far more than anyone types a shared password and far less than one
+ * core.
+ */
+const UNLOCK_RATE_LIMIT = { limit: 30, windowMs: 60_000 } as const;
+
+/**
  * Verifies a status page's shared password. On success, mints an HMAC
  * unlock cookie scoped to the page and reloads; on failure, bounces back
  * with `?e=1` so the form can show an error. No session required — this
@@ -39,7 +57,12 @@ export async function unlockStatusPageAction(
   formData: FormData,
 ): Promise<void> {
   const password = String(formData.get("password") ?? "");
-  const pageId = password ? await unlockStatusPage(db, slug, password) : null;
+  // Refused attempts answer exactly like a wrong password. Saying "too
+  // many attempts" would tell an unauthenticated caller that this slug is
+  // a real page, which is the one thing the generic answer protects.
+  const allowed = checkRateLimit(`sp-unlock:${slug}`, UNLOCK_RATE_LIMIT);
+  const pageId =
+    password && allowed ? await unlockStatusPage(db, slug, password) : null;
 
   if (!pageId) {
     redirect(`/status/${encodeURIComponent(slug)}?e=1`);
@@ -77,7 +100,12 @@ export async function subscribeToStatusPageAction(
     const email = normalizeEmail(parsed.data.email);
 
     // Cap attempts per address so the confirmation email can't be weaponised.
-    if (!checkRateLimit(`sp-subscribe:${email}`, { limit: 3, windowMs: 3_600_000 })) {
+    if (
+      !checkRateLimit(`sp-subscribe:${email}`, {
+        limit: 3,
+        windowMs: 3_600_000,
+      })
+    ) {
       return actionError("Too many attempts. Try again later.");
     }
 

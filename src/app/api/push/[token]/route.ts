@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { db } from "@/db";
 import { checkRateLimit } from "@/lib/rate-limit";
 import {
@@ -68,8 +70,19 @@ function arrivalFrom(url: URL): HeartbeatArrival {
   };
 }
 
+/** SHA-256, hex. The token is 256 bits of CSPRNG, so there is no
+ * dictionary to slow an attacker through and no reason to pay for one. */
+function sha256Hex(token: string): string {
+  return createHash("sha256").update(token, "utf8").digest("hex");
+}
+
 async function receive(request: Request, token: string): Promise<Response> {
-  if (!checkRateLimit(`push:${token}`, RATE_LIMIT)) {
+  // Keyed on the hash, not the token. The limiter's map is
+  // process-lifetime state, and a push token is a live bearer credential:
+  // putting it there hands every token tried since boot to anything that
+  // can read the heap. `api/probe/enroll` already reasoned this out and
+  // hashes; this route, on the same map, did not.
+  if (!checkRateLimit(`push:${sha256Hex(token)}`, RATE_LIMIT)) {
     return Response.json(
       { ok: false, error: "Too many heartbeats." },
       { status: 429 },

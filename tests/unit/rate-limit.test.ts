@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { checkRateLimit } from "@/lib/rate-limit";
+import {
+  checkRateLimit,
+  rateLimitKeyCount,
+  resetRateLimits,
+} from "@/lib/rate-limit";
 
 // The limiter keeps per-key state in module scope; each test uses its
 // own key so tests in this file cannot interfere with one another.
@@ -50,6 +54,35 @@ describe("checkRateLimit", () => {
     expect(checkRateLimit("unit:expiry", options)).toBe(true);
     expect(checkRateLimit("unit:expiry", options)).toBe(true);
     expect(checkRateLimit("unit:expiry", options)).toBe(false);
+  });
+
+  it("does not retain a key for every value an attacker tries", () => {
+    // The keys here are chosen by the caller: `push:<token>` from an
+    // unauthenticated route, `sp-subscribe:<email>`, a status-page slug.
+    // Nothing evicted them, so guessing tokens grew the map forever —
+    // half a million keys measured at 132 MB, and every behavioural test
+    // above still passed, because the limiting itself was never wrong.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-01T00:00:00Z"));
+    resetRateLimits();
+
+    const options = { limit: 1, windowMs: 60_000 };
+    for (let i = 0; i < 40_000; i += 1) {
+      checkRateLimit(`unit:flood-${i}`, options);
+    }
+    const atPeak = rateLimitKeyCount();
+    expect(atPeak).toBeLessThanOrEqual(20_000);
+
+    // And an expired backlog is released rather than merely capped: once
+    // the windows lapse, ordinary traffic sweeps them out, so a quiet
+    // process does not sit on twenty thousand dead keys forever.
+    vi.setSystemTime(new Date("2026-07-01T00:02:00Z"));
+    for (let i = 0; i < 1_000; i += 1) {
+      checkRateLimit(`unit:after-${i}`, options);
+    }
+    expect(rateLimitKeyCount()).toBeLessThan(2_000);
+
+    resetRateLimits();
   });
 
   it("does not count blocked attempts against the window", () => {

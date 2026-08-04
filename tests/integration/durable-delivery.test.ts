@@ -507,12 +507,23 @@ describe("lease fencing", () => {
 
     const { renewLease } = await import("@/modules/notifications/outbox");
     const bLease = (await rowFor(row.id))!.leasedUntil!;
-    await renewLease(db, row.id, a!.fence);
+    const aHeld = await renewLease(db, row.id, a!.fence);
     // A's renewal changed nothing: B's lease is intact.
     expect((await rowFor(row.id))!.leasedUntil!.getTime()).toBe(
       bLease.getTime(),
     );
     expect(b!.fence).toBeGreaterThan(a!.fence);
+
+    // And A is TOLD. This assertion is the one that matters, and it is
+    // the one this test did not make: the refusal used to be silent,
+    // `renewLease` returned void, and the caller went on to send. The
+    // fence then refused to record the outcome — which protects the
+    // ledger, not the person whose phone rang twice. A test that asserts
+    // only "B's lease is intact" passes with the duplicate live.
+    expect(aHeld).toBe(false);
+    // The owner is told the opposite, or "false" would be satisfied by a
+    // function that has simply stopped working.
+    expect(await renewLease(db, row.id, b!.fence)).toBe(true);
   });
 
   it("gives two concurrent claims of one row to exactly one worker", async () => {

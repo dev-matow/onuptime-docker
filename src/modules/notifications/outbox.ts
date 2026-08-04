@@ -484,21 +484,34 @@ export async function claimDue(
 }
 
 /**
- * Extends the lease on a row about to be delivered.
+ * Extends the lease on a row about to be delivered, and reports whether
+ * this worker still owns it.
  *
  * Called immediately before each send, so the clock starts at the send
  * rather than at the batch claim. Without it the last row of a slow
  * batch inherits whatever is left of a lease the first row started.
+ *
+ * **The answer is the point, and it used to be thrown away.** This
+ * returned `void`, so a fenced UPDATE matching zero rows — the signal
+ * that the lease had lapsed and somebody else now owns this delivery —
+ * was indistinguishable from success, and the caller sent anyway. The
+ * fence then correctly refused to record the outcome, which protected
+ * the ledger and not the recipient: the page went out twice and only one
+ * of them was written down. A batch is 250 rows at 4 concurrent with a
+ * 10s timeout, so its own tail can pass the 600s lease without any
+ * operator error at all.
+ *
+ * @returns false when the fence has moved. Do not send.
  */
 export async function renewLease(
   db: DbClient,
   rowId: string,
   fence: number,
-): Promise<void> {
+): Promise<boolean> {
   // Fenced, like every other write from a claim. Extending a lease is
   // an assertion of ownership, and a worker that has already lost the
   // row asserting it would push the real owner's deadline out.
-  await db
+  const held = await db
     .update(notificationOutbox)
     .set({
       leasedUntil: sql`now() + make_interval(secs => ${LEASE_MS / 1000})`,
@@ -508,7 +521,9 @@ export async function renewLease(
         eq(notificationOutbox.id, rowId),
         eq(notificationOutbox.fence, fence),
       ),
-    );
+    )
+    .returning({ id: notificationOutbox.id });
+  return held.length > 0;
 }
 
 /** Where a delivery ended, and why. Returned so the caller can log and

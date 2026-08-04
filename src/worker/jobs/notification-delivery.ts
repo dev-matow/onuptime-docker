@@ -274,7 +274,20 @@ export async function runNotificationDelivery(
       // seven slow ones does not inherit what is left of a lease taken
       // when the batch was claimed. Fenced: a worker that already lost
       // the row does not get to extend a lease it no longer holds.
-      await renewLease(db, row.id, claim.fence);
+      //
+      // And if it has lost it, it does not get to SEND either. The fence
+      // decides whose result counts, which is a rule about the ledger; a
+      // second copy of a page has already reached the human by the time
+      // the ledger refuses it. This is the only place that can tell in
+      // time, because it is the last thing that happens before the send.
+      if (!(await renewLease(db, row.id, claim.fence))) {
+        result.superseded++;
+        logger.warn(
+          { outboxId: row.id, fence: claim.fence, attempt: claim.attempt },
+          "notification lease was lost before the send; not delivering",
+        );
+        return;
+      }
       outcome = await deliver(db, row, send, options.net ?? {});
     } catch (error) {
       // A transport that throws instead of returning an outcome is a

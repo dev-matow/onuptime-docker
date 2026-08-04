@@ -82,7 +82,17 @@ export async function getIncidentDetail(
     .from(incidentEvents)
     .leftJoin(user, eq(incidentEvents.createdBy, user.id))
     .where(eq(incidentEvents.incidentId, incidentId))
-    .orderBy(desc(incidentEvents.createdAt));
+    // Ordered by id, not by `created_at`.
+    //
+    // `created_at` defaults to `now()`, which in Postgres is the
+    // TRANSACTION START time, not the commit time. Two concurrent
+    // writers therefore appear on the timeline in the order they began,
+    // which can be the reverse of the order they committed - measured:
+    // the event written by the transaction that committed second
+    // carried the earlier timestamp. `uuidv7()` uses the wall clock at
+    // insert, so the id is strictly the better ordering key and needs
+    // no column change.
+    .orderBy(desc(incidentEvents.id));
 
   return {
     incident,
@@ -161,14 +171,36 @@ export async function acknowledgeIncident(
       .update(incidents)
       .set({ acknowledgedAt: new Date(), acknowledgedBy: actor.userId })
       .where(
-        and(eq(incidents.id, incidentId), isNull(incidents.acknowledgedAt)),
+        and(
+          eq(incidents.id, incidentId),
+          eq(incidents.organizationId, actor.organizationId),
+          isNull(incidents.acknowledgedAt),
+          // The status guard above ran against a row read earlier in
+          // this transaction. Without it here too, a worker resolving
+          // the incident in between let this acknowledge a CLOSED
+          // incident and append to its timeline - the same lost update
+          // the status compare-and-swap was written to stop, in a
+          // function that never got one.
+          ne(incidents.status, "resolved"),
+        ),
       )
       .returning();
-    // Lost the race — the incident is acknowledged, which is what the
-    // caller wanted. Return the winner's row rather than raising: an ack
-    // is idempotent by intent.
+    // Zero rows has two causes now, and they are not the same answer.
+    // Somebody else acknowledged first: that is what the caller wanted,
+    // so return the winner's row - an ack is idempotent by intent. The
+    // incident was RESOLVED between the guard above and this write:
+    // that is a conflict, and returning quietly would tell the operator
+    // their acknowledgement stuck when it did not.
     if (!updated) {
-      return findIncidentOrThrow(tx, actor.organizationId, incidentId);
+      const current = await findIncidentOrThrow(
+        tx,
+        actor.organizationId,
+        incidentId,
+      );
+      if (current.status === "resolved") {
+        throw new ConflictError("This incident is already resolved.");
+      }
+      return current;
     }
 
     await tx.insert(incidentEvents).values({
@@ -232,6 +264,13 @@ export async function changeIncidentStatus(
       .where(
         and(
           eq(incidents.id, incidentId),
+          // Tenant-scoped in the statement that WRITES, not only in the
+          // read above it. `findIncidentOrThrow` already proved
+          // ownership, but this is the predicate that actually decides,
+          // and one another tenant's row cannot satisfy is worth more
+          // than an earlier check - the same rule the notification
+          // module states three times.
+          eq(incidents.organizationId, actor.organizationId),
           eq(incidents.status, incident.status),
         ),
       )
@@ -271,10 +310,14 @@ export async function postIncidentUpdate(
   internal = false,
 ): Promise<IncidentEvent> {
   return db.transaction(async (tx) => {
+    // Locked: the guard below is only worth anything if the status it
+    // reads cannot change before the insert. An INSERT has no column to
+    // compare-and-swap on, so the lock is the guard.
     const incident = await findIncidentOrThrow(
       tx,
       actor.organizationId,
       incidentId,
+      { forUpdate: true },
     );
     if (incident.status === "resolved") {
       throw new ConflictError(
@@ -317,9 +360,25 @@ export async function changeIncidentSeverity(
     const [updated] = await tx
       .update(incidents)
       .set({ severity })
-      .where(eq(incidents.id, incidentId))
+      .where(
+        and(
+          eq(incidents.id, incidentId),
+          eq(incidents.organizationId, actor.organizationId),
+          // `where id` alone, directly below the comment on
+          // `changeIncidentStatus` explaining exactly this hazard: an
+          // operator raising the severity of an incident a worker
+          // resolved a moment ago changed a closed incident and wrote a
+          // `severity_change` line onto a timeline the public status
+          // page renders.
+          ne(incidents.status, "resolved"),
+        ),
+      )
       .returning();
-    if (!updated) throw new NotFoundError("Incident not found.");
+    if (!updated) {
+      throw new ConflictError(
+        "This incident was resolved while you were looking at it, reload and try again.",
+      );
+    }
 
     await tx.insert(incidentEvents).values({
       incidentId,
@@ -386,6 +445,28 @@ export async function openMonitorIncident(
 ): Promise<Incident | null> {
   try {
     return await db.transaction(async (tx) => {
+      // Serialise on the monitor row, and re-read the status under it.
+      //
+      // The check that decided to open this incident committed a moment
+      // ago in its own transaction; the decision to open is made out
+      // here, afterwards. So a recovery check for the same monitor can
+      // land in between, resolve the open incident and mark the monitor
+      // up - and this insert would then open a BRAND NEW incident for a
+      // monitor that is currently fine, page for it, and resolve it on
+      // the next check. One page-resolve-page flap per race, and it was
+      // reproducible.
+      //
+      // `resolveMonitorIncidents` takes the same lock, so the two
+      // serialise and whichever is second sees the other's committed
+      // status. Refusing on `up` is the whole guard: an incident is
+      // never opened for a monitor the database currently says is fine.
+      const [current] = await tx
+        .select({ status: monitors.currentStatus })
+        .from(monitors)
+        .where(eq(monitors.id, monitor.id))
+        .for("update");
+      if (!current || current.status === "up") return null;
+
       const [incident] = await tx
         .insert(incidents)
         .values({
@@ -473,6 +554,51 @@ function isUniqueViolation(error: unknown, constraint: string): boolean {
  * aren't held, or recovery exhaustion / the escalation failsafe when
  * they are. Postgres arbitrates the race via the conditional update.
  */
+/**
+ * The open automatic incident for a monitor when nobody has acted on it
+ * yet, so a later check can finish what an interrupted one started.
+ *
+ * `openMonitorIncident` returns null once the row exists - that is its
+ * contract, and it is correct. What was wrong is what the caller did
+ * with it: every consequence of an incident (the page, the recovery
+ * job, the escalation ladder) hung off "I was the transaction that
+ * inserted the row". A worker that committed the insert and then died -
+ * evicted pod, dropped connection, a throw between the two - left an
+ * incident open with nobody notified, and every later check took the
+ * null path and skipped the block. Nobody was ever paged, and nothing
+ * anywhere repaired it.
+ *
+ * Two conditions, and both are needed. `notified_at is null` means the
+ * page has not gone out. No system event means no handler has recorded
+ * a decision about this incident either - which is how a HELD incident
+ * (recovery is handling it, the page deliberately deferred) is told
+ * apart from one nobody has looked at. Without the second condition a
+ * held incident would be re-handled on every check and would schedule
+ * its recovery job again each time.
+ */
+export async function findUnhandledAutoIncident(
+  db: DbClient,
+  monitorId: string,
+): Promise<Incident | null> {
+  const [row] = await db
+    .select()
+    .from(incidents)
+    .where(
+      and(
+        eq(incidents.monitorId, monitorId),
+        eq(incidents.source, "monitor"),
+        ne(incidents.status, "resolved"),
+        isNull(incidents.notifiedAt),
+        sql`not exists (
+          select 1 from ${incidentEvents} e
+          where e.incident_id = ${incidents.id} and e.type = 'system'
+        )`,
+      ),
+    )
+    .limit(1);
+  return row ?? null;
+}
+
 export async function claimIncidentNotification(
   db: DbClient,
   incidentId: string,
@@ -491,6 +617,16 @@ export async function resolveMonitorIncidents(
   monitor: Monitor,
 ): Promise<Incident[]> {
   return db.transaction(async (tx) => {
+    // The same monitor-row lock `openMonitorIncident` takes, so a check
+    // opening an incident and a check resolving one cannot interleave.
+    // Without it the resolver's read could miss an insert that had not
+    // committed yet, leaving a live incident on a monitor that is up.
+    await tx
+      .select({ id: monitors.id })
+      .from(monitors)
+      .where(eq(monitors.id, monitor.id))
+      .for("update");
+
     const open = await tx.query.incidents.findMany({
       where: and(
         eq(incidents.monitorId, monitor.id),
@@ -561,17 +697,36 @@ export async function recordSystemEvent(
   });
 }
 
+/**
+ * The one read every mutating path starts from.
+ *
+ * `forUpdate` takes a row lock, and the paths that write take it. The
+ * pattern without it is read-check-write across two statements, and
+ * under READ COMMITTED that is a lost update waiting for a busy
+ * afternoon: an operator posts a public update at the same moment a
+ * worker resolves the incident, the read says `investigating`, the
+ * guard passes, and a customer-facing line lands on a timeline the
+ * status page has already closed. `changeIncidentStatus` avoids that
+ * with a compare-and-swap because it has a column to swap on; an INSERT
+ * of a timeline event has nothing to compare, so it locks instead.
+ */
 async function findIncidentOrThrow(
   db: DbClient,
   organizationId: string,
   incidentId: string,
+  options: { forUpdate?: boolean } = {},
 ): Promise<Incident> {
-  const incident = await db.query.incidents.findFirst({
-    where: and(
-      eq(incidents.id, incidentId),
-      eq(incidents.organizationId, organizationId),
-    ),
-  });
+  const query = db
+    .select()
+    .from(incidents)
+    .where(
+      and(
+        eq(incidents.id, incidentId),
+        eq(incidents.organizationId, organizationId),
+      ),
+    )
+    .limit(1);
+  const [incident] = await (options.forUpdate ? query.for("update") : query);
   if (!incident) throw new NotFoundError("Incident not found.");
   return incident;
 }

@@ -62,10 +62,17 @@ async function dispatchIncidentWebhook(
 ): Promise<void> {
   try {
     const detail = await getIncidentDetail(db, organizationId, incidentId);
+    // The newest timeline entry identifies this transition, so a second
+    // update on the same incident is a second notification rather than
+    // one the outbox's idempotency key silently swallows. The timeline
+    // is ordered newest-first by `getIncidentDetail`.
+    const transitionKey =
+      event === "incident.updated" ? detail.timeline[0]?.id : undefined;
     await sendIncidentWebhook(db, {
       event,
       incident: detail.incident,
       monitor: detail.monitor ?? undefined,
+      ...(transitionKey ? { transitionKey } : {}),
     });
     // Status-page subscribers hear about the same public lifecycle events.
     const kind = SUBSCRIBER_KIND[event];

@@ -6,6 +6,38 @@ free edition; entries for commercial-only features live in the other
 repository, because they are not in this one and listing them here would
 describe software you do not have.
 
+## 1.18.1 — 2026-08-04
+
+A flaky test turned out to be hiding six real ones.
+
+### Fixed
+
+- **An incident whose worker died before paging anyone was never paged.**
+  The page hung off "I am the transaction that inserted the row", so a
+  worker that committed the insert and then died left an incident open
+  with nobody notified and no later check would repair it. A later
+  check now finds it, claims the notification in the database, and
+  pages exactly once.
+- **A monitor that recovered could still have an incident opened for
+  it**, producing a page-resolve-page flap. Opening and resolving now
+  serialise on the monitor row.
+- **A resolved incident could still be acknowledged, re-prioritised or
+  given a public update** by a caller that read its status a moment
+  earlier - including a customer-facing line on a closed status-page
+  timeline.
+- **Every `incident.updated` after the first was silently dropped** for
+  the life of the incident, because the outbox key named the incident
+  rather than the transition.
+- **Deleting a monitor mid-outage orphaned its incident forever.** It
+  is now closed in the same transaction, with a note saying why.
+- **The incident timeline was ordered by the transaction start clock**,
+  so concurrent writers could appear in the reverse of commit order.
+
+### Changed
+
+- The concurrency tests force the race instead of hoping for it, and
+  every fix above has a test that fails without it.
+
 ## 1.18.0 — 2026-08-04
 
 A delivery engine that survives a provider being down for an afternoon.

@@ -1,6 +1,6 @@
 {
   "name": "vigil-core",
-  "version": "1.18.0",
+  "version": "1.18.1",
   "private": false,
   "license": "Apache-2.0",
   "scripts": {

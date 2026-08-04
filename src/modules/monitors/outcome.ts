@@ -6,6 +6,7 @@ import { logger } from "@/lib/logger";
 import { askAlertHold, askIncidentOpened } from "@/modules/incidents/hooks";
 import {
   claimIncidentNotification,
+  findUnhandledAutoIncident,
   openMonitorIncident,
   recordSystemEvent,
   resolveMonitorIncidents,
@@ -144,11 +145,24 @@ export async function applyOutcome(
   // monitor that somehow ended up down with no incident repairs itself
   // instead of staying wrong until someone notices.
   if (reconciliation.openIncident) {
-    const incident = await openMonitorIncident(
+    const created = await openMonitorIncident(
       db,
       updated,
       outcome.error ?? "check failed",
     );
+    // Level-triggered on "this incident has not been acted on", not on
+    // "I am the transaction that inserted it".
+    //
+    // `openMonitorIncident` returns null once the row exists, so hanging
+    // the block below off it made the page, the recovery job and the
+    // escalation ladder consequences of ONE transaction succeeding
+    // end-to-end. A worker that committed the insert and then died left
+    // an incident open with nobody notified, every later check took the
+    // null path, and nobody was ever paged - in a product whose entire
+    // job is paging people. Re-reading on the null path is what makes
+    // the comment above this block true.
+    const incident =
+      created ?? (await findUnhandledAutoIncident(db, updated.id));
     if (incident) {
       log.warn(
         { monitorId: monitor.id, incidentId: incident.id },
@@ -165,6 +179,10 @@ export async function applyOutcome(
       const scheduled = await askIncidentOpened({ ...ctx, held });
 
       if (held) {
+        // The system event is also the marker that a handler has
+        // decided about this incident: `findUnhandledAutoIncident`
+        // refuses a row that has one, so a held incident is handled
+        // once and not re-handled on every subsequent check.
         await recordSystemEvent(
           db,
           incident.id,
@@ -172,8 +190,20 @@ export async function applyOutcome(
             `${describeDelay(held.deadlineSeconds)} from now.`,
         );
       } else {
-        await claimIncidentNotification(db, incident.id);
-        await sendOpenedNotifications(incident, updated, scheduled.pagesAHuman);
+        // The claim decides who sends, and it is the database that
+        // decides. Two workers reaching here for one incident - the one
+        // that opened it and one repairing after a crash - both attempt
+        // it, and only the one whose UPDATE matched `notified_at is
+        // null` pages. Sending before claiming, which is what this did,
+        // meant the repair path could page a second time.
+        const claimed = await claimIncidentNotification(db, incident.id);
+        if (claimed) {
+          await sendOpenedNotifications(
+            incident,
+            updated,
+            scheduled.pagesAHuman,
+          );
+        }
       }
 
       log.info(

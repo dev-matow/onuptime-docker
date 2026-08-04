@@ -6,13 +6,19 @@ import {
   gte,
   inArray,
   isNull,
+  ne,
   notInArray,
   or,
   sql,
 } from "drizzle-orm";
 
 import type { DbClient } from "@/db";
-import { monitorChecks, monitors } from "@/db/schema";
+import {
+  incidentEvents,
+  incidents,
+  monitorChecks,
+  monitors,
+} from "@/db/schema";
 import { ConflictError, NotFoundError } from "@/lib/errors";
 import { writeAudit } from "@/modules/audit";
 import { stampFact } from "@/modules/ledger/service";
@@ -571,6 +577,39 @@ export async function deleteMonitor(
       monitorId,
     );
 
+    // Close this monitor's open incidents BEFORE the row goes.
+    //
+    // `incidents.monitor_id` is ON DELETE SET NULL, so deleting a
+    // monitor mid-outage left its incident open with nothing pointing
+    // at it: `resolveMonitorIncidents` selects by `monitor_id` and can
+    // never reach it again, so the incident sat in the active list and
+    // the dashboard count forever. Resolving it here, in the same
+    // transaction as the delete, is the only moment the link still
+    // exists - and it says why on the timeline rather than closing
+    // silently.
+    const orphaned = await tx
+      .update(incidents)
+      .set({ status: "resolved", resolvedAt: new Date() })
+      .where(
+        and(
+          eq(incidents.monitorId, monitorId),
+          eq(incidents.organizationId, actor.organizationId),
+          eq(incidents.source, "monitor"),
+          ne(incidents.status, "resolved"),
+        ),
+      )
+      .returning({ id: incidents.id });
+    for (const incident of orphaned) {
+      await tx.insert(incidentEvents).values({
+        incidentId: incident.id,
+        type: "system",
+        status: "resolved",
+        message: `Resolved because the monitor "${monitor.name}" was deleted.`,
+        internal: false,
+        createdBy: actor.userId,
+      });
+    }
+
     await tx.delete(monitors).where(eq(monitors.id, monitorId));
     await writeAudit(tx, {
       organizationId: actor.organizationId,
@@ -578,7 +617,11 @@ export async function deleteMonitor(
       action: "monitor.deleted",
       targetType: "monitor",
       targetId: monitorId,
-      metadata: { name: monitor.name, url: monitor.url },
+      metadata: {
+        name: monitor.name,
+        url: monitor.url,
+        incidentsResolved: orphaned.length,
+      },
     });
     return { releasedGroupId: monitor.parentId };
   });

@@ -676,7 +676,11 @@ async function publicIncidents(
       ne(incidentEvents.type, "system"),
       eq(incidentEvents.internal, false),
     ),
-    orderBy: [desc(incidentEvents.createdAt)],
+    // By id, not `created_at`: that column defaults to `now()`, which
+    // is the transaction START time, so two concurrent writers can land
+    // on the public timeline in the reverse of the order they
+    // committed. `uuidv7()` uses the wall clock at insert.
+    orderBy: [desc(incidentEvents.id)],
   });
 
   return rows.map((incident) => ({

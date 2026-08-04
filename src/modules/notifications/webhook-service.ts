@@ -86,6 +86,12 @@ export async function sendIncidentWebhook(
     event: WebhookEvent;
     incident: Incident;
     monitor?: WebhookMonitor;
+    /**
+     * What happened, when one incident can produce this event more than
+     * once. Only `incident.updated` needs it, and without it that event
+     * fired at most ONCE PER INCIDENT, ever - see below.
+     */
+    transitionKey?: string;
   },
 ): Promise<void> {
   const { event, incident, monitor } = input;
@@ -93,7 +99,19 @@ export async function sendIncidentWebhook(
     const queued = await dispatchToChannels(db, {
       organizationId: incident.organizationId,
       event,
-      causeKey: `incident:${incident.id}:${event}`,
+      // The cause has to identify the TRANSITION, not the incident.
+      //
+      // `incident:<id>:incident.updated` is the same string for every
+      // update an incident ever receives, and the outbox's unique index
+      // on the idempotency key silently dropped all but the first. So a
+      // team posting four updates during an outage broadcast the first
+      // and nothing after it, for the life of the incident, with no
+      // error anywhere. `monitor.down`, `incident.opened` and
+      // `incident.resolved` happen once per incident by nature and are
+      // correct with the plain key; `incident.updated` is not.
+      causeKey: input.transitionKey
+        ? `incident:${incident.id}:${event}:${input.transitionKey}`
+        : `incident:${incident.id}:${event}`,
       subject: monitor?.name ?? incident.title,
       detail: [
         // When the subject is the monitor, the incident title is the

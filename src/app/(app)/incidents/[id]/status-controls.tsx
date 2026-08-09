@@ -151,7 +151,7 @@ export function StatusControls({
           <div className="flex flex-col gap-2">
             {canUpdate &&
               (acknowledged ? (
-                <p className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400">
+                <p className="text-muted-foreground flex items-center gap-1.5 text-[11.5px]">
                   <BellSlashIcon aria-hidden className="size-3.5" />
                   Acknowledged, escalation stopped
                 </p>
@@ -167,10 +167,7 @@ export function StatusControls({
                 </Button>
               ))}
             {canResolve && (
-              <Button
-                className="w-full bg-emerald-600 text-white hover:bg-emerald-600/90"
-                onClick={() => openDialog("resolved")}
-              >
+              <Button className="w-full" onClick={() => openDialog("resolved")}>
                 <CheckCircleIcon aria-hidden />
                 Resolve incident
               </Button>
@@ -283,11 +280,6 @@ export function StatusControls({
                 <Button
                   type="submit"
                   disabled={statusPending || message.trim().length === 0}
-                  className={
-                    resolving
-                      ? "bg-emerald-600 text-white hover:bg-emerald-600/90"
-                      : undefined
-                  }
                 >
                   {statusPending && <Spinner />}
                   {resolving ? "Resolve incident" : "Update status"}

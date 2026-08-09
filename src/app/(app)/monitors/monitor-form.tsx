@@ -541,10 +541,9 @@ export function MonitorForm({
               <FieldDescription>
                 {dials ? (
                   <>
-                    {humanSeconds(readNumber(intervalSeconds, 60))}, a
-                    baseline, not a fixed rate. Vigil checks more often when a
-                    target looks suspicious and backs off when it has been
-                    steady.
+                    {humanSeconds(readNumber(intervalSeconds, 60))}, a baseline,
+                    not a fixed rate. Vigil checks more often when a target
+                    looks suspicious and backs off when it has been steady.
                   </>
                 ) : (
                   <>
@@ -715,8 +714,7 @@ export function MonitorForm({
                 />
                 <FieldDescription>
                   Assert the response body contains (or doesn&apos;t) this text,
-                  catches a 200 that serves an error page. Leave empty to
-                  skip.
+                  catches a 200 that serves an error page. Leave empty to skip.
                 </FieldDescription>
               </Field>
               <Field>

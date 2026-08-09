@@ -1,12 +1,5 @@
 "use client";
 
-import {
-  BroadcastIcon,
-  GaugeIcon,
-  GearIcon,
-  PulseIcon,
-  SirenIcon,
-} from "@phosphor-icons/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -24,13 +17,23 @@ import {
   SidebarRail,
 } from "@/components/ui/sidebar";
 import type { RoleName } from "@/lib/permissions";
+import { cn } from "@/lib/utils";
 
+/**
+ * No icons. A gauge, a pulse and a siren next to the words Dashboard,
+ * Monitors and Incidents say nothing the words did not already say, and
+ * seven of them is most of the decoration in the console.
+ *
+ * The marker in their place is the ladder's square: filled where you
+ * are, hollow where you are not. It is one mark doing two jobs, and it
+ * still occupies the rail when the sidebar collapses to it.
+ */
 const NAV_ITEMS = [
-  { title: "Dashboard", href: "/dashboard", icon: GaugeIcon },
-  { title: "Monitors", href: "/monitors", icon: PulseIcon },
-  { title: "Incidents", href: "/incidents", icon: SirenIcon },
-  { title: "Status page", href: "/status-page", icon: BroadcastIcon },
-  { title: "Settings", href: "/settings", icon: GearIcon },
+  { title: "Dashboard", href: "/dashboard" },
+  { title: "Monitors", href: "/monitors" },
+  { title: "Incidents", href: "/incidents" },
+  { title: "Status page", href: "/status-page" },
+  { title: "Settings", href: "/settings" },
 ] as const;
 
 export function AppSidebar({
@@ -52,20 +55,31 @@ export function AppSidebar({
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
-              {NAV_ITEMS.map((item) => (
-                <SidebarMenuItem key={item.href}>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={pathname.startsWith(item.href)}
-                    tooltip={item.title}
-                  >
-                    <Link href={item.href}>
-                      <item.icon aria-hidden />
-                      <span>{item.title}</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
+              {NAV_ITEMS.map((item) => {
+                const active = pathname.startsWith(item.href);
+                return (
+                  <SidebarMenuItem key={item.href}>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={active}
+                      tooltip={item.title}
+                    >
+                      <Link href={item.href}>
+                        <span
+                          aria-hidden
+                          className={cn(
+                            "inline-block size-1.5 shrink-0 border",
+                            active
+                              ? "border-foreground bg-foreground"
+                              : "border-faint",
+                          )}
+                        />
+                        <span>{item.title}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

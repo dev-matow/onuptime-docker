@@ -137,7 +137,7 @@ function CapabilityBadges({ provider }: { provider: ProviderDescriptor }) {
   return (
     <div className="flex flex-wrap items-center gap-1">
       {!c.native && (
-        <Badge variant="outline" className="text-amber-500">
+        <Badge variant="outline" className="text-foreground">
           Bridge, not a Vigil integration
         </Badge>
       )}
@@ -643,7 +643,7 @@ export function ChannelManager({
                           .join(", ")}
                       </p>
                       {row.scopedToMonitors && row.targetCount === 0 && (
-                        <p className="mt-0.5 text-xs text-amber-500">
+                        <p className="text-foreground mt-0.5 text-xs">
                           Every monitor this channel was scoped to has been
                           deleted, so it receives nothing. Pick monitors, or
                           switch it to the whole workspace.

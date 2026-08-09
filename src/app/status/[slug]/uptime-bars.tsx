@@ -4,9 +4,9 @@ const DAYS_SHOWN = 90;
 
 function barColor(pct: number | null): string {
   if (pct === null) return "bg-muted";
-  if (pct >= 99) return "bg-emerald-500";
-  if (pct >= 90) return "bg-amber-400";
-  return "bg-red-500";
+  if (pct >= 99) return "bg-line-tag";
+  if (pct >= 90) return "bg-foreground";
+  return "bg-destructive";
 }
 
 /**

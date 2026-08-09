@@ -35,8 +35,7 @@ export function SubscribeForm({ slug }: { slug: string }) {
   if (done) {
     return (
       <p className="text-muted-foreground text-sm" role="status">
-        Almost there, check your inbox for a link to confirm your
-        subscription.
+        Almost there, check your inbox for a link to confirm your subscription.
       </p>
     );
   }
@@ -62,10 +61,7 @@ export function SubscribeForm({ slug }: { slug: string }) {
         Subscribe
       </Button>
       {error && (
-        <p
-          className="text-sm text-red-600 dark:text-red-400 sm:self-center"
-          role="alert"
-        >
+        <p className="text-destructive text-sm sm:self-center" role="alert">
           {error}
         </p>
       )}

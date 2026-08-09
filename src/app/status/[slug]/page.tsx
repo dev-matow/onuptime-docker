@@ -5,6 +5,7 @@ import { unstable_cache } from "next/cache";
 
 import { AutoRefresh } from "@/components/auto-refresh";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { VigilMark } from "@/components/vigil-mark";
 import { db } from "@/db";
 import { member, organization } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
@@ -110,12 +111,22 @@ const OVERALL_BANNER: Record<
   PublicStatusPage["overall"],
   { text: string; className: string }
 > = {
+  // A filled banner carries the page colour as its text, which is the
+  // same inverse block a solid button uses. Each fill states its own
+  // foreground: "degraded" is the ink itself, and white on it would be
+  // white on white.
   operational: {
     text: "All systems operational",
-    className: "bg-emerald-500",
+    className: "bg-line-tag text-foreground",
   },
-  degraded: { text: "Degraded performance", className: "bg-amber-500" },
-  outage: { text: "Ongoing outage", className: "bg-red-500" },
+  degraded: {
+    text: "Degraded performance",
+    className: "bg-foreground text-background",
+  },
+  outage: {
+    text: "Ongoing outage",
+    className: "bg-destructive text-background",
+  },
 };
 
 const COMPONENT_STATUS: Record<
@@ -124,13 +135,13 @@ const COMPONENT_STATUS: Record<
 > = {
   up: {
     label: "Operational",
-    className: "text-emerald-600 dark:text-emerald-400",
+    className: "text-muted-foreground",
   },
   degraded: {
     label: "Degraded",
-    className: "text-amber-600 dark:text-amber-400",
+    className: "text-foreground",
   },
-  down: { label: "Down", className: "text-red-600 dark:text-red-400" },
+  down: { label: "Down", className: "text-destructive" },
   unknown: { label: "No data", className: "text-muted-foreground" },
 };
 
@@ -181,10 +192,7 @@ export default async function PublicStatusPage(
         </header>
 
         <div
-          className={cn(
-            "flex items-center gap-3 rounded-lg px-4 py-3 text-white",
-            banner.className,
-          )}
+          className={cn("flex items-center gap-3 px-4 py-3", banner.className)}
         >
           <span className="text-lg font-medium">{banner.text}</span>
         </div>
@@ -260,9 +268,15 @@ export default async function PublicStatusPage(
           </section>
         )}
 
+        {/* Vigil's own mark, and only here. Everything above this line is
+            the customer's page: their name, their logo, their colour. The
+            footer appears at all only when they left branding on. */}
         {page.showBranding && (
           <footer className="text-muted-foreground border-t pt-6 text-center text-xs">
-            Powered by Vigil
+            <span className="inline-flex items-center gap-1.5">
+              <VigilMark className="h-[11px]" />
+              Powered by Vigil
+            </span>
           </footer>
         )}
       </div>
@@ -285,11 +299,12 @@ function IncidentCard({ incident }: { incident: PublicIncident }) {
           <span
             className={cn(
               "rounded-full border px-2 py-0.5 font-mono uppercase",
-              incident.severity === "critical" && "border-red-300 text-red-600",
+              incident.severity === "critical" &&
+                "border-destructive text-destructive",
               incident.severity === "major" &&
-                "border-orange-300 text-orange-600",
+                "border-line-tag text-foreground",
               incident.severity === "minor" &&
-                "border-yellow-300 text-yellow-600",
+                "border-line-tag text-foreground",
             )}
           >
             {SEVERITY_LABEL[incident.severity]}

@@ -1,10 +1,4 @@
-import {
-  ArrowRightIcon,
-  CheckCircleIcon,
-  PulseIcon,
-  SirenIcon,
-  WarningIcon,
-} from "@phosphor-icons/react/dist/ssr";
+import { ArrowRightIcon, PulseIcon } from "@phosphor-icons/react/dist/ssr";
 import type { Metadata } from "next";
 import Link from "next/link";
 
@@ -31,6 +25,7 @@ import {
 import { db } from "@/db";
 import { formatRelativeTime, formatUptime } from "@/lib/format";
 import { requireOrgContext } from "@/lib/session";
+import { cn } from "@/lib/utils";
 import { listIncidents } from "@/modules/incidents/service";
 import { listMonitors } from "@/modules/monitors/service";
 
@@ -62,31 +57,18 @@ export default async function DashboardPage() {
         </p>
       </header>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard
-          label="Operational"
-          value={`${up}/${active.length}`}
-          icon={
-            <CheckCircleIcon className="size-4 text-emerald-500" aria-hidden />
-          }
-        />
-        <StatCard
-          label="Down"
-          value={String(down)}
-          icon={<WarningIcon className="size-4 text-red-500" aria-hidden />}
-          alert={down > 0}
-        />
-        <StatCard
-          label="Degraded"
-          value={String(degraded)}
-          icon={<PulseIcon className="size-4 text-amber-500" aria-hidden />}
-          alert={degraded > 0}
-        />
-        <StatCard
+      {/* The counters are the positive signal. There are no green dots in
+          the list below, on purpose, so "everything is fine" has to be
+          readable here in one number instead of scanned for down a
+          column of fifteen rows, or five hundred. */}
+      <div className="grid border sm:grid-cols-2 lg:grid-cols-4">
+        <StatCell label="Operational" value={`${up}/${active.length}`} />
+        <StatCell label="Down" value={String(down)} tone="down" />
+        <StatCell label="Degraded" value={String(degraded)} tone="degraded" />
+        <StatCell
           label="Active incidents"
           value={String(activeIncidents.length)}
-          icon={<SirenIcon className="size-4 text-red-500" aria-hidden />}
-          alert={activeIncidents.length > 0}
+          tone={activeIncidents.length > 0 ? "down" : undefined}
         />
       </div>
 
@@ -105,7 +87,7 @@ export default async function DashboardPage() {
                 <li key={incident.id}>
                   <Link
                     href={`/incidents/${incident.id}`}
-                    className="hover:bg-muted/50 -mx-2 flex flex-wrap items-center gap-3 rounded-md px-2 py-3"
+                    className="hover:bg-accent -mx-2 flex flex-wrap items-center gap-3 px-2 py-3"
                   >
                     <SeverityBadge severity={incident.severity} />
                     <span className="min-w-0 flex-1 truncate font-medium">
@@ -157,7 +139,7 @@ export default async function DashboardPage() {
                 <li key={monitor.id}>
                   <Link
                     href={`/monitors/${monitor.id}`}
-                    className="hover:bg-muted/50 -mx-2 flex items-center gap-3 rounded-md px-2 py-2.5"
+                    className="hover:bg-accent -mx-2 flex h-10 items-center gap-3 px-2"
                   >
                     <MonitorStatusIndicator
                       status={monitor.currentStatus}
@@ -181,28 +163,44 @@ export default async function DashboardPage() {
   );
 }
 
-function StatCard({
+/**
+ * A counter carries the same square as the rows it is counting, so the
+ * legend and the list are one vocabulary rather than two. The number is
+ * mono: the console is instruments, and a counter is an instrument that
+ * happens to be large.
+ */
+function StatCell({
   label,
   value,
-  icon,
-  alert = false,
+  tone,
 }: {
   label: string;
   value: string;
-  icon: React.ReactNode;
-  alert?: boolean;
+  tone?: "down" | "degraded";
 }) {
+  const zero = value === "0";
   return (
-    <Card className={alert ? "border-red-200 dark:border-red-900" : undefined}>
-      <CardContent className="flex flex-col gap-1">
-        <div className="text-muted-foreground flex items-center gap-2 text-xs font-medium tracking-wide uppercase">
-          {icon}
-          {label}
-        </div>
-        <div className="font-mono text-2xl font-semibold tabular-nums">
-          {value}
-        </div>
-      </CardContent>
-    </Card>
+    <div className="border-line-inner border-l px-4 py-3 first:border-l-0">
+      <div className="text-muted-foreground flex items-center gap-2 text-[10px] font-medium tracking-[0.08em] uppercase">
+        <span
+          aria-hidden
+          className={cn(
+            "inline-block size-1.5 shrink-0 border",
+            tone === "down" && !zero && "border-destructive bg-destructive",
+            tone === "degraded" && !zero && "border-foreground bg-foreground",
+            (!tone || zero) && "border-muted-foreground",
+          )}
+        />
+        {label}
+      </div>
+      <div
+        className={cn(
+          "mt-1 font-mono text-[36px] leading-none font-bold tabular-nums",
+          tone === "down" && !zero && "text-destructive",
+        )}
+      >
+        {value}
+      </div>
+    </div>
   );
 }

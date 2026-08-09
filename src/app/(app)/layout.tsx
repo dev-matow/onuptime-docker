@@ -1,7 +1,6 @@
 import { eq } from "drizzle-orm";
 
 import { AppSidebar } from "@/components/app-sidebar";
-import { ThemeToggle } from "@/components/theme-toggle";
 import {
   SidebarInset,
   SidebarProvider,
@@ -26,10 +25,14 @@ export default async function AppLayout({
   });
 
   return (
-    <SidebarProvider>
+    // The console is dark-only: this is the screen somebody opens at 3am,
+    // and it is the one surface that never leaves the building. The theme
+    // toggle lives on the public status page instead, where the reader is
+    // the customer's audience rather than the operator.
+    <SidebarProvider className="dark bg-background text-foreground">
       <a
         href="#main-content"
-        className="focus:bg-background focus:ring-ring sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-md focus:px-3 focus:py-2 focus:text-sm focus:ring-2"
+        className="focus:bg-background focus:ring-ring sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:px-3 focus:py-2 focus:text-sm focus:ring-2"
       >
         Skip to content
       </a>
@@ -43,17 +46,14 @@ export default async function AppLayout({
         role={ctx.role}
       />
       <SidebarInset className="min-w-0">
-        <header className="bg-background/80 sticky top-0 z-10 flex h-14 items-center gap-2 border-b px-4 backdrop-blur">
+        <header className="bg-background sticky top-0 z-10 flex h-12 items-center gap-2 border-b px-4">
           <SidebarTrigger className="-ml-1" />
           <Separator orientation="vertical" className="mr-2 h-4" />
-          <span className="text-sm font-medium">{org?.name}</span>
-          <div className="ml-auto flex items-center gap-1">
-            <ThemeToggle />
-          </div>
+          <span className="text-[12.5px] font-medium">{org?.name}</span>
         </header>
         <main
           id="main-content"
-          className="mx-auto w-full max-w-6xl flex-1 p-4 md:p-8"
+          className="mx-auto w-full max-w-[1104px] flex-1 p-6"
         >
           {children}
         </main>

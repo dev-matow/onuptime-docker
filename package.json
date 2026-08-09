@@ -25,6 +25,8 @@
     "test:e2e": "playwright test",
     "dashes": "node scripts/dash-guard.mjs",
     "dashes:check": "node scripts/dash-guard.mjs --check",
+    "brand": "node scripts/brand-mark.mjs",
+    "brand:check": "node scripts/brand-mark.mjs --check",
     "dod": "node scripts/dod-matrix.mjs",
     "kuma:matrix": "node scripts/kuma-matrix.mjs",
     "kuma:check": "node scripts/kuma-matrix.mjs --check",

@@ -61,9 +61,7 @@ export async function generateText(options: {
   } catch (error) {
     if (error instanceof AppError) throw error;
     if (error instanceof Anthropic.RateLimitError) {
-      throw new AppError(
-        "AI is briefly over capacity, try again in a minute.",
-      );
+      throw new AppError("AI is briefly over capacity, try again in a minute.");
     }
     if (error instanceof Anthropic.APIError) {
       logger.error({ err: error, status: error.status }, "anthropic api error");

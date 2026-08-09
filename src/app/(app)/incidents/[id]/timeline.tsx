@@ -30,13 +30,13 @@ const EVENT_LABELS: Record<TimelineEvent["type"], string> = {
 
 function iconTone(event: TimelineEvent): string {
   if (event.type === "status_change" && event.status === "resolved") {
-    return "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400";
+    return "text-muted-foreground";
   }
   if (event.type === "created") {
     return "bg-foreground text-background";
   }
   if (event.type === "severity_change") {
-    return "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400";
+    return "text-foreground";
   }
   return "bg-muted text-muted-foreground";
 }
@@ -78,7 +78,7 @@ export function IncidentTimeline({ events }: { events: TimelineEvent[] }) {
                 </span>
                 {event.status && <IncidentStatusBadge status={event.status} />}
                 {event.internal && (
-                  <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-amber-700 uppercase dark:bg-amber-950 dark:text-amber-400">
+                  <span className="text-foreground rounded px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase">
                     Internal
                   </span>
                 )}

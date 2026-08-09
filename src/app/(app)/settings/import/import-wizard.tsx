@@ -300,8 +300,8 @@ export function ImportWizard({ canImport }: { canImport: boolean }) {
             read. If Kuma is still running, checkpoint it first:{" "}
             <code className="font-mono">
               sqlite3 kuma.db &quot;PRAGMA wal_checkpoint(TRUNCATE);&quot;
-            </code>{" "},
-            because everything since the last checkpoint lives in the{" "}
+            </code>{" "}
+            , because everything since the last checkpoint lives in the{" "}
             <code className="font-mono">-wal</code> sidecar and an upload
             carries one file.
           </FieldDescription>

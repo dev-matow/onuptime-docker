@@ -136,7 +136,7 @@ export default async function MonitorDetailPage(
                 className={cn(
                   "font-mono text-xs",
                   monitor.tlsDaysRemaining < monitor.tlsWarnDays &&
-                    "text-amber-600 dark:text-amber-400",
+                    "text-foreground",
                 )}
               >
                 cert {monitor.tlsDaysRemaining}d left
@@ -307,10 +307,7 @@ function CheckResultBadge({
 }) {
   if (!check.ok) {
     return (
-      <Badge
-        variant="outline"
-        className="border-red-300 text-red-700 dark:border-red-800 dark:text-red-400"
-      >
+      <Badge variant="outline" className="border-destructive text-destructive">
         Failed
       </Badge>
     );
@@ -320,19 +317,13 @@ function CheckResultBadge({
     check.responseTimeMs > degradedThresholdMs
   ) {
     return (
-      <Badge
-        variant="outline"
-        className="border-amber-300 text-amber-700 dark:border-amber-800 dark:text-amber-500"
-      >
+      <Badge variant="outline" className="border-line-tag text-foreground">
         Degraded
       </Badge>
     );
   }
   return (
-    <Badge
-      variant="outline"
-      className="border-emerald-300 text-emerald-700 dark:border-emerald-900 dark:text-emerald-400"
-    >
+    <Badge variant="outline" className="border-line-tag text-muted-foreground">
       OK
     </Badge>
   );

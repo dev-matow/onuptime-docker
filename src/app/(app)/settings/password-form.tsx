@@ -85,9 +85,8 @@ export function PasswordForm() {
             required
           />
           <FieldDescription>
-            At least 10 characters. Every other session is signed out, a
-            browser that already had one open can take up to five minutes to
-            notice.
+            At least 10 characters. Every other session is signed out, a browser
+            that already had one open can take up to five minutes to notice.
           </FieldDescription>
         </Field>
         <Field>

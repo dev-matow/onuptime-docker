@@ -68,8 +68,7 @@ export default async function IncidentsPage(props: PageProps<"/incidents">) {
               variant="secondary"
               className={cn(
                 "font-mono",
-                activeIncidents.length > 0 &&
-                  "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300",
+                activeIncidents.length > 0 && "text-destructive",
               )}
             >
               {activeIncidents.length} open
@@ -97,10 +96,7 @@ export default async function IncidentsPage(props: PageProps<"/incidents">) {
         tab === "active" ? (
           <Empty className="border border-dashed py-12">
             <EmptyHeader>
-              <EmptyMedia
-                variant="icon"
-                className="bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400"
-              >
+              <EmptyMedia variant="icon" className="text-muted-foreground">
                 <CheckCircleIcon aria-hidden />
               </EmptyMedia>
               <EmptyTitle>No active incidents</EmptyTitle>

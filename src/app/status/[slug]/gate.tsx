@@ -48,7 +48,7 @@ export function PasswordGate({
           required
         />
         {error && (
-          <p className="text-sm text-red-600 dark:text-red-400" role="alert">
+          <p className="text-destructive text-sm" role="alert">
             That password didn&apos;t match. Try again.
           </p>
         )}

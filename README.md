@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/brand/vigil-mark.svg">
+  <img src="docs/brand/vigil-mark-dark.svg" alt="" width="100" height="44">
+</picture>
+
 # Vigil Core
 
 **Self-hosted uptime monitoring, incidents and status pages.** Two

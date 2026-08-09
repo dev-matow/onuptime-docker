@@ -51,15 +51,15 @@ export function ResponseTimeChart({
       <div className="text-muted-foreground mb-2 flex items-center justify-between gap-4 text-[11px]">
         <div className="flex items-center gap-3" aria-hidden>
           <span className="flex items-center gap-1.5">
-            <span className="size-2 bg-emerald-500" />
+            <span className="bg-faint size-2" />
             Healthy
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="size-2 bg-amber-500" />
+            <span className="bg-foreground size-2" />
             Degraded
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="size-2 bg-red-500" />
+            <span className="bg-destructive size-2" />
             Failed
           </span>
         </div>
@@ -87,10 +87,10 @@ export function ResponseTimeChart({
                 2,
               );
           const barClass = failed
-            ? "fill-red-500"
+            ? "fill-destructive"
             : responseMs !== null && responseMs > degradedThresholdMs
-              ? "fill-amber-500"
-              : "fill-emerald-500";
+              ? "fill-foreground"
+              : "fill-faint";
           const label = failed
             ? (check.error ?? "Check failed")
             : responseMs !== null

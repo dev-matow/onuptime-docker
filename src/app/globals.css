@@ -7,9 +7,20 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
+  /* Two ends of one axis, and the fence between them is a rule about
+     authorship: mono is what a machine emitted — identifiers, hostnames,
+     timestamps, durations, status codes, payloads, log lines — and sans
+     is everything the product says, including the counters. There is no
+     third family: display is the sans at 700 with tighter tracking. */
+  --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);
-  --font-heading: var(--font-mono);
+  --font-heading: var(--font-sans);
+  --color-line-inner: var(--line-inner);
+  --color-line-tag: var(--line-tag);
+  --color-line-quiet: var(--line-quiet);
+  --color-faint: var(--faint);
+  --color-body: var(--body-ink);
+  --color-panel: var(--panel);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -48,73 +59,111 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/**
+ * The light scheme is not the console. It exists for the two surfaces
+ * that leave the building: the public status page, which sits on the
+ * customer's brand in daylight, and the printed client report. Both are
+ * read by somebody who never bought Vigil, so neither can be severe.
+ *
+ * Every value below clears WCAG AA against the lighter of the two
+ * backgrounds it can land on. `--crit` darkens here on purpose: the
+ * console's #ff4a3d reads 3.3:1 on a light field and fails.
+ */
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --background: #f6f6f6;
+  --foreground: #191919;
+  --card: #f6f6f6;
+  --card-foreground: #191919;
+  --popover: #f6f6f6;
+  --popover-foreground: #191919;
+  --primary: #191919;
+  --primary-foreground: #f6f6f6;
+  --secondary: #f2f2f2;
+  --secondary-foreground: #191919;
+  --muted: #f2f2f2;
+  --muted-foreground: #5f5f5f;
+  --accent: #ededed;
+  --accent-foreground: #191919;
+  --destructive: #c81e12;
+  --border: #d9d9d9;
+  --input: #d9d9d9;
+  --ring: #191919;
+  --chart-1: #6e6e6e;
+  --chart-2: #191919;
+  --chart-3: #c81e12;
+  --chart-4: #d9d9d9;
+  --chart-5: #5f5f5f;
+  --radius: 0;
+  --panel: #f2f2f2;
+  --line-inner: #e2e2e2;
+  --line-tag: #cfcfcf;
+  --line-quiet: #b4b4b4;
+  --faint: #6e6e6e;
+  --body-ink: #333333;
+  --sidebar: #f6f6f6;
+  --sidebar-foreground: #333333;
+  --sidebar-primary: #191919;
+  --sidebar-primary-foreground: #f6f6f6;
+  --sidebar-accent: #ededed;
+  --sidebar-accent-foreground: #191919;
+  --sidebar-border: #d9d9d9;
+  --sidebar-ring: #191919;
 }
 
+/**
+ * The console. Dark is not a preference here, it is the product: this is
+ * the screen somebody opens at 3am, and it is the public site's identity
+ * carried indoors.
+ *
+ * Two rules explain most of what follows. A block is rules drawn on the
+ * field, not a card floating above it, so `--card` and `--popover` are
+ * the page colour and the border does the separating. And emphasis is
+ * white, not a hue: `--primary` is the ink, and `--destructive` is the
+ * one chromatic value in the whole scheme, spent only on down.
+ *
+ * Contrast against #060606: faint 4.7:1, muted 7.4:1, body 11.9:1,
+ * ink 16.2:1, crit 6.1:1.
+ */
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --background: #060606;
+  --foreground: #e6e6e6;
+  --card: #060606;
+  --card-foreground: #e6e6e6;
+  --popover: #060606;
+  --popover-foreground: #e6e6e6;
+  --primary: #e6e6e6;
+  --primary-foreground: #060606;
+  --secondary: #0a0a0a;
+  --secondary-foreground: #e6e6e6;
+  --muted: #0a0a0a;
+  --muted-foreground: #9c9c9c;
+  --accent: #101010;
+  --accent-foreground: #e6e6e6;
+  --destructive: #ff4a3d;
+  --border: #242424;
+  --input: #242424;
+  --ring: #e6e6e6;
+  /* Charts carry the row encoding, not a categorical palette: quiet grey
+     is fine, white is degraded, red is failed. */
+  --chart-1: #7a7a7a;
+  --chart-2: #e6e6e6;
+  --chart-3: #ff4a3d;
+  --chart-4: #3a3a3a;
+  --chart-5: #9c9c9c;
+  --panel: #0a0a0a;
+  --line-inner: #1e1e1e;
+  --line-tag: #3a3a3a;
+  --line-quiet: #4c4c4c;
+  --faint: #7a7a7a;
+  --body-ink: #c6c6c6;
+  --sidebar: #060606;
+  --sidebar-foreground: #c6c6c6;
+  --sidebar-primary: #e6e6e6;
+  --sidebar-primary-foreground: #060606;
+  --sidebar-accent: #101010;
+  --sidebar-accent-foreground: #e6e6e6;
+  --sidebar-border: #242424;
+  --sidebar-ring: #e6e6e6;
 }
 
 @layer base {
@@ -126,5 +175,37 @@
   }
   html {
     @apply font-sans;
+  }
+
+  /**
+   * The same hard reset the public site ships. Nothing is rounded,
+   * nothing is raised, nothing eases: structure is 1px rules and the
+   * only thing separating two blocks is a line. `--radius: 0` already
+   * covers the primitives that read it; this covers the ones that write
+   * a radius, a shadow or a blur directly into a class.
+   *
+   * `animation` is deliberately left alone. Radix drives unmount off
+   * animation events, and the frame-swapped motion the design does want
+   * (a skeleton alternating two panel tones, a live-check square filling
+   * and emptying) is an animation too. Easing is what gets removed here;
+   * whether a thing moves at all is decided per component.
+   */
+  *,
+  *::before,
+  *::after {
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    filter: none !important;
+    backdrop-filter: none !important;
+    transition: none !important;
+  }
+
+  /* Long human-written prose: a date inside a sentence should not sit in
+     a tabular cell, so this is the one place proportional figures are
+     wanted. Everything else in the product is a column. */
+  .prose-text {
+    font-size: 14.5px;
+    line-height: 1.6;
+    font-variant-numeric: proportional-nums;
   }
 }

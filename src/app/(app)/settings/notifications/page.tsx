@@ -82,7 +82,7 @@ export default async function NotificationsSettingsPage({
           {isEmailEnabled ? (
             <>
               <CheckCircleIcon
-                className="size-4 text-emerald-500"
+                className="text-muted-foreground size-4"
                 aria-hidden
               />
               <span>Delivering via Resend.</span>

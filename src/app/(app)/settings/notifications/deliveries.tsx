@@ -141,7 +141,7 @@ function QueueHealthCard({ health }: { health: QueueHealth }) {
       <div>
         <p
           className={`text-2xl font-medium tabular-nums ${
-            health.unknownAttempts > 0 ? "text-amber-500" : ""
+            health.unknownAttempts > 0 ? "text-foreground" : ""
           }`}
         >
           {health.unknownAttempts}
@@ -357,7 +357,7 @@ export function DeliveryLedger({
                       )}
                       {row.replayOf && <Badge variant="outline">Replay</Badge>}
                       {row.unknownAttempts > 0 && (
-                        <Badge variant="outline" className="text-amber-500">
+                        <Badge variant="outline" className="text-foreground">
                           {row.unknownAttempts} with no answer
                         </Badge>
                       )}
@@ -503,7 +503,7 @@ export function DeliveryLedger({
                         </p>
                       )}
                       {attempt.outcome === "unknown" && (
-                        <p className="mt-1 text-xs text-amber-500">
+                        <p className="text-foreground mt-1 text-xs">
                           This attempt never reported an outcome, so a duplicate
                           at the other end cannot be ruled out.
                         </p>

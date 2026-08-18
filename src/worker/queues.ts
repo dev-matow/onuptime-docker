@@ -27,6 +27,18 @@ export const QUEUES = {
    * rows that had already been deleted.
    */
   highFrequencyRollup: "high-frequency-rollup",
+  /**
+   * Expands maintenance rules into occurrences, moves those through
+   * their states, and lets go of the incidents a finished window was
+   * holding.
+   *
+   * Every minute rather than nightly, and a queue of its own rather than
+   * a step inside the delivery tick, because the third of those three
+   * jobs pages people: an incident held through a window is released the
+   * minute the window ends, and putting that behind the notification
+   * drain would make one tenant's slow provider delay another tenant's
+   * page.
+   */
 } as const;
 
 export interface MonitorCheckJob {

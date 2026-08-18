@@ -78,6 +78,54 @@ The migration journal matters: a restored database knows which
 migrations it has already had, so `npm run db:migrate` afterwards is a
 no-op rather than an attempt to replay all of them.
 
+## What a dump contains, and what is in the clear
+
+A dump is a credential file. Treat it as one.
+
+**Notification channel secrets are encrypted** (AES-256-GCM, under a key
+derived from `BETTER_AUTH_SECRET`), so a Slack webhook or an SMTP
+password in the archive is ciphertext. The key lives in `.env`, which
+the next section says to store somewhere the dump is not. That
+separation is the whole of what the encryption buys.
+
+**Monitor credentials are not encrypted.** A Redis password in
+`monitors.config`, and a `postgres://user:password@host/db` target in
+`monitors.url`, are stored as they were typed. This is deliberate, and
+the reasoning is written down here because the asymmetry looks like an
+oversight:
+
+- **The target cannot be encrypted.** It is the address the probe
+  dials, it is rendered on the monitor page, and it is what a check
+  type is addressed by. Encrypting `config` while `url` stayed readable
+  would produce a half-story whose boundary no operator could be
+  expected to know: true for a Redis monitor, false for a Postgres one,
+  and describable only in a sentence that is wrong half the time.
+- **It would not survive the credential's own life.** The secret is
+  sent to remote probe agents on every poll and then presented on the
+  wire to protocols that are not confidential by design. RADIUS
+  authenticates with MD5, SQL Server's login packet is a nibble swap
+  and an XOR, and the FTP, IMAP, SMTP and memcached probes are
+  plaintext throughout. Vigil's own docs say so where each is
+  documented.
+- **It would not survive an application compromise.** The key is
+  derived from a secret the same process reads out of the same `.env`.
+  Anything that can run as Vigil can decrypt. There is no KMS and no
+  operator passphrase, and adding one would mean the worker could not
+  start unattended, which is not a trade a monitoring product can make.
+
+So the honest boundary is the archive, not the column. Encrypt the dump
+or put it somewhere already encrypted, and give a monitor an account
+scoped to what the check needs: a Postgres monitor needs to connect, it
+does not need to read your tables.
+
+What Vigil does instead is make sure the credential does not travel.
+The target is stripped of its userinfo everywhere it is displayed,
+logged, exported or sent to a channel, and the config blob's declared
+secrets are replaced by a sentinel before anything crosses into a
+browser. Encryption at rest is claimed only for notification channels,
+and a test keeps that claim scoped so it cannot quietly widen into one
+about monitors.
+
 ## What is NOT backed up
 
 **Everything outside Postgres.** These are not in the dump and a restore

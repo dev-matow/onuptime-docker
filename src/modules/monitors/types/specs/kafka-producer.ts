@@ -1,6 +1,15 @@
 import { z } from "zod";
 
-import { DEFAULT_KAFKA_PORT, kafkaProducerDescriptor } from "../catalog";
+import {
+  DEFAULT_KAFKA_MESSAGE,
+  DEFAULT_KAFKA_PORT,
+  kafkaProducerDescriptor,
+} from "../catalog";
+
+// Re-exported because it moved to the catalog — the form quotes it as a
+// placeholder and may not import a spec — and the tests that assert the
+// default record still import it from here, where it used to live.
+export { DEFAULT_KAFKA_MESSAGE };
 import type { Assertion, CheckTypeSpec, MonitorRowView } from "../contract";
 import { monitorHostnameSchema } from "../targets";
 import { latencyAssertion } from "./shared";
@@ -31,7 +40,6 @@ import { latencyAssertion } from "./shared";
  * traceable to the thing that put it there, or the first response is an
  * incident about an unknown producer.
  */
-export const DEFAULT_KAFKA_MESSAGE = "vigil monitor check";
 
 /**
  * Kafka's own bound on a topic name (`Topic.MAX_NAME_LENGTH`), and the

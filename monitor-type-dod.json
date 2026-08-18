@@ -13,6 +13,7 @@
       "exportImport": true,
       "unitTest": true,
       "protocolFixture": "n/a",
+      "configurable": true,
       "documented": false,
       "capability": null,
       "remoteProbe": true
@@ -28,6 +29,7 @@
       "exportImport": true,
       "unitTest": true,
       "protocolFixture": true,
+      "configurable": true,
       "documented": false,
       "capability": null,
       "remoteProbe": true
@@ -43,6 +45,7 @@
       "exportImport": true,
       "unitTest": true,
       "protocolFixture": true,
+      "configurable": true,
       "documented": false,
       "capability": null,
       "remoteProbe": true
@@ -58,6 +61,7 @@
       "exportImport": true,
       "unitTest": true,
       "protocolFixture": true,
+      "configurable": true,
       "documented": false,
       "capability": null,
       "remoteProbe": true
@@ -73,6 +77,7 @@
       "exportImport": true,
       "unitTest": true,
       "protocolFixture": true,
+      "configurable": true,
       "documented": true,
       "capability": null,
       "remoteProbe": true
@@ -88,6 +93,7 @@
       "exportImport": true,
       "unitTest": true,
       "protocolFixture": true,
+      "configurable": true,
       "documented": false,
       "capability": null,
       "remoteProbe": true
@@ -103,6 +109,7 @@
       "exportImport": true,
       "unitTest": true,
       "protocolFixture": true,
+      "configurable": true,
       "documented": false,
       "capability": "globalping-api",
       "remoteProbe": true
@@ -118,6 +125,7 @@
       "exportImport": true,
       "unitTest": true,
       "protocolFixture": "n/a",
+      "configurable": "n/a",
       "documented": false,
       "capability": null,
       "remoteProbe": "n/a"
@@ -133,6 +141,7 @@
       "exportImport": true,
       "unitTest": true,
       "protocolFixture": true,
+      "configurable": true,
       "documented": false,
       "capability": null,
       "remoteProbe": true
@@ -148,6 +157,7 @@
       "exportImport": true,
       "unitTest": true,
       "protocolFixture": true,
+      "configurable": "n/a",
       "documented": false,
       "capability": null,
       "remoteProbe": true
@@ -163,6 +173,7 @@
       "exportImport": true,
       "unitTest": true,
       "protocolFixture": true,
+      "configurable": true,
       "documented": true,
       "capability": null,
       "remoteProbe": true
@@ -178,6 +189,7 @@
       "exportImport": true,
       "unitTest": true,
       "protocolFixture": true,
+      "configurable": true,
       "documented": false,
       "capability": null,
       "remoteProbe": true
@@ -193,6 +205,7 @@
       "exportImport": true,
       "unitTest": true,
       "protocolFixture": true,
+      "configurable": true,
       "documented": false,
       "capability": null,
       "remoteProbe": true
@@ -208,6 +221,7 @@
       "exportImport": true,
       "unitTest": true,
       "protocolFixture": true,
+      "configurable": true,
       "documented": false,
       "capability": null,
       "remoteProbe": true
@@ -223,6 +237,7 @@
       "exportImport": true,
       "unitTest": true,
       "protocolFixture": "n/a",
+      "configurable": true,
       "documented": false,
       "capability": null,
       "remoteProbe": "n/a"
@@ -238,6 +253,7 @@
       "exportImport": true,
       "unitTest": true,
       "protocolFixture": true,
+      "configurable": true,
       "documented": true,
       "capability": null,
       "remoteProbe": true
@@ -253,6 +269,7 @@
       "exportImport": true,
       "unitTest": true,
       "protocolFixture": true,
+      "configurable": "n/a",
       "documented": false,
       "capability": null,
       "remoteProbe": true
@@ -268,6 +285,7 @@
       "exportImport": true,
       "unitTest": true,
       "protocolFixture": true,
+      "configurable": true,
       "documented": false,
       "capability": null,
       "remoteProbe": true
@@ -283,6 +301,7 @@
       "exportImport": true,
       "unitTest": true,
       "protocolFixture": true,
+      "configurable": "n/a",
       "documented": false,
       "capability": null,
       "remoteProbe": true
@@ -298,6 +317,7 @@
       "exportImport": true,
       "unitTest": true,
       "protocolFixture": true,
+      "configurable": true,
       "documented": false,
       "capability": null,
       "remoteProbe": true
@@ -313,6 +333,7 @@
       "exportImport": true,
       "unitTest": true,
       "protocolFixture": true,
+      "configurable": "n/a",
       "documented": false,
       "capability": null,
       "remoteProbe": true
@@ -328,6 +349,7 @@
       "exportImport": true,
       "unitTest": true,
       "protocolFixture": true,
+      "configurable": true,
       "documented": false,
       "capability": "icmp",
       "remoteProbe": true
@@ -343,6 +365,7 @@
       "exportImport": true,
       "unitTest": true,
       "protocolFixture": true,
+      "configurable": "n/a",
       "documented": false,
       "capability": null,
       "remoteProbe": true
@@ -358,6 +381,7 @@
       "exportImport": true,
       "unitTest": true,
       "protocolFixture": "n/a",
+      "configurable": true,
       "documented": false,
       "capability": null,
       "remoteProbe": "n/a"
@@ -373,6 +397,7 @@
       "exportImport": true,
       "unitTest": true,
       "protocolFixture": true,
+      "configurable": true,
       "documented": true,
       "capability": null,
       "remoteProbe": true
@@ -388,6 +413,7 @@
       "exportImport": true,
       "unitTest": true,
       "protocolFixture": true,
+      "configurable": true,
       "documented": false,
       "capability": null,
       "remoteProbe": true
@@ -403,6 +429,7 @@
       "exportImport": true,
       "unitTest": true,
       "protocolFixture": true,
+      "configurable": true,
       "documented": false,
       "capability": "headless-browser",
       "remoteProbe": true
@@ -418,6 +445,7 @@
       "exportImport": true,
       "unitTest": true,
       "protocolFixture": true,
+      "configurable": true,
       "documented": false,
       "capability": null,
       "remoteProbe": true
@@ -433,6 +461,7 @@
       "exportImport": true,
       "unitTest": true,
       "protocolFixture": true,
+      "configurable": true,
       "documented": false,
       "capability": null,
       "remoteProbe": true
@@ -448,6 +477,7 @@
       "exportImport": true,
       "unitTest": true,
       "protocolFixture": true,
+      "configurable": "n/a",
       "documented": false,
       "capability": null,
       "remoteProbe": true
@@ -463,6 +493,7 @@
       "exportImport": true,
       "unitTest": true,
       "protocolFixture": true,
+      "configurable": true,
       "documented": false,
       "capability": null,
       "remoteProbe": true
@@ -478,6 +509,7 @@
       "exportImport": true,
       "unitTest": true,
       "protocolFixture": true,
+      "configurable": "n/a",
       "documented": false,
       "capability": null,
       "remoteProbe": true
@@ -493,6 +525,7 @@
       "exportImport": true,
       "unitTest": true,
       "protocolFixture": true,
+      "configurable": true,
       "documented": false,
       "capability": null,
       "remoteProbe": true
@@ -508,6 +541,7 @@
       "exportImport": true,
       "unitTest": true,
       "protocolFixture": true,
+      "configurable": "n/a",
       "documented": false,
       "capability": null,
       "remoteProbe": true
@@ -523,6 +557,7 @@
       "exportImport": true,
       "unitTest": true,
       "protocolFixture": true,
+      "configurable": "n/a",
       "documented": false,
       "capability": "systemd",
       "remoteProbe": true
@@ -538,6 +573,7 @@
       "exportImport": true,
       "unitTest": true,
       "protocolFixture": true,
+      "configurable": true,
       "documented": false,
       "capability": "tailscale",
       "remoteProbe": true
@@ -553,6 +589,7 @@
       "exportImport": true,
       "unitTest": true,
       "protocolFixture": true,
+      "configurable": "n/a",
       "documented": false,
       "capability": null,
       "remoteProbe": true
@@ -568,6 +605,7 @@
       "exportImport": true,
       "unitTest": true,
       "protocolFixture": true,
+      "configurable": true,
       "documented": false,
       "capability": null,
       "remoteProbe": true
@@ -583,6 +621,7 @@
       "exportImport": true,
       "unitTest": true,
       "protocolFixture": true,
+      "configurable": true,
       "documented": false,
       "capability": null,
       "remoteProbe": true
@@ -598,6 +637,7 @@
       "exportImport": true,
       "unitTest": true,
       "protocolFixture": true,
+      "configurable": true,
       "documented": false,
       "capability": null,
       "remoteProbe": true

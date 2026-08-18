@@ -37,6 +37,12 @@ import {
   pushEndpointAction,
   regeneratePushTokenAction,
 } from "./actions";
+import {
+  buildConfig as buildConfigFromFields,
+  initialConfigState,
+  type ConfigFieldState,
+} from "./config-fields";
+import { ConfigFieldsSection } from "./config-fields-section";
 import { HighFrequencyPanel } from "./high-frequency-panel";
 
 /** Editable subset of a monitor, shared by the create and edit dialogs. */
@@ -179,6 +185,34 @@ export function MonitorForm({
 
   const descriptor = describeCheckType(checkType);
   const shows = (section: FormSection) => descriptor.form.includes(section);
+  const configFields = descriptor.configFields ?? [];
+
+  // The type's own settings, rendered from its declaration rather than
+  // from a branch per type. Reset when the operator switches type, the
+  // same rule `mergeConfig` applies on the server: a config belongs to
+  // the type that wrote it, and carrying a Redis password into a DNS
+  // monitor would be a stale setting in a type that never asked for one.
+  //
+  // Adjusted during render rather than in an effect — the documented
+  // pattern for state derived from a changing input, and the one that
+  // avoids rendering one frame of the previous type's values.
+  const [configType, setConfigType] = useState(checkType);
+  const [configState, setConfigState] = useState<ConfigFieldState>(() =>
+    initialConfigState(configFields, initial.config),
+  );
+  if (configType !== checkType) {
+    setConfigType(checkType);
+    setConfigState(
+      initialConfigState(
+        configFields,
+        // Back on the type this monitor actually is: its stored settings
+        // are the right starting point again.
+        checkType === initial.checkType ? initial.config : null,
+      ),
+    );
+  }
+  const setConfigValue = (name: string, value: string | boolean) =>
+    setConfigState((current) => ({ ...current, [name]: value }));
   const takesPort = descriptor.port !== null;
   // What the operator is being asked for changes with the kind, and the
   // fields that stop applying have to disappear rather than sit there
@@ -222,6 +256,14 @@ export function MonitorForm({
   }
 
   function buildConfig(): Record<string, unknown> | null {
+    // A type that declares its settings builds them from the declaration.
+    // The four branches below are the sections that predate it and keep
+    // their bespoke controls; everything else used to fall through to
+    // `null`, which is how twenty-four types came to store settings no
+    // operator could reach.
+    if (configFields.length > 0) {
+      return buildConfigFromFields(configFields, configState);
+    }
     if (shows("dnsRecord")) {
       const expected = expectedValue.trim();
       return { recordType, expectedValue: expected === "" ? null : expected };
@@ -495,6 +537,12 @@ export function MonitorForm({
             </Field>
           </div>
         )}
+        <ConfigFieldsSection
+          idPrefix={id}
+          fields={configFields.filter((field) => field.group !== "advanced")}
+          state={configState}
+          onChange={setConfigValue}
+        />
         <div className="grid grid-cols-2 gap-4">
           {shows("method") && (
             <Field>
@@ -561,6 +609,12 @@ export function MonitorForm({
           <FieldDescription>
             Tune when a check counts as degraded or failed.
           </FieldDescription>
+          <ConfigFieldsSection
+            idPrefix={id}
+            fields={configFields.filter((field) => field.group === "advanced")}
+            state={configState}
+            onChange={setConfigValue}
+          />
           <div className="grid grid-cols-2 gap-4">
             {dials && (
               <Field>

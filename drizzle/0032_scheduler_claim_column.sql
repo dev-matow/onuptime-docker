@@ -1,0 +1,18 @@
+-- The scheduler's claim, in its own column.
+--
+-- CORE, not commercial: the defect it closes is a tick re-enqueueing a
+-- monitor whose check is still running, and a free installation with a
+-- thousand monitors has exactly the same one.
+--
+-- Nullable with no default and no backfill, which is correct rather than
+-- lazy: null reads as "not claimed", and before this column existed
+-- nothing was. Additive, so a downgrade leaves the column behind and
+-- nothing reads it.
+--
+-- The first version of this claim moved `next_evaluation_at` forward
+-- instead of adding a column. It worked, and it hid the thing the same
+-- release added a metric for: every reading of how far behind the
+-- scheduler is takes lateness from that column, so claiming a backlog
+-- made it disappear. A separate column keeps "when is this due" and
+-- "who is allowed to enqueue it" as the two different facts they are.
+ALTER TABLE "monitors" ADD COLUMN "dispatch_claimed_until" timestamp with time zone;

@@ -62,7 +62,7 @@ export function IncidentTimeline({ events }: { events: TimelineEvent[] }) {
             )}
             <span
               className={cn(
-                "ring-foreground/10 flex size-8 shrink-0 items-center justify-center rounded-full ring-1",
+                "ring-line-tag flex size-8 shrink-0 items-center justify-center rounded-full ring-1",
                 iconTone(event),
               )}
             >
@@ -85,12 +85,16 @@ export function IncidentTimeline({ events }: { events: TimelineEvent[] }) {
                 <span aria-hidden className="text-muted-foreground/50">
                   ·
                 </span>
+                {/* The chronology is the product here: eight events that
+                    all say "1 hour ago" cannot be correlated with a
+                    deploy or a DNS change. The clock time is the visible
+                    stamp; the relative reading is the hover. */}
                 <time
                   dateTime={event.createdAt.toISOString()}
-                  title={formatDateTime(event.createdAt)}
-                  className="text-muted-foreground"
+                  title={formatRelativeTime(event.createdAt)}
+                  className="text-muted-foreground font-mono text-[11px] tabular-nums"
                 >
-                  {formatRelativeTime(event.createdAt)}
+                  {formatDateTime(event.createdAt)}
                 </time>
               </div>
               <p className="text-foreground/90 text-sm/relaxed whitespace-pre-wrap">

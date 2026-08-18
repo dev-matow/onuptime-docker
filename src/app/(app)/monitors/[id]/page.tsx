@@ -40,7 +40,10 @@ import {
   type MonitorDetail,
   type UptimeWindow,
 } from "@/modules/monitors/service";
-import { describeMonitorTarget } from "@/modules/monitors/spec";
+import {
+  describeMonitorTarget,
+  redactTargetCredentials,
+} from "@/modules/monitors/spec";
 import { describeCheckType } from "@/modules/monitors/types/catalog";
 import { redactConfig } from "@/modules/monitors/types/config";
 import { requireSpec } from "@/modules/monitors/types/specs";
@@ -77,6 +80,10 @@ export default async function MonitorDetailPage(
 
   const { monitor, windows, recentChecks } = detail;
   const checkType = describeCheckType(monitor.checkType);
+  // `getMonitorDetail` already replaced the password with the sentinel so
+  // the edit dialog can round-trip it. Nothing should read the sentinel,
+  // so the label drops the userinfo altogether.
+  const displayTarget = redactTargetCredentials(monitor.url);
   const canUpdate = hasPermission(ctx.role, { monitor: ["update"] });
   const canDelete = hasPermission(ctx.role, { monitor: ["delete"] });
 
@@ -107,13 +114,19 @@ export default async function MonitorDetailPage(
               paused={monitor.paused}
             />
             {checkType.target.kind === "url" ? (
+              // The url branch is the one that can carry a credential —
+              // `postgres` and `sqlserver` targets are the reason this
+              // function exists — and it was the branch showing the
+              // target verbatim while the other went through the spec.
+              // An href is worse than a label: it survives in history and
+              // in whatever the next page reads as a referrer.
               <a
-                href={monitor.url}
+                href={displayTarget}
                 target="_blank"
                 rel="noreferrer"
                 className="hover:text-foreground inline-flex max-w-96 items-center gap-1 font-mono text-xs transition-colors hover:underline"
               >
-                <span className="truncate">{monitor.url}</span>
+                <span className="truncate">{displayTarget}</span>
                 <ArrowSquareOutIcon aria-hidden className="size-3 shrink-0" />
               </a>
             ) : (
@@ -183,6 +196,7 @@ export default async function MonitorDetailPage(
           canDelete={canDelete}
         />
       </div>
+
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         {windows.map((window) => (

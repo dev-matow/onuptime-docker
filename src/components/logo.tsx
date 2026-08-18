@@ -1,13 +1,12 @@
 import Link from "next/link";
 
-import { BlinkingVigilMark } from "@/components/vigil-mark-blink";
+import { VigilMark } from "@/components/vigil-mark";
 import { cn } from "@/lib/utils";
 
 /**
- * The application's brand mark, once per page: sign-in, onboarding, the
- * invitation page, the marketing root and 404. It is the one place the
- * eye is allowed to blink, because a page with two of them blinking on
- * their own schedules looks broken rather than alive.
+ * The application's brand lockup, once per page: sign-in, onboarding, the
+ * invitation page, the marketing root and 404. One mark and a widely
+ * tracked wordmark, the way the identity board sets them.
  */
 export function Logo({
   className,
@@ -21,8 +20,8 @@ export function Logo({
       href={href}
       className={cn("flex items-center gap-2.5 font-semibold", className)}
     >
-      <BlinkingVigilMark />
-      <span className="text-lg tracking-tight">Vigil</span>
+      <VigilMark className="h-[20px]" />
+      <span className="text-base tracking-[0.18em]">VIGIL</span>
     </Link>
   );
 }

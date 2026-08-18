@@ -5,11 +5,8 @@ import { PgBoss } from "pg-boss";
 import { db } from "@/db";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
-import {
-  HighFrequencyPlane,
-  highFrequencyClaims,
-} from "@/modules/monitors/highfreq";
-import { findDueMonitors } from "@/modules/monitors/service";
+import { HighFrequencyPlane } from "@/modules/monitors/highfreq";
+
 import {
   backfillChannelDestinations,
   sealPlainChannelSecrets,
@@ -18,6 +15,7 @@ import {
 
 import { runHighFrequencyRollupJob } from "./jobs/high-frequency";
 import { runMonitorCheck } from "./jobs/monitor-check";
+import { runMonitorTick } from "./jobs/monitor-tick";
 // A second import from the same module rather than a second specifier on
 // the line above, because the marker acts on whole lines: folded into
 // one import, `workerActorId` survives into Core as an unused binding
@@ -101,34 +99,32 @@ async function main() {
   // exactly where nobody is watching the logs.
   await boss.createQueue(QUEUES.highFrequencyRollup, { policy: "singleton" });
   await boss.createQueue(QUEUES.retention);
+  // Singleton: the pass is level-triggered and idempotent, so two of
+  // them would be correct - and they would also both walk every window
 
   await boss.work(QUEUES.monitorTick, async () => {
-    const due = await findDueMonitors(db);
-    if (due.length === 0) return;
-
-    // Monitors a live high-frequency lease already covers are left
-    // alone: two planes probing one target is a doubled request rate
-    // the operator never asked for, and two observations of the same
-    // instant in `monitor_checks`. The test is on the lease and not on
-    // the flag, so a monitor whose worker died falls back to this
-    // cadence rather than to none — degrading from 500ms to 2s is a
-    // service level; degrading to silence is an outage nobody sees.
-    const claimed = await highFrequencyClaims();
-    const queued = due.filter((monitor) => !claimed(monitor));
-    if (queued.length === 0) return;
-
-    log.debug({ count: queued.length }, "enqueueing due monitor checks");
-    await Promise.all(
-      queued.map((monitor) =>
-        boss.send(
-          QUEUES.monitorCheck,
-          { monitorId: monitor.id } satisfies MonitorCheckJob,
-          {
-            singletonKey: monitor.id,
-          },
-        ),
-      ),
-    );
+    const result = await runMonitorTick(db, boss);
+    // Logged here rather than inside the tick, and that is what keeps
+    // `result` const-correct in BOTH editions: every other reader of it
+    // is in the commercial block below, so without a Core reader the
+    // stripped tree would carry a binding nothing uses. The tick returns
+    // its numbers; the worker decides what to say about them.
+    //
+    // Silent when there was nothing to do. This fires every minute, and
+    // a line per idle tick buries the ones that matter.
+    if (result.claimed > 0 || result.backlog > 0) {
+      log.info(
+        {
+          due: result.backlog,
+          lagSeconds: Math.round(result.lagSeconds),
+          selected: result.selected,
+          claimed: result.claimed,
+          enqueued: result.enqueued,
+          durationMs: result.durationMs,
+        },
+        "scheduler tick",
+      );
+    }
   });
 
   await boss.work<MonitorCheckJob>(
@@ -167,6 +163,7 @@ async function main() {
     await runHighFrequencyRollupJob();
   });
 
+
   // Cron minimum granularity is one minute; monitor intervals are
   // multiples of 60s, so every due monitor is picked up on time.
   await boss.schedule(QUEUES.monitorTick, "* * * * *");
@@ -183,6 +180,8 @@ async function main() {
   // A message queued just before the last shutdown should not wait a
   // minute for its first attempt.
   await boss.send(QUEUES.notificationDelivery, {});
+  // Same reasoning, sharper: a window that ended while the worker was
+  // down is holding incidents nobody has been paged about, and they wait
 
   // The high-frequency plane. Started unconditionally and idle by
   // default: with no monitor enabled it holds its shard leases and
@@ -193,6 +192,7 @@ async function main() {
   // worse than a setting that is absent.
   const highFrequency = new HighFrequencyPlane({ boss });
   await highFrequency.start();
+
 
 
   log.info("worker started");

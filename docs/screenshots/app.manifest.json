@@ -1,8 +1,8 @@
 {
   "_": "Written by scripts/capture-screenshots.ts. Verified by scripts/probe-shots-check.mjs.",
-  "capturedAt": "2026-08-09",
-  "sourceCommit": "2a7ad933c8ee1dcbe0c93b6e8fb0e23d8ff11923",
-  "base": "http://localhost:3100",
+  "capturedAt": "2026-08-18",
+  "sourceCommit": "ea42f458354446b7ddc71b6eedfe02e9352732b7",
+  "base": "http://localhost:3001",
   "shots": [
     {
       "file": "branding.png",
@@ -10,8 +10,8 @@
       "command": null,
       "shows": "Status-page settings, including the white-label branding toggle",
       "viewport": "1440x900",
-      "bytes": 68043,
-      "sha256": "6cee379c74c989586166c9619ab14f41bc74e50736c7b413e2d71b53b024e11d"
+      "bytes": 81685,
+      "sha256": "74792ddb2702bf33c2af595dfe8e8ebe6dfe7ce115088e76e98a28cbdc2c19ec"
     },
     {
       "file": "dashboard.png",
@@ -19,8 +19,8 @@
       "command": null,
       "shows": "The dashboard: monitor states, open incidents and the setup checklist on seeded data",
       "viewport": "1440x900",
-      "bytes": 77723,
-      "sha256": "6bc27661d552d092838fef1447061da2d410c71eb7a25017071cf00c445aab8a"
+      "bytes": 80830,
+      "sha256": "aa72791ca49263608623dcc5599ebc1e7272dc72f1bd482e006705a9dab628ac"
     },
     {
       "file": "incident-detail.png",
@@ -28,8 +28,8 @@
       "command": null,
       "shows": "An open incident: severity, lifecycle, and the append-only timeline",
       "viewport": "1440x900",
-      "bytes": 108982,
-      "sha256": "1945b4e7bd6210a9e6c6e8e28aa5bc5b00751da917ccb70afc9d3eaed80bed6f"
+      "bytes": 139793,
+      "sha256": "76bcc3f66cab90a16aac3c41ec51773e270f04ee5d07d23d145b14b79dbc6625"
     },
     {
       "file": "kuma-import.png",
@@ -37,8 +37,8 @@
       "command": null,
       "shows": "The Uptime Kuma importer: upload a kuma.db, read the dry-run report, then apply",
       "viewport": "1440x900",
-      "bytes": 64477,
-      "sha256": "244f2a9c42a700efc8ad39cf343d5e806561b0a4c44f0f9f1af4b2f3d821e251"
+      "bytes": 121850,
+      "sha256": "62cad3949f1dfb2a56f32664ed2df358684cd119cf35ed1059214aef11d77320"
     },
     {
       "file": "monitor-detail.png",
@@ -46,8 +46,8 @@
       "command": null,
       "shows": "A monitor's detail page: response-time chart, recent checks and configuration",
       "viewport": "1440x900",
-      "bytes": 75919,
-      "sha256": "55f35978d0db2bd31ce5ae58129a617d4cb4057969d26d5b1a9bd6390f4342ca"
+      "bytes": 97183,
+      "sha256": "ac09abdf4e9c5ac81f27a346485e11867a95f8de8d40a6de219d752b767165a1"
     },
     {
       "file": "monitor-types.png",
@@ -55,8 +55,8 @@
       "command": null,
       "shows": "The check-type selector on the create-monitor form, one entry per registered type",
       "viewport": "1440x900",
-      "bytes": 109059,
-      "sha256": "fc9fe9205a7c8aa64a3b46c5788126961f56bb3e59ad35a96447240b13dca557"
+      "bytes": 185526,
+      "sha256": "5191f286c28c4faf68cb89b253e8ae75da3e6a1c59bc1d41c69c7ffe4add0de7"
     },
     {
       "file": "notification-attempts.png",
@@ -64,8 +64,8 @@
       "command": null,
       "shows": "One delivery's attempt timeline, including an attempt that never reported an outcome",
       "viewport": "1440x900",
-      "bytes": 131355,
-      "sha256": "ddc3a82d6347716cc04d2e7cf7c1af5abdfba672a8e87835330159dae106893e"
+      "bytes": 180027,
+      "sha256": "87cac7c0c58e36a6396c0d7282d72e1866681a58519983fde3ca43f7ac33d6d9"
     },
     {
       "file": "notification-deliveries.png",
@@ -73,8 +73,8 @@
       "command": null,
       "shows": "The delivery ledger: queue pressure, attempts spent, next retry, and why a message stopped",
       "viewport": "1440x900",
-      "bytes": 108588,
-      "sha256": "06a8f2c1d7dd699cdf57e53fe391eccc182e23a232a7a30e1e548b43f6ebc2ff"
+      "bytes": 136846,
+      "sha256": "b747032085214505821ba370787db2b564045707bba8805d3df8e838c34cddc4"
     },
     {
       "file": "notification-providers.png",
@@ -82,8 +82,8 @@
       "command": null,
       "shows": "The provider picker: searchable and grouped, each entry showing its pinned API version and what it can do",
       "viewport": "1440x900",
-      "bytes": 134628,
-      "sha256": "4090d163853d5f4b565609ef9eac663a4fcb5bd76a4e755fcc75f746ccd3d57b"
+      "bytes": 192760,
+      "sha256": "e5b898ec58f85c24fea29db600db176bf99c5b3d9f3337e4a68187e0fcc79e08"
     },
     {
       "file": "notifications.png",
@@ -91,8 +91,8 @@
       "command": null,
       "shows": "Notification channels: the provider editor, event-class routing and the delivery history",
       "viewport": "1440x900",
-      "bytes": 111582,
-      "sha256": "3809aeeb421a024e3382fca3691fd16d6bd60d92d91a315f18d411edb5dc0d4d"
+      "bytes": 133947,
+      "sha256": "7264d8cd9d71fee15e0fbb9c29c605eee0c196dba036098073ac7cc2ef0b2b81"
     },
     {
       "file": "roles.png",
@@ -100,8 +100,8 @@
       "command": null,
       "shows": "The team page: owner, admin, responder and viewer on separate accounts",
       "viewport": "1440x900",
-      "bytes": 47593,
-      "sha256": "29a297e89e3b171d9726db88473e01506732140ce7e7f506570e3407b0a216cd"
+      "bytes": 63108,
+      "sha256": "541b5ba02e2459046ea7667d6e6891305dcd9857ac9e2a483221d325aed10339"
     },
     {
       "file": "status-page.png",
@@ -109,8 +109,8 @@
       "command": null,
       "shows": "The public status page: components, 90-day uptime bars and incident history",
       "viewport": "1440x900",
-      "bytes": 64265,
-      "sha256": "6a897d3960f50a8af06d91921eeadd607fb95246e50b2bf45b6aadbf143bcd11"
+      "bytes": 76485,
+      "sha256": "330b547a25744128424f9cb72cb484ed1b416ee131b51f13c2795a6085bd95c4"
     }
   ]
 }

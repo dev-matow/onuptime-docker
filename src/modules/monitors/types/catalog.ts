@@ -93,6 +93,16 @@ export const pingDescriptor: CheckTypeDescriptor<"active"> = {
     { key: "packetsReceived", label: "Replies", kind: "number" },
   ],
   form: [],
+  configFields: [
+    {
+      name: "packets",
+      emptyValue: "omit",
+      label: "Echo requests",
+      control: { kind: "number", min: 1, max: 5, unit: "packets" },
+      help: "How many ICMP echoes one check sends. One reply is enough to pass, so raising this rides out a link that drops the occasional packet; at 1, a single lost echo (or a host that rate-limits ICMP) is a full outage in the timeline.",
+      group: "advanced",
+    },
+  ],
   // ICMP needs a raw socket. On Linux that is CAP_NET_RAW, or a
   // `net.ipv4.ping_group_range` that includes the worker's gid. When it
   // is absent the monitor reads `misconfigured`, never `down`.
@@ -315,6 +325,15 @@ export const redisDescriptor: CheckTypeDescriptor<"active"> = {
     },
   ],
   form: ["port"],
+  configFields: [
+    {
+      name: "password",
+      emptyValue: "null",
+      label: "Password",
+      control: { kind: "secret", maxLength: 512 },
+      help: "Sent as AUTH before the PING. Leave it empty only for a server that answers unauthenticated: one that wants a password answers every command with a RESP error, an error is not a failed PING, and the monitor reads up having proved nothing.",
+    },
+  ],
   supportsRecovery: true,
 };
 
@@ -343,6 +362,31 @@ export const dockerDescriptor: CheckTypeDescriptor<"active"> = {
     { key: "restartCount", label: "Restarts", kind: "number" },
   ],
   form: [],
+  configFields: [
+    {
+      name: "containerName",
+      emptyValue: "null",
+      label: "Container",
+      control: { kind: "text", placeholder: "web-1", maxLength: 255 },
+      help: "The container's name or id, as `docker ps` prints it. It is matched exactly, so a container recreated under a different name reads as missing, and a missing container is judged down.",
+    },
+    {
+      // Primary rather than advanced, even though the default is right
+      // nine times in ten: this field — not the Docker host field — is
+      // what decides which machine is asked, and hiding it is how a
+      // monitor ends up quietly watching the wrong daemon.
+      name: "socketPath",
+      emptyValue: "omit",
+      label: "Daemon address",
+      control: {
+        kind: "text",
+        placeholder: DEFAULT_DOCKER_SOCKET,
+        maxLength: 255,
+        mono: true,
+      },
+      help: `The daemon this monitor asks: a socket path, or \`tcp://host:2375\` for an engine on another machine. Left at ${DEFAULT_DOCKER_SOCKET} the local daemon is asked and the Docker host field is only a label, whatever hostname it holds.`,
+    },
+  ],
   supportsRecovery: true,
 };
 
@@ -371,6 +415,22 @@ export const mqttDescriptor: CheckTypeDescriptor<"active"> = {
     },
   ],
   form: ["port"],
+  configFields: [
+    {
+      name: "username",
+      emptyValue: "null",
+      label: "Username",
+      control: { kind: "text", placeholder: "vigil", maxLength: 255 },
+      help: "Set this when the broker requires credentials. Without it, a broker that refuses anonymous connects answers a CONNACK refusing the connection, and the monitor reads as down while the broker is perfectly healthy.",
+    },
+    {
+      name: "password",
+      emptyValue: "null",
+      label: "Password",
+      control: { kind: "secret", maxLength: 255 },
+      help: "Sent inside the CONNECT packet as it is: this check speaks plaintext MQTT only, so port 8883 will never answer and a password here is readable on the path. A password with no username is forbidden by the protocol and refused.",
+    },
+  ],
   supportsRecovery: true,
 };
 
@@ -429,6 +489,27 @@ export const jsonQueryDescriptor: CheckTypeDescriptor<"active"> = {
   // No shared form section: the path and the expected value are this
   // type's own config, not something another type renders too.
   form: [],
+  configFields: [
+    {
+      name: "jsonPath",
+      emptyValue: "omit",
+      label: "JSON path",
+      control: {
+        kind: "text",
+        placeholder: "status",
+        maxLength: 200,
+        mono: true,
+      },
+      help: "Dotted, into the response body: status, db.connected, checks[0].name. The default watches for a status field, which is the convention this type exists for and wrong for every endpoint that does not follow it.",
+    },
+    {
+      name: "expectedValue",
+      emptyValue: "omit",
+      label: "Expected value",
+      control: { kind: "text", placeholder: "ok", maxLength: 200, mono: true },
+      help: 'Compared as text against whatever is at that path, so true, 1 and ok all work with no type picker. The price is that 1 and "1" are the same answer here.',
+    },
+  ],
   supportsRecovery: true,
 };
 
@@ -477,6 +558,12 @@ export const pushDescriptor: CheckTypeDescriptor<"passive"> = {
     },
   ],
   form: ["heartbeatGrace"],
+  configFieldsOmitted: {
+    token:
+      "Generated, not typed. A browser is handed SECRET_MASK in its " +
+      "place, and the URL that carries it is revealed and rotated " +
+      "through the push-endpoint control instead.",
+  },
   // Recovery verifies a fix by re-probing, and there is nothing here to
   // re-probe: the only thing that can prove a push monitor healthy is
   // the job itself checking in, on its own schedule.
@@ -566,10 +653,35 @@ export const rabbitmqDescriptor: CheckTypeDescriptor<"active"> = {
   // Credentials are this type's only setting and the form has no section
   // for them yet; they arrive by import or by API. See the spec.
   form: [],
+  configFields: [
+    {
+      name: "username",
+      emptyValue: "null",
+      label: "Management username",
+      control: { kind: "text", placeholder: "vigil", maxLength: 255 },
+      help: "The management API authenticates every request, so a monitor with no user gets a 401 and reports misconfigured: never up, never down. Give it a user with the `monitoring` tag, which can read the health checks and nothing else.",
+    },
+    {
+      name: "password",
+      emptyValue: "null",
+      label: "Password",
+      control: { kind: "secret", maxLength: 255 },
+      help: "Sent as HTTP Basic, in the clear unless the URL is `https://`. A password with no username is refused: Basic carries one `user:password` field, and a silently unsent password comes back as a 401 that reads like a wrong one.",
+    },
+  ],
   supportsRecovery: true,
 };
 
 export const DEFAULT_KAFKA_PORT = 9092;
+
+/**
+ * The record every Kafka check publishes.
+ *
+ * Here rather than in the spec because the form's placeholder quotes it,
+ * and the form may not import a spec — that would pull zod and a broker
+ * client into the browser bundle.
+ */
+export const DEFAULT_KAFKA_MESSAGE = "vigil monitor check";
 
 export const kafkaProducerDescriptor: CheckTypeDescriptor<"active"> = {
   kind: "active",
@@ -594,6 +706,55 @@ export const kafkaProducerDescriptor: CheckTypeDescriptor<"active"> = {
     RESPONSE_TIME,
   ],
   form: ["port"],
+  configFields: [
+    {
+      name: "topic",
+      emptyValue: "null",
+      label: "Topic",
+      control: {
+        kind: "text",
+        placeholder: "vigil-monitor-checks",
+        // Kafka's own Topic.MAX_NAME_LENGTH. Repeated from the spec as a
+        // courtesy; storedSchema stays the authority.
+        maxLength: 249,
+        mono: true,
+      },
+      help: "One record is produced to this topic on every check, so point it at a topic you own; every consumer of it sees the message. Without a topic nothing is dialled at all and the monitor reports misconfigured.",
+    },
+    {
+      name: "tls",
+      defaultValue: false,
+      label: "Connect with TLS",
+      control: { kind: "boolean" },
+      help: "On for an `SSL` or `SASL_SSL` listener, off for `PLAINTEXT`. SASL/PLAIN puts the password on the wire as it is, so a credential set without this is readable by anything on the path. The certificate is verified; a private CA belongs in NODE_EXTRA_CA_CERTS.",
+    },
+    {
+      name: "username",
+      emptyValue: "null",
+      label: "SASL username",
+      control: { kind: "text", placeholder: "vigil", maxLength: 255 },
+      help: "Only for a listener that demands SASL/PLAIN. Leave it empty on a cluster that takes anonymous connections: a credential offered to a listener with no SASL configured is refused at the handshake and reports misconfigured.",
+    },
+    {
+      name: "password",
+      emptyValue: "null",
+      label: "SASL password",
+      control: { kind: "secret", maxLength: 255 },
+      help: "Needs a username: PLAIN sends both as one token, so a password on its own cannot be put on the wire. Turn on TLS before you set one.",
+    },
+    {
+      name: "message",
+      emptyValue: "omit",
+      label: "Message",
+      control: {
+        kind: "text",
+        placeholder: DEFAULT_KAFKA_MESSAGE,
+        maxLength: 512,
+      },
+      help: "The record's value. The default names its author, so a record found in the topic six months later is traceable; change it only when your consumers validate a schema.",
+      group: "advanced",
+    },
+  ],
   supportsRecovery: true,
 };
 
@@ -630,6 +791,30 @@ export const memcachedDescriptor: CheckTypeDescriptor<"active"> = {
     RESPONSE_TIME,
   ],
   form: ["port"],
+  configFields: [
+    {
+      name: "username",
+      emptyValue: "null",
+      label: "Username",
+      control: { kind: "text", placeholder: "monitor", maxLength: 255 },
+      help: "The user from the server's --auth-file (memcached 1.5.16 and later). Leave this and the password empty for a server that accepts unauthenticated commands; SASL over the binary protocol is a different mechanism and is not supported.",
+    },
+    {
+      name: "password",
+      emptyValue: "null",
+      label: "Password",
+      control: { kind: "secret", maxLength: 255 },
+      help: "Offered only after the server refuses an unauthenticated command, so it is never written into the cache as an ordinary key. A password with no username is refused: the auth file pairs them.",
+    },
+    {
+      name: "maxConnectionUsagePercent",
+      emptyValue: "null",
+      label: "Connection limit warning",
+      control: { kind: "number", min: 1, max: 100, step: 1, unit: "%" },
+      group: "advanced",
+      help: "Share of the server's maxconns in use before the monitor goes amber; it never opens an incident. Leave it empty to make no claim about connection usage; a monitor created outside this form takes 90.",
+    },
+  ],
   supportsRecovery: true,
 };
 
@@ -640,6 +825,14 @@ export const memcachedDescriptor: CheckTypeDescriptor<"active"> = {
  * because the placeholder and the docs both quote it.
  */
 export const DEFAULT_ELASTICSEARCH_PORT = 9200;
+
+/**
+ * The cluster colours that can count as healthy. Red never can.
+ *
+ * Here rather than in the spec for the reason the Kafka message is: the
+ * form types its options against this, and the form cannot import a spec.
+ */
+export const ACCEPTABLE_CLUSTER_STATUSES = ["green", "yellow"] as const;
 
 export const elasticsearchDescriptor: CheckTypeDescriptor<"active"> = {
   kind: "active",
@@ -671,6 +864,48 @@ export const elasticsearchDescriptor: CheckTypeDescriptor<"active"> = {
   // Credentials are this type's only setting and the form has no section
   // for them yet; they arrive by import or by API. See the spec.
   form: [],
+  configFields: [
+    {
+      name: "username",
+      emptyValue: "null",
+      label: "Username",
+      control: { kind: "text", placeholder: "elastic", maxLength: 255 },
+      help: "HTTP basic, for a cluster with security enabled. Put it here and not in the cluster URL: the URL is exported and printed verbatim, and this field is masked everywhere.",
+    },
+    {
+      name: "password",
+      emptyValue: "null",
+      label: "Password",
+      control: { kind: "secret", maxLength: 512 },
+      help: "A password needs a username. A cluster that refuses it answers 401, which reports misconfigured rather than down, because the cluster is up and refusing us.",
+    },
+    {
+      name: "apiKey",
+      emptyValue: "null",
+      label: "API key",
+      control: { kind: "secret", maxLength: 1024 },
+      help: "Sent as an ApiKey authorization header, instead of a username and password rather than as well as them: saving both is refused. A key holding only the cluster monitor privilege is all this check needs.",
+    },
+    {
+      name: "minimumStatus",
+      defaultValue: "green",
+      emptyValue: "omit",
+      label: "Lowest healthy status",
+      control: {
+        kind: "select",
+        // Typed against the enum rather than restating it, so a colour
+        // `storedSchema` would refuse cannot be offered in the form.
+        options: [
+          { value: "green", label: "Green (yellow is degraded)" },
+          { value: "yellow", label: "Yellow (normal on a single node)" },
+        ] satisfies readonly {
+          value: (typeof ACCEPTABLE_CLUSTER_STATUSES)[number];
+          label: string;
+        }[],
+      },
+      help: "The worst colour that still counts as fully healthy; red is down either way. A single-node cluster is permanently yellow (it has replicas configured and nowhere to put them), so green there makes the monitor amber from the day it is created.",
+    },
+  ],
   supportsRecovery: true,
 };
 
@@ -702,6 +937,27 @@ export const websocketDescriptor: CheckTypeDescriptor<"active"> = {
     },
   ],
   form: [],
+  configFields: [
+    {
+      name: "subprotocol",
+      emptyValue: "null",
+      label: "Subprotocol",
+      control: {
+        kind: "text",
+        placeholder: "graphql-ws",
+        maxLength: 64,
+        mono: true,
+      },
+      help: "A single token, offered in Sec-WebSocket-Protocol. With one set, a server that accepts the socket without agreeing to it is a failure, which is the point: a gateway that answers every path is not the application.",
+    },
+    {
+      name: "authorization",
+      emptyValue: "null",
+      label: "Authorization header",
+      control: { kind: "secret", placeholder: "Bearer ...", maxLength: 2048 },
+      help: "Sent verbatim as the Authorization header on the handshake. Include the scheme.",
+    },
+  ],
   supportsRecovery: true,
 };
 
@@ -738,6 +994,34 @@ export const grpcDescriptor: CheckTypeDescriptor<"active"> = {
     },
   ],
   form: ["port"],
+  configFields: [
+    {
+      name: "tls",
+      defaultValue: false,
+      label: "TLS",
+      control: { kind: "boolean" },
+      help: "On for a server behind TLS. Dialling a TLS port in plaintext does not fail politely; the connection stalls and the check times out.",
+    },
+    {
+      name: "service",
+      emptyValue: "empty",
+      label: "Service name",
+      control: {
+        kind: "text",
+        placeholder: "grpc.health.v1.Health",
+        maxLength: 200,
+        mono: true,
+      },
+      help: "Which service to ask about. Leave it empty to ask whether the whole server is serving.",
+    },
+    {
+      name: "authorization",
+      emptyValue: "null",
+      label: "Authorization metadata",
+      control: { kind: "secret", placeholder: "Bearer ...", maxLength: 2048 },
+      help: "Sent as the authorization metadata entry on the health call. Include the scheme.",
+    },
+  ],
   supportsRecovery: true,
 };
 
@@ -764,6 +1048,31 @@ export const ldapDescriptor: CheckTypeDescriptor<"active"> = {
     { key: "responseTimeMs", label: "Bind time", kind: "number", unit: "ms" },
   ],
   form: ["port"],
+  configFields: [
+    {
+      name: "bindDn",
+      emptyValue: "null",
+      label: "Bind DN",
+      control: {
+        kind: "text",
+        placeholder: "cn=vigil,ou=service,dc=example,dc=com",
+        maxLength: 512,
+        mono: true,
+      },
+      help: "The DN to bind as. Leave it empty and Vigil binds anonymously, which proves the directory answers but not that it can still authenticate anyone, and a directory that refuses anonymous binds reports every check as down.",
+    },
+    // No `showWhen` pairing these two: `equals` compares against a fixed
+    // list of values, and "the DN is not empty" is not one of those. The
+    // rule that a password needs a DN is a refinement in `specs/ldap.ts`,
+    // which is where the operator meets it, with the field named.
+    {
+      name: "bindPassword",
+      emptyValue: "null",
+      label: "Bind password",
+      control: { kind: "secret", maxLength: 512 },
+      help: "Sent in the clear: this bind never starts TLS, which is why port 636 is not an option. A password needs a bind DN: on its own the directory ignores it, binds anonymously and answers success.",
+    },
+  ],
   supportsRecovery: true,
 };
 
@@ -794,6 +1103,20 @@ export const sshDescriptor: CheckTypeDescriptor<"active"> = {
     },
   ],
   form: ["port"],
+  configFields: [
+    {
+      name: "expectedBanner",
+      emptyValue: "null",
+      label: "Expected banner",
+      control: {
+        kind: "text",
+        placeholder: "OpenSSH_9",
+        maxLength: 255,
+        mono: true,
+      },
+      help: "A substring the identification string must contain, which turns this into a version assertion: OpenSSH_9 catches a rollback to an older build, Debian catches a failover onto a different image. Match on as little as you can; a full version reports down the first time the host is patched.",
+    },
+  ],
   supportsRecovery: true,
 };
 
@@ -893,6 +1216,20 @@ export const imapDescriptor: CheckTypeDescriptor<"active"> = {
     },
   ],
   form: ["port"],
+  configFields: [
+    {
+      name: "requiredCapability",
+      emptyValue: "null",
+      label: "Required capability",
+      control: {
+        kind: "text",
+        placeholder: "STARTTLS",
+        maxLength: 64,
+        mono: true,
+      },
+      help: "One capability the server must keep advertising: STARTTLS, IDLE, AUTH=PLAIN. Leave it empty to assert only that the store answers; name one the server does not already list and the monitor is down on its first check.",
+    },
+  ],
   supportsRecovery: true,
 };
 
@@ -925,6 +1262,26 @@ export const ftpDescriptor: CheckTypeDescriptor<"active"> = {
     },
   ],
   form: ["port"],
+  configFields: [
+    {
+      name: "username",
+      emptyValue: "null",
+      label: "Username",
+      control: { kind: "text", placeholder: "anonymous", maxLength: 128 },
+      help: "The account to log in as. Leave it empty and the check stops after the feature list, so an expired or locked account is not something it can see.",
+    },
+    // Not hidden until a username exists: `showWhen` compares against a
+    // fixed list of values, and a stored secret behind a hidden control is
+    // a credential the operator can no longer see they have. The pairing
+    // rule is a refinement in `specs/ftp.ts`.
+    {
+      name: "password",
+      emptyValue: "null",
+      label: "Password",
+      control: { kind: "secret", maxLength: 255 },
+      help: "Travels in the clear, because FTP has no other way and this check never issues AUTH TLS, so point it at an account that can list a directory and nothing else. It needs a username: PASS only means anything after USER.",
+    },
+  ],
   supportsRecovery: true,
 };
 
@@ -977,6 +1334,101 @@ export const snmpDescriptor: CheckTypeDescriptor<"active"> = {
     },
   ],
   form: ["port"],
+  configFields: [
+    {
+      name: "oid",
+      emptyValue: "omit",
+      label: "OID",
+      control: {
+        kind: "text",
+        placeholder: DEFAULT_SNMP_OID,
+        maxLength: 255,
+        mono: true,
+      },
+      help: "Numeric, like 1.3.6.1.2.1.1.3.0. Names out of a MIB are not resolved. The default reads the agent's uptime, which every agent answers.",
+    },
+    {
+      name: "version",
+      defaultValue: "2c",
+      emptyValue: "omit",
+      label: "Version",
+      control: {
+        kind: "select",
+        options: [
+          { value: "1", label: "v1" },
+          { value: "2c", label: "v2c" },
+          { value: "3", label: "v3 (USM)" },
+        ],
+      },
+      help: "v1 and v2c authenticate with a community string and nothing else. v3 identifies the caller by user name and can sign and encrypt.",
+    },
+    {
+      name: "community",
+      emptyValue: "null",
+      label: "Community string",
+      control: { kind: "secret", maxLength: 255 },
+      showWhen: { field: "version", equals: ["1", "2c"] },
+      help: "The whole of v1 and v2c authentication. `public` unless somebody changed it, and an agent that wants a different one does not answer, which reads as an outage.",
+    },
+    {
+      name: "v3Username",
+      emptyValue: "null",
+      label: "USM user name",
+      control: { kind: "text", maxLength: 64 },
+      showWhen: { field: "version", equals: ["3"] },
+      help: "Sent in the clear at every security level, so it is not treated as a secret.",
+    },
+    {
+      name: "v3AuthProtocol",
+      emptyValue: "null",
+      label: "Authentication",
+      control: {
+        kind: "select",
+        options: [
+          { value: "", label: "None (noAuthNoPriv)" },
+          { value: "MD5", label: "MD5" },
+          { value: "SHA", label: "SHA" },
+        ],
+      },
+      showWhen: { field: "version", equals: ["3"] },
+    },
+    {
+      name: "v3AuthPassword",
+      emptyValue: "null",
+      label: "Authentication pass phrase",
+      control: { kind: "secret", maxLength: 255 },
+      showWhen: { field: "version", equals: ["3"] },
+    },
+    {
+      name: "v3PrivProtocol",
+      emptyValue: "null",
+      label: "Privacy",
+      control: {
+        kind: "select",
+        options: [
+          { value: "", label: "None" },
+          { value: "AES", label: "AES-128" },
+        ],
+      },
+      showWhen: { field: "version", equals: ["3"] },
+      help: "USM has no encrypt-without-authenticate level, so this needs an authentication protocol as well.",
+    },
+    {
+      name: "v3PrivPassword",
+      emptyValue: "null",
+      label: "Privacy pass phrase",
+      control: { kind: "secret", maxLength: 255 },
+      showWhen: { field: "version", equals: ["3"] },
+    },
+    {
+      name: "expectedValue",
+      emptyValue: "null",
+      label: "Expected value",
+      control: { kind: "text", maxLength: 255, mono: true },
+      help: "Leave empty to require only that the OID answers.",
+      group: "advanced",
+    },
+  ],
   supportsRecovery: true,
 };
 
@@ -1163,6 +1615,30 @@ export const gamedigDescriptor: CheckTypeDescriptor<"active"> = {
   // one created by import or API queries whatever it asked for. Same
   // shape as `rabbitmq`'s credentials; both want a form section.
   form: ["port"],
+  configFields: [
+    {
+      name: "protocol",
+      defaultValue: "source",
+      emptyValue: "omit",
+      label: "Query protocol",
+      control: {
+        kind: "select",
+        // Derived from the list above rather than restated, so a fourth
+        // protocol is one edit. No empty option: `protocol` is a
+        // required enum with a default, and "not set" is not a value
+        // `gamedigStoredSchema` accepts.
+        options: GAME_QUERY_PROTOCOLS.map((entry) => ({
+          value: entry.id,
+          label: entry.label,
+        })),
+      },
+      help: `Which query Vigil sends. ${GAME_QUERY_PROTOCOLS.map(
+        (entry) => `${entry.label}: ${entry.games}`,
+      ).join(
+        ". ",
+      )}. The wrong one for this port draws no reply at all, so a server that is running reads as down.`,
+    },
+  ],
   supportsRecovery: true,
 };
 
@@ -1211,6 +1687,39 @@ export const udpDescriptor: CheckTypeDescriptor<"active"> = {
   // in the UI sends an empty datagram and one created by import or API
   // sends what it asked for.
   form: ["port"],
+  configFields: [
+    {
+      name: "payloadEncoding",
+      defaultValue: "text",
+      emptyValue: "null",
+      label: "Payload encoding",
+      // Values are `UDP_PAYLOAD_ENCODINGS` — see the note on that
+      // constant. Declared here because the form must render this
+      // selector without importing the spec (and therefore zod).
+      control: {
+        kind: "select",
+        options: [
+          { value: "text", label: "Text" },
+          { value: "hex", label: "Hex" },
+        ],
+      },
+      help: "How the payload and the expected reply below are written. Text goes on the wire as UTF-8; hex as the bytes those digit pairs spell, like `00ff2a`. The reply is read the same way, so a hex payload needs a hex expectation.",
+    },
+    {
+      name: "payload",
+      emptyValue: "null",
+      label: "Payload",
+      control: { kind: "text", maxLength: 4096, mono: true },
+      help: "What the check sends. UDP answers nothing it was not asked, so an empty payload means most services never reply and the monitor reads down whether or not they are healthy. Trailing whitespace is kept: it is the terminator half the text protocols use. 1024 bytes maximum: a larger datagram is fragmented, and firewalls routinely drop the fragments.",
+    },
+    {
+      name: "expectedResponse",
+      emptyValue: "null",
+      label: "Expected reply contains",
+      control: { kind: "text", maxLength: 200 },
+      help: "A substring the reply must contain, read in the encoding above. Leave it empty and any reply at all counts as up, including an error the service sends back or an unrelated process bound on that port.",
+    },
+  ],
   supportsRecovery: true,
 };
 
@@ -1235,6 +1744,16 @@ export const ntpDescriptor: CheckTypeDescriptor<"active"> = {
     RESPONSE_TIME,
   ],
   form: ["port"],
+  configFields: [
+    {
+      name: "maxOffsetMs",
+      emptyValue: "null",
+      label: "Clock offset tolerance",
+      control: { kind: "number", min: 1, max: 3_600_000, unit: "ms" },
+      help: "How far the server's clock may sit from Vigil's before the check reads degraded. The offset is measured against this host's clock, not against真 time, so tightening it much below the 1000ms default reports Vigil's own drift as every time server drifting at once.",
+      group: "advanced",
+    },
+  ],
   supportsRecovery: true,
 };
 
@@ -1265,6 +1784,44 @@ export const radiusDescriptor: CheckTypeDescriptor<"active"> = {
   // created in the UI reports `misconfigured` until one is supplied by
   // import or API — which is the correct answer, and never `down`.
   form: ["port"],
+  configFields: [
+    {
+      name: "secret",
+      emptyValue: "null",
+      label: "Shared secret",
+      control: { kind: "secret", maxLength: 255 },
+      help: "The secret this client is configured with on the server. It signs the request and verifies the reply, so without it there is nothing to check and the monitor says so rather than reporting an outage.",
+    },
+    {
+      name: "username",
+      emptyValue: "null",
+      label: "User name",
+      control: { kind: "text", maxLength: 253 },
+      help: "Sent as User-Name. A probe account that is expected to be rejected works as well as one that is accepted; see below.",
+    },
+    {
+      name: "password",
+      emptyValue: "null",
+      label: "Password",
+      control: { kind: "secret", maxLength: 128 },
+      help: "Sent as User-Password, encrypted with the shared secret.",
+    },
+    {
+      name: "expectAccept",
+      defaultValue: false,
+      label: "Require Access-Accept",
+      control: { kind: "boolean" },
+      help: "Off, and any well-formed signed reply proves the server is answering, which is what most people want to watch, and it needs no real account. On, and only an Access-Accept passes, which also checks the directory behind it.",
+    },
+    {
+      name: "nasIdentifier",
+      emptyValue: "null",
+      label: "NAS identifier",
+      control: { kind: "text", maxLength: 253 },
+      help: "Sent as NAS-Identifier. Some servers select a client policy by it.",
+      group: "advanced",
+    },
+  ],
   supportsRecovery: true,
 };
 
@@ -1313,6 +1870,31 @@ export const sipDescriptor: CheckTypeDescriptor<"active"> = {
   // answers 405 to OPTIONS can say so in the UI, rather than needing an
   // API call to set a type-specific field.
   form: ["port", "expectedStatusCode"],
+  configFields: [
+    {
+      name: "transport",
+      defaultValue: "udp",
+      emptyValue: "omit",
+      label: "Transport",
+      // Values are `SIP_TRANSPORTS`, declared just above this descriptor.
+      control: {
+        kind: "select",
+        options: [
+          { value: "udp", label: "UDP" },
+          { value: "tcp", label: "TCP" },
+        ],
+      },
+      help: "Which listener the OPTIONS request goes to. UDP 5060 and TCP 5060 are different listeners on most SBCs, so choosing the one the element does not serve times out and reads as down while it is answering perfectly on the other. TLS on 5061 is a transport this check does not speak.",
+    },
+    {
+      name: "requestUser",
+      emptyValue: "null",
+      label: "Request-URI user",
+      control: { kind: "text", placeholder: "pstn", maxLength: 64 },
+      help: "Addresses the request to `sip:user@host` instead of the bare `sip:host`. Leave it empty for a proxy or registrar, which is what every one of them answers; set it when the element answers per-AOR, such as a gateway that serves one number and 404s the host itself.",
+      group: "advanced",
+    },
+  ],
   supportsRecovery: true,
 };
 
@@ -1344,6 +1926,24 @@ export const tailscalePingDescriptor: CheckTypeDescriptor<"active"> = {
     { key: "responseTimeMs", label: "Round trip", kind: "number", unit: "ms" },
   ],
   form: [],
+  configFields: [
+    {
+      name: "packets",
+      emptyValue: "omit",
+      label: "Ping attempts",
+      control: { kind: "number", min: 1, max: 10, unit: "pings" },
+      help: "How many pings one check sends before giving up. The first reply passes, so more attempts ride out a path being renegotiated: a peer that has just changed networks drops the first packet and answers the second. The monitor's timeout is divided between the attempts rather than spent on each, so raising this shortens the wait per attempt.",
+      group: "advanced",
+    },
+    {
+      name: "requireDirect",
+      defaultValue: false,
+      label: "Require a direct path",
+      control: { kind: "boolean" },
+      help: "Report a peer that is only reachable through a DERP relay as degraded. Leave it off unless direct paths are the norm on your tailnet: plenty of estates never negotiate one, and this would then be amber forever.",
+      group: "advanced",
+    },
+  ],
   // The `tailscale` CLI, and a tailscaled that is logged into a tailnet.
   // Absent — which is every default install — the monitor reads
   // `misconfigured` and says what is missing, never `down`.
@@ -1375,6 +1975,35 @@ export const realBrowserDescriptor: CheckTypeDescriptor<"active"> = {
   // type and `http`. It is a flat column and an existing form section,
   // so an operator can set it without a type-specific field.
   form: ["keyword"],
+  configFields: [
+    {
+      name: "serviceUrl",
+      emptyValue: "null",
+      label: "Rendering service URL",
+      control: {
+        kind: "text",
+        placeholder: "https://browserless.example.com",
+        maxLength: 512,
+        mono: true,
+      },
+      help: "Where the headless browser runs. Vigil does not ship one: without this the monitor reports that it cannot measure rather than guessing.",
+    },
+    {
+      name: "token",
+      emptyValue: "null",
+      label: "Service token",
+      control: { kind: "secret", maxLength: 512 },
+      help: "Whatever the rendering service authenticates with. Not trimmed: leading and trailing space are legal in a token.",
+    },
+    {
+      name: "settleMs",
+      emptyValue: "omit",
+      label: "Settle for (ms)",
+      control: { kind: "number", min: 0, max: 10000, step: 100 },
+      help: "How long to wait after load before reading the page, for an app that paints its content afterwards. Every millisecond here is added to the check's own latency.",
+      group: "advanced",
+    },
+  ],
   // A browser. Vigil does not ship one — Chromium is a hundred and fifty
   // megabytes and a pile of system libraries — so this type talks to a
   // rendering service over HTTP and reports `misconfigured` when none is
@@ -1382,6 +2011,12 @@ export const realBrowserDescriptor: CheckTypeDescriptor<"active"> = {
   requiresCapability: "headless-browser",
   supportsRecovery: true,
 };
+
+/**
+ * Globalping's own API. Here rather than in the spec because the form's
+ * placeholder quotes it, and the form cannot import a spec.
+ */
+export const GLOBALPING_API_URL = "https://api.globalping.io";
 
 export const globalpingDescriptor: CheckTypeDescriptor<"active"> = {
   kind: "active",
@@ -1421,6 +2056,59 @@ export const globalpingDescriptor: CheckTypeDescriptor<"active"> = {
   // three probes and one created by import or API measures what it asked
   // for.
   form: [],
+  configFields: [
+    {
+      name: "location",
+      emptyValue: "omit",
+      label: "Measure from",
+      control: { kind: "text", placeholder: "world", maxLength: 100 },
+      help: "Where the measurement runs from, in Globalping's own syntax: `world`, `europe`, `Germany`, `US+NY`, `AS13335`, or a comma-separated list of them. This is half of what the monitor measures: a route that is broken only in São Paulo stays invisible unless you ask for São Paulo.",
+    },
+    {
+      name: "apiToken",
+      emptyValue: "null",
+      label: "API token",
+      control: { kind: "secret", placeholder: "Optional", maxLength: 512 },
+      help: "A free Globalping API token. Without one the measurements are anonymous and share an hourly quota with everything else leaving this install's IP address; when that quota is spent the monitor stops measuring rather than reporting the target down.",
+    },
+    {
+      name: "probeLimit",
+      emptyValue: "omit",
+      label: "Probes",
+      control: { kind: "number", min: 1, max: 10, step: 1, unit: "probes" },
+      help: "How many probes run each measurement. Every one of them spends quota, and a single probe cannot tell a regional outage from one bad machine.",
+      group: "advanced",
+    },
+    {
+      name: "packets",
+      emptyValue: "omit",
+      label: "Packets per probe",
+      control: { kind: "number", min: 1, max: 16, step: 1, unit: "packets" },
+      help: "ICMP echoes each probe sends. Fewer makes the loss figure coarser: with one packet, loss is either 0% or 100%.",
+      group: "advanced",
+    },
+    {
+      name: "maxPacketLossPct",
+      emptyValue: "omit",
+      label: "Degraded above",
+      control: { kind: "number", min: 0, max: 100, step: 1, unit: "%" },
+      help: "Mean packet loss across the probes that counts as degraded. Not zero: internet ICMP loses the odd packet everywhere, so a threshold of zero leaves the monitor permanently amber, which is the same as having no amber at all.",
+      group: "advanced",
+    },
+    {
+      name: "apiBaseUrl",
+      emptyValue: "omit",
+      label: "API base URL",
+      control: {
+        kind: "text",
+        placeholder: GLOBALPING_API_URL,
+        maxLength: 512,
+        mono: true,
+      },
+      help: "The Globalping API to call. Change it only to point at a mirror or a self-hosted instance; anything that is not an http or https URL stops the monitor running at all.",
+      group: "advanced",
+    },
+  ],
   requiresCapability: "globalping-api",
   // Deliberately not recoverable. A recovery verification re-probes, and
   // one re-probe here spends three of an hourly quota that is shared by

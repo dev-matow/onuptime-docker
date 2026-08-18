@@ -1,6 +1,7 @@
 import dns from "node:dns/promises";
 import http from "node:http";
 import https from "node:https";
+import type { LookupFunction } from "node:net";
 import { Readable, type Transform } from "node:stream";
 import zlib from "node:zlib";
 
@@ -486,6 +487,57 @@ function pinnedFetch(pin: ResolvedAddress | null): typeof fetch {
   };
 }
 
+/**
+ * The resolver `node:http` is handed: one answer, already classified,
+ * delivered on a later turn of the loop.
+ *
+ * The deferral is not decoration, and it is the whole reason this is a
+ * named function with a test of its own. Answering synchronously means
+ * the connector runs its `connect(2)` inside this callback, still inside
+ * `transport.request(...)`, before that call has returned to
+ * `pinnedRequest` below. A connect that fails synchronously - `ENETUNREACH`
+ * on a host with no route to the pinned address, which is every worker
+ * in a network namespace, a container that lost its default route, and a
+ * machine whose uplink just went down - then destroys the socket in the
+ * same stack. Two things follow, both bad:
+ *
+ *  1. The TLS layer keeps unwinding through a socket whose `_handle` is
+ *     now null and throws `Cannot read properties of null (reading
+ *     'setServername')`. That escapes the promise executor, so the
+ *     request rejects with a TypeError that has no `cause` - and every
+ *     caller in this repo reports `error.cause.message`.
+ *  2. The real `ENETUNREACH` is emitted on the socket a tick later, by
+ *     which time `transport.request(...)` has thrown rather than
+ *     returned, so `request.once("error", ...)` below was never
+ *     attached. An 'error' event with no listener is an UNCAUGHT
+ *     EXCEPTION: in production that is the worker process dying, which
+ *     means monitoring stops at exactly the moment the network broke.
+ *
+ * `dns.lookup` is asynchronous in every implementation node ships - it
+ * answers from the threadpool - so a connector that could not survive a
+ * later answer would already be broken. Answering on the next turn is
+ * the shape node is written against, and it puts the connect error back
+ * on the ordinary socket path, where it becomes the same
+ * `TypeError("fetch failed", { cause })` a refused connection produces.
+ */
+export function pinnedLookup(pin: ResolvedAddress): LookupFunction {
+  return (_hostname, lookupOptions, callback) => {
+    // `setImmediate` rather than `nextTick`: the nextTick queue drains
+    // ahead of I/O, and the point is to look like the I/O completion a
+    // real lookup is.
+    setImmediate(() => {
+      // Node calls this with `all: true` from `net.connect`, and with
+      // the single-address shape elsewhere. Answer in the shape asked
+      // for; both mean the same one address.
+      if (lookupOptions.all) {
+        callback(null, [{ address: pin.address, family: pin.family }]);
+      } else {
+        callback(null, pin.address, pin.family);
+      }
+    });
+  };
+}
+
 function pinnedRequest(
   url: URL,
   init: EgressRequestInit,
@@ -520,16 +572,7 @@ function pinnedRequest(
         // times out in four seconds and the fastest monitor interval is
         // measured in seconds.
         agent: false,
-        lookup: (_hostname, lookupOptions, callback) => {
-          // Node calls this with `all: true` from `net.connect`, and
-          // with the single-address shape elsewhere. Answer in the
-          // shape asked for; both mean the same one address.
-          if (lookupOptions.all) {
-            callback(null, [{ address: pin.address, family: pin.family }]);
-          } else {
-            callback(null, pin.address, pin.family);
-          }
-        },
+        lookup: pinnedLookup(pin),
       },
       (message) => {
         resolve(webResponse(message, url, method));

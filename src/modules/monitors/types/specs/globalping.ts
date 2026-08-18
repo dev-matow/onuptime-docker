@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { globalpingDescriptor } from "../catalog";
+import { GLOBALPING_API_URL, globalpingDescriptor } from "../catalog";
 import type { Assertion, CheckTypeSpec, MonitorRowView } from "../contract";
 import { monitorHostnameSchema } from "../targets";
 import { latencyAssertion } from "./shared";
@@ -24,7 +24,6 @@ import { latencyAssertion } from "./shared";
  */
 
 /** The public API. Overridable so an install can point at a mirror. */
-export const GLOBALPING_API_URL = "https://api.globalping.io";
 
 /** Where the measurement runs from, in Globalping's "magic" syntax. */
 export const DEFAULT_GLOBALPING_LOCATION = "world";

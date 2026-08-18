@@ -172,6 +172,62 @@ export const monitors = pgTable(
      * scheduler instead of swapping a function.
      */
     nextEvaluationAt: timestamp({ withTimezone: true }),
+    /**
+     * When the scheduler's claim on this monitor runs out.
+     *
+     * A SEPARATE column from `next_evaluation_at`, and the separation is
+     * the whole point. The first version of the claim pushed
+     * `next_evaluation_at` forward instead, which stopped the duplicate
+     * enqueue it was written for and quietly broke two other things:
+     *
+     *   - the column stopped meaning "when this monitor is next due" and
+     *     started meaning "when it is next due, unless a tick has looked
+     *     at it recently", which is not a thing any reader wanted;
+     *   - every measurement of how far behind the scheduler is reads
+     *     that column, so claiming a backlog HID it. A fleet the workers
+     *     could not keep up with reported a lag of at most one lease,
+     *     forever, however far behind it actually was. The operator page
+     *     and the capacity benchmark were both reading a number the
+     *     claim had flattened.
+     *
+     * So the claim leases the monitor here and leaves the due time
+     * alone. Selection skips a monitor with a live claim; lateness is
+     * measured from `next_evaluation_at` and is therefore immune to it.
+     *
+     * Null on every row written before this column existed, which reads
+     * as "not claimed" and is correct: nothing was.
+     */
+    dispatchClaimedUntil: timestamp({ withTimezone: true }),
+    /**
+     * Which system this monitor was migrated out of, or null when a
+     * person created it here. `uptime-kuma`, `pingdom`, `checkly` — the
+     * importer's own id, never a display name.
+     *
+     * Two columns rather than a free-text note, because this pair is the
+     * only thing that makes a re-import safe. The importer used to match
+     * an existing monitor on (check type, target, name), which is a
+     * guess wearing the costume of a key: rename an imported monitor and
+     * the next run imports it again, so an operator who re-ran a
+     * migration after fixing three checks got a second copy of the other
+     * two hundred. A recorded source id cannot be renamed out of.
+     *
+     * Nullable on purpose, and it stays nullable. Every monitor that
+     * existed before this column did has no provenance and can never
+     * truthfully be given any — nothing anywhere records which Kuma row
+     * it came from. Backfilling a guess here would be the same fuzzy
+     * match, written into the schema where it looks authoritative.
+     */
+    importSource: text(),
+    /**
+     * The id this monitor had in that system, verbatim and as text.
+     *
+     * Text because the source systems disagree: Kuma's ids are integers,
+     * Pingdom's are integers that exceed 2^31, Checkly's are UUIDs. A
+     * numeric column would force every adapter that has a string id to
+     * invent a number, and the only thing this value is ever used for is
+     * equality against the same source's next answer.
+     */
+    importSourceId: text(),
     createdBy: text().references(() => user.id, { onDelete: "set null" }),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp({ withTimezone: true })
@@ -206,6 +262,21 @@ export const monitors = pgTable(
     index("monitors_high_frequency_idx")
       .on(t.organizationId)
       .where(sql`${t.highFrequency} = true and ${t.paused} = false`),
+    // One source record, one monitor, per organisation. Stated to
+    // Postgres rather than checked in application code, because the
+    // importer's own check reads the table at the top of the transaction
+    // and two operators clicking Import on the same backup at the same
+    // moment both read "nothing there". Application-side dedup makes
+    // that race produce two fleets; this index makes the loser's insert
+    // fail, which the per-monitor savepoint turns into one report line.
+    //
+    // Scoped to the organisation, because two tenants migrating off the
+    // same Kuma instance are two separate migrations and neither may see
+    // the other. Partial, because every hand-made monitor has null here
+    // and there are far more of those than imported ones.
+    uniqueIndex("monitors_import_source_idx")
+      .on(t.organizationId, t.importSource, t.importSourceId)
+      .where(sql`${t.importSource} is not null`),
   ],
 );
 

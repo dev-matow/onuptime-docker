@@ -46,6 +46,12 @@ next-env.d.ts
 /playwright-report/
 /test-results/
 
+# Ad-hoc browser-audit output: captures and accessibility dumps written
+# while checking a page by hand. A screenshot worth keeping goes into
+# docs/ or landing/assets/ under its own name.
+/output/
+.playwright-cli/
+
 # build-process notes (not part of the product)
 .engineering_state.json
 

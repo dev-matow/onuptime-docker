@@ -751,3 +751,128 @@ describe("listMonitors", () => {
     expect(list[0]?.avgResponseMs).toBeNull();
   });
 });
+
+/**
+ * The read paths a browser is on the other end of.
+ *
+ * A `postgres` target is a connection string and the catalog's own
+ * placeholder — `postgres://user:pass@db.example.com:5432/app` — tells
+ * the operator to put the password in it. Both list and detail crossed
+ * that string into a client component, so it landed in the page source
+ * of anyone who could open the page, and a viewer's statements are `{}`:
+ * no permission at all, and a full read of the credential.
+ *
+ * The password never appears in these tests as a literal the assertions
+ * could pass by accident — each one greps the whole serialised result.
+ */
+describe("target credentials never reach a read path", () => {
+  const PASSWORD = "pg-password-that-must-not-travel";
+  const TARGET = `postgres://app:${PASSWORD}@db.example.com:5432/prod`;
+
+  it("listMonitors strips the credential out of the target", async () => {
+    const actor = await createTestOrg();
+    await createMonitor(
+      db,
+      actor,
+      monitorInput({ checkType: "postgres", url: TARGET, port: 5432 }),
+    );
+
+    const list = await listMonitors(db, actor.organizationId);
+    expect(JSON.stringify(list)).not.toContain(PASSWORD);
+    expect(list[0]?.url).toBe("postgres://db.example.com:5432/prod");
+  });
+
+  it("getMonitorDetail masks the credential but keeps the user name", async () => {
+    const actor = await createTestOrg();
+    const monitor = await createMonitor(
+      db,
+      actor,
+      monitorInput({ checkType: "postgres", url: TARGET, port: 5432 }),
+    );
+
+    const detail = await getMonitorDetail(db, actor.organizationId, monitor.id);
+    expect(JSON.stringify(detail)).not.toContain(PASSWORD);
+    // Masked rather than stripped: the edit dialog has to be able to
+    // save this back without destroying the user name.
+    expect(detail.monitor.url).toContain("app:");
+    expect(detail.monitor.url).toContain("db.example.com:5432/prod");
+  });
+
+  it("the row itself still carries the credential, because the probe dials it", async () => {
+    const actor = await createTestOrg();
+    const monitor = await createMonitor(
+      db,
+      actor,
+      monitorInput({ checkType: "postgres", url: TARGET, port: 5432 }),
+    );
+
+    const [row] = await db
+      .select()
+      .from(monitors)
+      .where(eq(monitors.id, monitor.id));
+    expect(row?.url).toBe(TARGET);
+  });
+
+  it("an edit that does not retype the password keeps it", async () => {
+    const actor = await createTestOrg();
+    const monitor = await createMonitor(
+      db,
+      actor,
+      monitorInput({ checkType: "postgres", url: TARGET, port: 5432 }),
+    );
+
+    // Exactly what the dialog sends back: the target it was given,
+    // with the host changed and the sentinel untouched.
+    const detail = await getMonitorDetail(db, actor.organizationId, monitor.id);
+    const edited = detail.monitor.url.replace(
+      "db.example.com",
+      "db2.example.com",
+    );
+    await updateMonitor(db, actor, monitor.id, { url: edited });
+
+    const [row] = await db
+      .select()
+      .from(monitors)
+      .where(eq(monitors.id, monitor.id));
+    expect(row?.url).toBe(
+      `postgres://app:${PASSWORD}@db2.example.com:5432/prod`,
+    );
+  });
+
+  it("an edit that retypes the password replaces it", async () => {
+    const actor = await createTestOrg();
+    const monitor = await createMonitor(
+      db,
+      actor,
+      monitorInput({ checkType: "postgres", url: TARGET, port: 5432 }),
+    );
+
+    const replacement = `postgres://app:a-new-password@db.example.com:5432/prod`;
+    await updateMonitor(db, actor, monitor.id, { url: replacement });
+
+    const [row] = await db
+      .select()
+      .from(monitors)
+      .where(eq(monitors.id, monitor.id));
+    expect(row?.url).toBe(replacement);
+  });
+
+  it("the audit trail records the target without the credential", async () => {
+    const actor = await createTestOrg();
+    const monitor = await createMonitor(
+      db,
+      actor,
+      monitorInput({ checkType: "postgres", url: TARGET, port: 5432 }),
+    );
+    await deleteMonitor(db, actor, monitor.id);
+
+    const entries = await db
+      .select()
+      .from(auditLogs)
+      .where(eq(auditLogs.organizationId, actor.organizationId));
+    expect(entries.length).toBeGreaterThan(0);
+    // An audit entry outlives the monitor and is read by anyone who can
+    // read the trail.
+    expect(JSON.stringify(entries)).not.toContain(PASSWORD);
+  });
+});

@@ -8,7 +8,6 @@ import {
   isNull,
   ne,
   notInArray,
-  or,
   sql,
 } from "drizzle-orm";
 
@@ -19,6 +18,7 @@ import {
   monitorChecks,
   monitors,
 } from "@/db/schema";
+import { env } from "@/lib/env";
 import { ConflictError, NotFoundError } from "@/lib/errors";
 import { writeAudit } from "@/modules/audit";
 import { stampFact } from "@/modules/ledger/service";
@@ -28,7 +28,12 @@ import {
 } from "@/modules/notifications/intents";
 
 import type { CheckResult } from "./check";
-import { describeMonitorTarget } from "./spec";
+import {
+  describeMonitorTarget,
+  maskTargetSecret,
+  redactTargetCredentials,
+  restoreTargetSecret,
+} from "./spec";
 import { nextEvaluationAt, type RecentObservation } from "./scheduling";
 import { MEASURED, round2, uptimeSegments, type UptimeResult } from "./uptime";
 import type { CreateMonitorInput, UpdateMonitorInput } from "./schemas";
@@ -103,6 +108,17 @@ export async function listMonitors(
 
   return rows.map((monitor) => ({
     ...monitor,
+    // Redacted here rather than at each page, because every caller of
+    // this function renders it and none of them dials it. A `postgres`
+    // or `sqlserver` target holds a password — the catalog's own
+    // placeholder tells the operator to put one there — and the four
+    // pages that list monitors were putting it in the page source of
+    // anyone who could open them, including a viewer, whose statements
+    // are `{}`. Truncating it in CSS is not redaction.
+    //
+    // The probe path does not come through here. `toCheckSpec` reads the
+    // row, so the target that gets dialled is still the whole one.
+    url: redactTargetCredentials(monitor.url),
     uptime24hPct: uptime.get(monitor.id)?.uptimePct ?? null,
     avgResponseMs:
       latencyById.get(monitor.id) === null ||
@@ -237,7 +253,27 @@ export async function getMonitorDetail(
     });
   }
 
-  return { monitor, windows, recentChecks };
+  return {
+    monitor: {
+      ...monitor,
+      // Masked, not stripped. This row reaches the detail page, which
+      // shows the target and also hands it to the edit dialog — a client
+      // component, so whatever is here lands in the page source of
+      // anyone who can open the monitor, viewers included.
+      //
+      // Stripping the userinfo outright would be safe and wrong: the
+      // operator who opens the dialog to change a port would save the
+      // target back with its username gone. `maskTargetSecret` keeps
+      // everything that is not the secret, and `updateMonitor` puts the
+      // stored password back when the mask comes home untouched. The
+      // display paths strip what is left.
+      //
+      // The probe never reads this. `toCheckSpec` builds from the row.
+      url: maskTargetSecret(monitor.url),
+    },
+    windows,
+    recentChecks,
+  };
 }
 
 function within(interval: string) {
@@ -361,7 +397,13 @@ export async function createMonitor(
       action: "monitor.created",
       targetType: "monitor",
       targetId: monitor.id,
-      metadata: { name: monitor.name, url: monitor.url },
+      // An audit entry is read by anyone who can read the audit trail,
+      // exported with it, and kept after the monitor is gone. Recording
+      // the credential here would outlive every other copy of it.
+      metadata: {
+        name: monitor.name,
+        url: redactTargetCredentials(monitor.url),
+      },
     });
     return monitor;
   });
@@ -380,14 +422,26 @@ export async function updateMonitor(
       monitorId,
     );
 
+    // The edit dialog is handed the target with its password masked, so
+    // a save that did not retype the secret arrives carrying the
+    // sentinel. Put the stored password back before anything reads the
+    // target: `ruleChanged` compares it, the row stores it, and the
+    // probe dials it. Resolving it here rather than at the three of them
+    // is the same rule the config blob follows — the browser is never
+    // given the credential, so it cannot be asked to send it back.
+    const patch: UpdateMonitorInput =
+      input.url === undefined
+        ? input
+        : { ...input, url: restoreTargetSecret(input.url, existing.url) };
+
     // Settings are normalised against the effective type, merging what
     // was submitted over what is stored. Doing it any other way means a
     // type switch can leave the previous type's settings behind.
-    const checkType = input.checkType ?? existing.checkType;
+    const checkType = patch.checkType ?? existing.checkType;
     const spec = requireSpec(checkType);
 
-    if (input.parentId) {
-      await assertParent(tx, actor.organizationId, monitorId, input.parentId);
+    if (patch.parentId) {
+      await assertParent(tx, actor.organizationId, monitorId, patch.parentId);
     }
 
     // Turning a group into something else would leave its members
@@ -413,25 +467,25 @@ export async function updateMonitor(
     const columns = monitorColumnsFor(
       spec,
       {
-        port: input.port === undefined ? existing.port : input.port,
-        method: input.method ?? existing.method,
+        port: patch.port === undefined ? existing.port : patch.port,
+        method: patch.method ?? existing.method,
         expectedStatusCode:
-          input.expectedStatusCode === undefined
+          patch.expectedStatusCode === undefined
             ? existing.expectedStatusCode
-            : input.expectedStatusCode,
+            : patch.expectedStatusCode,
         bodyKeyword:
-          input.bodyKeyword === undefined
+          patch.bodyKeyword === undefined
             ? existing.bodyKeyword
-            : input.bodyKeyword,
-        keywordAbsent: input.keywordAbsent ?? existing.keywordAbsent,
-        tlsCheck: input.tlsCheck ?? existing.tlsCheck,
-        tlsWarnDays: input.tlsWarnDays ?? existing.tlsWarnDays,
+            : patch.bodyKeyword,
+        keywordAbsent: patch.keywordAbsent ?? existing.keywordAbsent,
+        tlsCheck: patch.tlsCheck ?? existing.tlsCheck,
+        tlsWarnDays: patch.tlsWarnDays ?? existing.tlsWarnDays,
         // The patch itself, not a value resolved against the row. The
         // flat columns above are all-or-nothing settings the form always
         // sends, so resolving them here is right; the config blob can
         // hold a credential the form was never given, so it is merged
         // field by field against what is stored.
-        config: input.config,
+        config: patch.config,
       },
       { checkType: existing.checkType, config: existing.config },
     );
@@ -439,7 +493,7 @@ export async function updateMonitor(
     const [updated] = await tx
       .update(monitors)
       .set({
-        ...input,
+        ...patch,
         checkType,
         ...columns,
         // Editing the rule creates a new version of it. The old version
@@ -451,8 +505,8 @@ export async function updateMonitor(
           : existing.specVersion,
         // A changed baseline should take effect now, not after the old
         // one elapses.
-        ...(input.intervalSeconds !== undefined &&
-        input.intervalSeconds !== existing.intervalSeconds
+        ...(patch.intervalSeconds !== undefined &&
+        patch.intervalSeconds !== existing.intervalSeconds
           ? { nextEvaluationAt: new Date() }
           : {}),
         // A type switch can move a monitor onto or off the scheduler.
@@ -490,7 +544,7 @@ export async function updateMonitor(
       action: "monitor.updated",
       targetType: "monitor",
       targetId: monitorId,
-      metadata: { fields: Object.keys(input) },
+      metadata: { fields: Object.keys(patch) },
     });
     return updated;
   });
@@ -656,7 +710,7 @@ export async function deleteMonitor(
       targetId: monitorId,
       metadata: {
         name: monitor.name,
-        url: monitor.url,
+        url: redactTargetCredentials(monitor.url),
         incidentsResolved: orphaned.length,
       },
     });
@@ -938,6 +992,13 @@ export async function recordCheckOutcome(
           firstFailureAt,
           currentStatus: reconciliation.status,
           lastCheckedAt: now,
+          // The claim is spent the moment its check lands. Left to
+          // expire instead, a monitor on an interval shorter than the
+          // lease would sit unselectable after being probed - a 30s
+          // monitor would be checked, then ignored for the remaining
+          // sixty seconds of a ninety-second claim, and settle at the
+          // lease rather than at its own cadence.
+          dispatchClaimedUntil: null,
           // A kind the scheduler does not own gets no next evaluation.
           // The adaptive policy is about when to *ask* again, and for a
           // derived or declared state there is nobody to ask — the next
@@ -1038,6 +1099,98 @@ export async function recordCheckOutcome(
 const TICK_GRACE_SECONDS = 30;
 
 /**
+ * "This monitor is owed a probe", written once.
+ *
+ * Three statements ask it - the selection, the backlog reading and the
+ * claim's re-check under the lock - and the third is the one that makes
+ * sharing it necessary rather than tidy. A claim whose predicate drifted
+ * from the selection's would push forward monitors the selection had
+ * never chosen, or refuse ones it had, and either way the symptom would
+ * be a cadence that is quietly wrong rather than an error anybody sees.
+ *
+ * `organizationId` narrows it to one tenant. The worker never passes one
+ * - it schedules the whole installation - and the operator surface
+ * always does, because in a deployment that holds one organization per
+ * client, "18,000 monitors are behind" is another client's number.
+ */
+function dueCondition(excludedCheckTypes: string[], organizationId?: string) {
+  return and(
+    organizationId === undefined
+      ? undefined
+      : eq(monitors.organizationId, organizationId),
+    eq(monitors.paused, false),
+    excludedCheckTypes.length === 0
+      ? undefined
+      : notInArray(monitors.checkType, excludedCheckTypes),
+    sql`(
+      ${monitors.nextEvaluationAt} is null
+      or ${monitors.nextEvaluationAt} - make_interval(secs => ${TICK_GRACE_SECONDS}) <= now()
+    )`,
+    // Nobody else's, right now. The claim is a lease on the RIGHT TO
+    // ENQUEUE, held in its own column, so a monitor another tick took a
+    // moment ago is invisible here without its due time having moved.
+    sql`(
+      ${monitors.dispatchClaimedUntil} is null
+      or ${monitors.dispatchClaimedUntil} <= now()
+    )`,
+  );
+}
+
+/**
+ * "This monitor is LATE", which is a different question from "this
+ * monitor is owed a probe".
+ *
+ * The difference is the claim, and getting it wrong made every
+ * measurement of scheduler health useless. A monitor a tick has claimed
+ * is not selectable - that is the point of claiming - but it is still
+ * late, because nothing has probed it yet. Measuring lateness with the
+ * selection predicate therefore made a backlog vanish the instant a tick
+ * looked at it, so a fleet the workers could not keep up with reported a
+ * lag of at most one lease however far behind it really was.
+ *
+ * No grace period either. `TICK_GRACE_SECONDS` exists so a monitor due
+ * at :02:02 is not missed by the :02:00 tick; it has nothing to do with
+ * whether that monitor is late, and subtracting it here would report
+ * every fleet as thirty seconds less behind than it is.
+ *
+ * High-frequency monitors are excluded, and the reason originally given
+ * here was false. It said that plane "never writes
+ * `next_evaluation_at`", so their due time is frozen and they would
+ * report as permanently late. It does write it:
+ * `HighFrequencyPlane.promote` calls `applyOutcome`, which is the same
+ * `recordCheckOutcome` every other check goes through.
+ *
+ * The true reason is narrower. `promote` fires only when a sample says
+ * something new, so the column advances on that plane's terms rather
+ * than on the ordinary cadence, and measuring lateness against it would
+ * report a number about a plane this predicate is not measuring.
+ *
+ * KNOWN GAP, stated rather than hidden: the exclusion is on the FLAG,
+ * and the flag is not the same question as "is that plane actually
+ * probing this monitor". A tenant whose high-frequency workers are all
+ * dead has its monitors scheduled by the ordinary tick, where they can
+ * fall arbitrarily behind, and this predicate still reports a backlog
+ * of zero for them. Closing it needs the live-lease test, and that
+ * lives in JavaScript (`shardOf` is an FNV hash, not a SQL function),
+ * so it is a change to how this is computed rather than to the
+ * predicate. `modules/monitors/highfreq/stats.ts` answers that plane's
+ * own health in the meantime.
+ */
+function latePredicate(excludedCheckTypes: string[], organizationId?: string) {
+  return and(
+    organizationId === undefined
+      ? undefined
+      : eq(monitors.organizationId, organizationId),
+    eq(monitors.paused, false),
+    eq(monitors.highFrequency, false),
+    excludedCheckTypes.length === 0
+      ? undefined
+      : notInArray(monitors.checkType, excludedCheckTypes),
+    sql`${monitors.nextEvaluationAt} <= now()`,
+  );
+}
+
+/**
  * Monitors the scheduler owes a probe.
  *
  * Note what is not here: any arithmetic on intervals. The predicate is
@@ -1047,8 +1200,20 @@ const TICK_GRACE_SECONDS = 30;
  * <= now()` meant the selection query *was* the scheduling policy, so
  * changing the policy meant rewriting the scheduler.
  *
- * Most-overdue first, so a batch `limit` can never starve a monitor:
- * anything skipped this tick sorts even earlier on the next one.
+ * Most-overdue first WITHIN a tenant, and then the best-ranked monitor
+ * of each tenant first. Plain most-overdue-first across the whole
+ * installation is starvation-free for a monitor and starvation BY
+ * CONSTRUCTION for a tenant: one organization with five thousand
+ * monitors owns the head of the ordering for as long as it is behind,
+ * and the tenant next to it with five monitors waits behind all of them
+ * however small it is. This is the same shape, and the same fix, as
+ * `notification_outbox`'s fair drain - see `dueRankingSql`.
+ *
+ * The rank is computed in one statement and the rows are fetched by id
+ * in a second. Two statements rather than one because the relational
+ * query builder cannot express a window function, and a single hand-
+ * written statement returning whole rows would have to name and map
+ * every column of the widest table in the product.
  *
  * The kind filter is the other half of "a group is never scheduled".
  * A group has nothing to measure and a manual monitor has nothing to
@@ -1061,22 +1226,289 @@ const TICK_GRACE_SECONDS = 30;
  */
 export async function findDueMonitors(
   db: DbClient,
-  limit = 500,
+  limit = env.MONITOR_SCHEDULER_BATCH,
+  organizationId?: string,
 ): Promise<Monitor[]> {
-  return db.query.monitors.findMany({
-    where: and(
-      eq(monitors.paused, false),
-      UNSCHEDULED_CHECK_TYPE_IDS.length === 0
-        ? undefined
-        : notInArray(monitors.checkType, [...UNSCHEDULED_CHECK_TYPE_IDS]),
-      or(
-        isNull(monitors.nextEvaluationAt),
-        sql`${monitors.nextEvaluationAt} - make_interval(secs => ${TICK_GRACE_SECONDS}) <= now()`,
-      ),
-    ),
-    orderBy: [sql`${monitors.nextEvaluationAt} asc nulls first`],
-    limit,
+  const excluded = [...UNSCHEDULED_CHECK_TYPE_IDS];
+  const { rows } = await db.execute<{ id: string }>(sql`
+    select id from (
+      select
+        ${monitors.id} as id,
+        ${monitors.nextEvaluationAt} as next_evaluation_at,
+        row_number() over (
+          partition by ${monitors.organizationId}
+          order by ${monitors.nextEvaluationAt} asc nulls first, ${monitors.id}
+        ) as rank
+      from ${monitors}
+      where ${dueCondition(excluded, organizationId)}
+    ) ranked
+    order by rank, next_evaluation_at asc nulls first, id
+    limit ${limit}
+  `);
+  if (rows.length === 0) return [];
+
+  const ids = rows.map((row) => row.id);
+  const found = await db.query.monitors.findMany({
+    where: inArray(monitors.id, ids),
   });
+  // Returned in the order the ranking chose, not the order the second
+  // statement happened to read them in. Nothing downstream depends on
+  // it today; a test that asserts fairness does, and an order that is
+  // stable only by accident is not evidence of anything.
+  const byId = new Map(found.map((monitor) => [monitor.id, monitor]));
+  return ids
+    .map((id) => byId.get(id))
+    .filter((monitor): monitor is Monitor => monitor !== undefined);
+}
+
+/**
+ * How long a monitor is taken off the due list by being enqueued.
+ *
+ * THE HOLE THIS EXISTS TO CLOSE. Not a race — `stately` genuinely
+ * permits only one ACTIVE job per monitor, so no monitor is ever probed
+ * twice at once — but a re-enqueue: the policy allows one queued job
+ * beside the active one, so a tick firing while a monitor's check is
+ * still running can add another, and the second runs the moment the
+ * first finishes.
+ *
+ * Stated as a hole and not as a bug count, because the two counts this
+ * comment used to carry were both wrong. Fifty-nine came from a
+ * benchmark whose duplicate threshold was half an interval, which counts
+ * the adaptive scheduler legitimately tightening on a monitor that
+ * failed; eight replaced it and came from a dirty tree with workers
+ * leaked from an earlier run probing the same monitors. Measured on
+ * clean trees the figure is zero, in every cell of both builds.
+ *
+ * Selection was level-triggered on `next_evaluation_at` and enqueueing
+ * changed nothing about it, so the tick had no way to know it had
+ * already asked. Claiming closes that: the monitor leaves the SELECTABLE
+ * set when it is enqueued and comes back when the check lands or the
+ * lease runs out.
+ *
+ * In its own column, not by moving the due time. Moving it worked and
+ * was wrong: `next_evaluation_at` stopped meaning "when this is next
+ * due", and every reading of how far behind the scheduler is takes its
+ * lateness from that column - so claiming a backlog HID it, and a fleet
+ * the workers could not keep up with reported a lag of at most one lease
+ * forever.
+ *
+ * The value has to exceed how long a job may sit before it runs, or a
+ * busy queue re-enqueues anyway; it has to be finite, or a job that is
+ * dropped takes its monitor with it forever.
+ *
+ * Ninety seconds is the ACTIVE bound plus slack, not the total: pg-boss
+ * expires a `monitor-check` after 60 seconds of running and does not
+ * retry it, so no single attempt outlives the lease. What can outlive it
+ * is queue WAIT on a fleet that is already behind - and there the lease
+ * expiring is the correct behaviour rather than a bug, because a monitor
+ * whose job has been waiting longer than a lease is one the queue may
+ * never get to. The duplicate that produces is bounded by the queue's
+ * own unique index, which permits one waiting and one running check per
+ * monitor and drops the rest.
+ */
+export const ENQUEUE_LEASE_SECONDS = 90;
+
+/**
+ * Takes the monitors this tick is about to enqueue off the due list.
+ *
+ * The whole point is what happens when two ticks run at once, which two
+ * workers make ordinary rather than exotic. `for update skip locked`
+ * means the second tick does not wait for the first and does not see its
+ * rows: the two get disjoint sets, and neither has to know the other
+ * exists. The `next_evaluation_at` re-check inside the UPDATE is the
+ * other half — a monitor whose check completed between the snapshot and
+ * the lock is no longer due, and pushing it forward would delay a
+ * monitor that had just been probed.
+ *
+ * Returns the ids actually claimed, which is what the caller enqueues.
+ * A caller that enqueued its whole candidate list instead would put back
+ * exactly the duplicate this removes.
+ */
+/**
+ * How many ids go into one claim statement.
+ *
+ * `inArray` binds one parameter per id, and Postgres's wire protocol
+ * refuses more than 65,535 in a single Bind message - measured, not
+ * assumed: 65,535 succeeds and 70,000 fails with "invalid number of
+ * parameter formats". With `MONITOR_SCHEDULER_BATCH` settable to tens of
+ * thousands, an operator raising it far enough would have broken every
+ * tick in the installation with a protocol error, which is the least
+ * debuggable failure this scheduler could produce.
+ *
+ * A thousand is well under the ceiling and also bounds how many row
+ * locks one statement holds at once. Each chunk is independently atomic,
+ * so the two-ticks-take-disjoint-sets property is unchanged: `skip
+ * locked` decides it per chunk, and a chunk that throws leaves its
+ * predecessors claimed - which is the same lease-shaped trade the whole
+ * claim makes, at a finer grain.
+ */
+const CLAIM_CHUNK = 1_000;
+
+export async function claimMonitorsForDispatch(
+  db: DbClient,
+  monitorIds: readonly string[],
+  leaseSeconds = ENQUEUE_LEASE_SECONDS,
+): Promise<string[]> {
+  if (monitorIds.length === 0) return [];
+  if (monitorIds.length > CLAIM_CHUNK) {
+    const claimed: string[] = [];
+    for (let start = 0; start < monitorIds.length; start += CLAIM_CHUNK) {
+      claimed.push(
+        ...(await claimMonitorsForDispatch(
+          db,
+          monitorIds.slice(start, start + CLAIM_CHUNK),
+          leaseSeconds,
+        )),
+      );
+    }
+    return claimed;
+  }
+  const { rows } = await db.execute<{ id: string }>(sql`
+    with locked as (
+      select ${monitors.id} as id
+      from ${monitors}
+      where ${inArray(monitors.id, [...monitorIds])}
+      for update skip locked
+    )
+    update ${monitors}
+       set dispatch_claimed_until = now() + make_interval(secs => ${leaseSeconds})
+      from locked
+     where ${monitors.id} = locked.id
+       and ${dueCondition([...UNSCHEDULED_CHECK_TYPE_IDS])}
+    returning ${monitors.id} as id
+  `);
+  return rows.map((row) => row.id);
+}
+
+/**
+ * Reserves one monitor's next dispatch, ahead of it being due.
+ *
+ * The sub-minute path enqueues a check for a monitor whose time has not
+ * come yet, so it cannot use the claim above: `dueCondition` asks "is it
+ * time", and the honest answer for a monitor due in forty seconds is no.
+ * Without a reservation of its own that enqueue is simply outside the
+ * scheduler's exclusion - the tick that fires while the follow-up is in
+ * flight sees an unclaimed, due monitor and enqueues it a second time.
+ *
+ * So the predicate here is narrower than due-ness and is only the part
+ * that means exclusivity: nobody else holds this monitor right now. One
+ * row, one statement - concurrent callers serialise on the row lock the
+ * UPDATE takes, and the loser re-evaluates the predicate against the
+ * winner's row and matches nothing.
+ *
+ * Returns whether the reservation was taken. A caller that enqueued
+ * regardless would have written this function for nothing.
+ */
+export async function reserveMonitorForFollowUp(
+  db: DbClient,
+  monitorId: string,
+  leaseSeconds: number,
+): Promise<boolean> {
+  const { rows } = await db.execute<{ id: string }>(sql`
+    update ${monitors}
+       set dispatch_claimed_until = now() + make_interval(secs => ${leaseSeconds})
+     where ${monitors.id} = ${monitorId}
+       and ${monitors.paused} = false
+       and (
+         ${monitors.dispatchClaimedUntil} is null
+         or ${monitors.dispatchClaimedUntil} <= now()
+       )
+    returning ${monitors.id} as id
+  `);
+  return rows.length > 0;
+}
+
+/**
+ * Stands the scheduler down from monitors another plane is probing.
+ *
+ * Enabling high frequency deliberately leaves `next_evaluation_at` where
+ * it was, and nothing advances it afterwards - that plane probes on its
+ * own timer and never writes the column. So a high-frequency monitor is
+ * permanently overdue, and "most overdue first" hands it the head of its
+ * tenant's ranking on every tick for as long as the flag is on. The tick
+ * then filters it out and throws the slot away. Fifty of them in a tenant
+ * is fifty selection slots that can never become work, taken from
+ * ordinary monitors that could have used them - starvation produced by
+ * the fairness ordering itself.
+ *
+ * Deferring by one tick period is enough to leave the ranking, and is
+ * also the whole failover cost: nothing here reads the flag, only the
+ * live lease the caller tested, so a monitor whose plane dies is deferred
+ * at most once more and then falls back to the ordinary cadence.
+ */
+export async function deferHighFrequencyOwned(
+  db: DbClient,
+  monitorIds: readonly string[],
+  seconds: number,
+): Promise<void> {
+  if (monitorIds.length === 0) return;
+  await db
+    .update(monitors)
+    .set({ nextEvaluationAt: sql`now() + make_interval(secs => ${seconds})` })
+    .where(
+      and(
+        inArray(monitors.id, [...monitorIds]),
+        // The caller decided on the LEASE, and it decided a moment ago.
+        // This is the flag, re-read under the write, and it is here only
+        // to close the gap: an operator who turned high frequency off
+        // between the tick's selection and this statement would
+        // otherwise have their monitor pushed a minute into the future
+        // by a plane that no longer owns it. Failing toward scheduling
+        // is the right direction for a monitor nobody is probing.
+        eq(monitors.highFrequency, true),
+      ),
+    );
+}
+
+/**
+ * How far behind the scheduler is, right now.
+ *
+ * Two numbers and no history. `dueCount` is the backlog, `oldestDueSeconds`
+ * is its age, and the age is the one that matters: a backlog of two
+ * hundred that is four seconds old is a healthy tick doing its job, and
+ * a backlog of five that is four minutes old is a scheduler that has
+ * stopped. A count on its own cannot tell those apart, which is why
+ * every dashboard that shows only queue depth eventually surprises
+ * somebody.
+ *
+ * Read by the worker after each tick and by the operator surface. It is
+ * deliberately a live query rather than a stored counter: a stored one
+ * is wrong the moment the process that maintains it dies, which is
+ * exactly when it is being read.
+ */
+export async function schedulerBacklog(
+  db: DbClient,
+  organizationId?: string,
+): Promise<{
+  dueCount: number;
+  oldestDueSeconds: number;
+}> {
+  const excluded = [...UNSCHEDULED_CHECK_TYPE_IDS];
+  const { rows } = await db.execute<{
+    due_count: number;
+    oldest_due_seconds: number;
+  }>(sql`
+    select
+      count(*)::int as due_count,
+      -- min(next_evaluation_at), not max(now() - next_evaluation_at).
+      -- The two are the same number and not the same query plan: the
+      -- partial index is ordered by this column, so the minimum is its
+      -- first entry, while an aggregate over an expression has to be
+      -- computed row by row. This runs on every tick and every render of
+      -- the operator page.
+      extract(epoch from (now() - min(${monitors.nextEvaluationAt})))::float
+        as oldest_due_seconds
+    from ${monitors}
+    where ${latePredicate(excluded, organizationId)}
+  `);
+  return {
+    dueCount: rows[0]?.due_count ?? 0,
+    // Null when nothing is due, and also when everything due has never
+    // been evaluated at all - `min` ignores nulls, exactly as the
+    // expression aggregate it replaced did. A never-evaluated monitor has
+    // no age to report; it shows up in the count.
+    oldestDueSeconds: Math.max(0, rows[0]?.oldest_due_seconds ?? 0),
+  };
 }
 
 async function findMonitorOrThrow(

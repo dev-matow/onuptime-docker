@@ -6,6 +6,143 @@ free edition; entries for commercial-only features live in the other
 repository, because they are not in this one and listing them here would
 describe software you do not have.
 
+## 1.21.0 — 2026-08-12
+
+The scheduler fixes from this release are all in this edition. The fleet
+view is not.
+
+### Fixed
+
+- **A fleet that was behind stayed behind, and nothing said so.**
+  Measured: 1000 monitors on a 60-second interval need 16.67 checks a
+  second, one worker delivered 10.10, the backlog aged to 185 seconds and
+  never cleared, 793 expected observations never happened and 4% of the
+  fleet went unprobed for the whole window. Nothing failed and nothing
+  logged; uptime was computed over less of the window than it should have
+  been. Throughput is not what changed - both builds keep up from two
+  workers on - the backlog is: its age at two workers went from 106
+  seconds to 2.1.
+
+  `findDueMonitors` also took `limit = 500` as a default argument nobody
+  passed. That bound is now `MONITOR_SCHEDULER_BATCH`, defaulting to
+  5000, and where it actually binds was measured rather than asserted:
+  not at 1000 or 2000 monitors on a 60-second interval, because a
+  monitor due before the next tick schedules its own next check and
+  never asks the tick at all.
+
+- **A tick re-enqueued monitors whose checks were still running.** The
+  queue permits one queued job beside the active one, and selection did
+  not know it had already asked. The tick now claims what it selects, so
+  two ticks running at once take disjoint sets. This is stated as an
+  invariant rather than as a bug count: measured on clean trees, both
+  builds produced zero duplicate observations, so the claim closes a
+  hole rather than fixing an observed fault.
+
+- **One organization with a large fleet starved the others.** Selection is
+  ranked within the organization now, as the notification drain already
+  was.
+
+- **The fan-out was a round trip per monitor per tick.** Now one batched
+  insert.
+
+### Not in this edition
+
+The worker heartbeat table and the Workers page are commercial. Adding a
+second worker is safe here and always was - Postgres arbitrates the cron,
+the tick and each check - but this edition has nothing that shows you the
+fleet.
+
+## 1.20.0 — 2026-08-12
+
+Almost nothing, and that is the honest summary. The release is two
+commercial features — maintenance windows and alert routing policies —
+and neither is in this edition. What reached Core is the seam they attach
+to and one correction.
+
+### Changed
+
+- **A dispatch asks two questions before it resolves a route.** "May
+  anything go out about this?" and "which channels?". Core registers no
+  answer to either, so both return "no opinion" and routing is decided by
+  the channel subscriptions exactly as it was: same query, same
+  behaviour, same messages. The registry exists so the commercial edition
+  can be a registration rather than a branch in this code. See
+  `docs/NOTIFICATIONS.md`.
+
+- **The importers no longer claim Vigil has no maintenance windows.**
+  Five source systems' maintenance schedules were reported as unimported
+  with that sentence attached, and the commercial edition now has them,
+  so the sentence was wrong. This edition still does not: the schedules
+  are reported by name as unimported, without the advice.
+
+## 1.19.0 — 2026-08-12
+
+The migration system, and an audit of what the product claims about
+itself. All of the defects below are in this edition.
+
+### Added
+
+- **Migrate from fifteen monitoring services.** Fourteen hosted
+  providers through their own APIs, plus an Uptime Kuma database file.
+  Every source check is translated, reported on by name, and either
+  imported or refused with a reason. A check Vigil cannot honestly
+  reproduce is listed rather than approximated: a monitor that watches
+  something subtly different from what you asked for is worse than one
+  that was never created.
+
+- **Every check type is configurable from the dashboard.** A type now
+  declares its own settings as data, and the monitor dialog renders
+  them. Twenty-four of the forty types previously stored settings that
+  no control could reach, so a monitor created here took whatever the
+  schema defaulted to and there was no supported way to change it. The
+  conformance suite compares the dialog against the registry, so a type
+  cannot ship with a setting nobody can enter.
+
+### Fixed
+
+- **A read-only member could read a database password out of the page
+  source.** A `postgres` or `sqlserver` monitor is addressed by a
+  connection string, and the catalog's own placeholder tells the
+  operator to put the password in it. The monitors list and the monitor
+  page both crossed that string into a client component, so it landed in
+  the page source of anyone who could open them, including a viewer,
+  whose permissions are otherwise empty. The target is now stripped of
+  its credential on every read path, masked rather than hidden in the
+  edit dialog so the operator can still edit around it, and restored
+  from storage when the mask comes home untouched. The audit trail and
+  the export carried their own copies; both are closed.
+
+- **A password-protected Redis read as healthy.** With no password
+  control the probe sent a bare `PING`; a server wanting `AUTH` answers
+  with an error rather than a pong, the assertion declined to judge a
+  non-boolean, and the verdict was up. Fixed by the configuration work
+  above rather than by a special case.
+
+- **Nine check types reported false outages** against a target that
+  needed a setting the dialog could not supply, and five more reported a
+  permanent `misconfigured`. Both classes are closed by the same change.
+
+- **Running an Uptime Kuma migration twice created a second copy of
+  every monitor.** Monitors now record which source record they came
+  from, as a digest rather than the id itself, with uniqueness enforced
+  by Postgres. The Kuma path also gained the per-monitor savepoint the
+  provider engine already had, so one row Postgres refuses is one
+  skipped line rather than an aborted import.
+
+- **A synchronous connect failure could kill the worker.** The pinned
+  transport answered DNS inside the caller's stack, so a host with no
+  route to the pinned address raised `ENETUNREACH` before the error
+  listener was attached. An `error` event with no listener is an uncaught
+  exception, and the process that died was the one doing the monitoring,
+  at the moment the network broke.
+
+### Changed
+
+- **Why monitor credentials are not encrypted at rest is written down**
+  in `docs/BACKUP.md`, next to the dump it actually matters for. Channel
+  secrets are sealed; monitor credentials are not, and the reasoning for
+  the asymmetry is now stated rather than left to look like an oversight.
+
 ## 1.18.3 — 2026-08-04
 
 Findings from an adversarial security review. Four defects, three of them

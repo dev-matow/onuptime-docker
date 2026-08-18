@@ -120,6 +120,54 @@ const envSchema = z.object({
    */
   NOTIFICATION_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(50).default(20),
   /**
+   * How many due monitors one scheduler tick enqueues.
+   *
+   * This number used to be a default argument on `findDueMonitors` that
+   * nobody had read, and it was 500. A fleet larger than that did not
+   * fail loudly: the tick enqueued the 500 most overdue monitors and the
+   * rest waited for the next minute, so a 1000-monitor installation on a
+   * 60-second cadence silently settled at roughly half the cadence its
+   * operator had configured, and the only visible symptom was uptime
+   * measured over less of the window than it should have been. Measured
+   * before it was changed - see `docs/SCALING.md`.
+   *
+   * It is still bounded, and the bound is still load-bearing. A tick
+   * that enqueues an unbounded fleet turns a worker restart into one
+   * enormous burst of outbound requests; a bounded one turns it into a
+   * few ticks of catch-up, which is the difference between a rolling
+   * deploy and a self-inflicted outage. What changed is that the bound
+   * is now a stated setting with a default sized for the fleets people
+   * actually run, rather than an argument nobody passed.
+   */
+  /**
+   * Whether the Workers page may show installation-wide detail.
+   *
+   * Hostnames, process ids, build versions and per-queue depth span
+   * every organization on the installation, and this edition is the one
+   * where an installation holds several - one per client. There is no
+   * installation-level role to gate them on, so this says instead "every
+   * organization here belongs to me", which is true of a single-tenant
+   * deployment and false of an agency one.
+   *
+   * Off by default. The workspace's own backlog and whether monitoring
+   * is running at all are shown regardless, to everybody: those are this
+   * tenant's own facts, and the stalled banner has to reach the
+   * responder whose job is to notice it.
+   */
+  VIGIL_FLEET_DETAIL: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
+  MONITOR_SCHEDULER_BATCH: z.coerce
+    .number()
+    .int()
+    .min(1)
+    // Below the point where one tick would be a lot of work to lose if
+    // it failed halfway. The claim itself is chunked, so this is not a
+    // protocol limit any more - it is a judgement about blast radius.
+    .max(50_000)
+    .default(5_000),
+  /**
    * How many messages one drain tick may take.
    *
    * Bounded rather than "everything due" because an unbounded drain

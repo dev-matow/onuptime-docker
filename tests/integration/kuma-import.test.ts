@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import { eq, like } from "drizzle-orm";
-import { beforeAll, afterAll, describe, expect, it } from "vitest";
+import { beforeAll, beforeEach, afterAll, describe, expect, it } from "vitest";
 
 import {
   monitorHeartbeats,
@@ -19,6 +19,7 @@ import {
   type TypeMapping,
 } from "@/modules/importers/kuma/mapping";
 import { KUMA_PIN } from "@/modules/importers/kuma/pinned";
+import { sourceKey } from "@/modules/importers/provenance";
 import {
   readKumaDatabase,
   type KumaDatabase,
@@ -735,10 +736,15 @@ describe("records Vigil has no home for", () => {
     expect(outcomeOf("notification", "1").outcome).toBe("unsupported");
   });
 
-  it("reports the maintenance window and warns that imported monitors will alert through it", () => {
+  it("reports the maintenance window and says where to recreate it", () => {
+    // Vigil HAS maintenance windows since 1.20.0; this importer still
+    // does not create them, and the entry has to say which of those two
+    // things is true. It used to say Vigil had none, which stopped being
+    // true and would have sent an operator to pause monitors by hand.
     const entry = outcomeOf("maintenance", "1");
     expect(entry.outcome).toBe("unsupported");
-    expect(entry.detail).toContain("alert during it");
+    expect(entry.detail).toContain("Vigil has maintenance windows of its own");
+    expect(entry.detail).toContain("Settings, Maintenance");
   });
 
   it("reports the tag and both monitors it was applied to", () => {
@@ -866,5 +872,267 @@ describe("a Kuma database from a schema this importer has never read", () => {
     expect(forced.status).toBe("completed");
     expect(forced.drift.length).toBeGreaterThan(0);
     expect(forced.totals.monitorsCreated).toBe(MAPPABLE_IDS.length);
+  });
+});
+
+/**
+ * The two properties a migration is not safe without, both of which the
+ * Kuma path lacked entirely and the provider engine already had.
+ *
+ * They are proved against the same fixture the rest of this file uses,
+ * mutated in memory rather than re-fixtured, because the failures being
+ * reproduced are about what the importer does with a database, not about
+ * what a database can look like.
+ */
+
+/** A copy of the pinned fixture, safe to break. */
+function mutableSource(): KumaDatabase {
+  return structuredClone(source);
+}
+
+/**
+ * A byte Postgres will not store, in a place Vigil's own rules allow.
+ *
+ * `text` cannot hold U+0000 (SQLSTATE 22021), while `z.string().trim()`
+ * passes it straight through, so this is the shortest honest way to
+ * reach a row the database refuses rather than one the schema does. It
+ * is not contrived either: SQLite stores it happily, so a real kuma.db
+ * can carry one.
+ */
+const REFUSED_BY_POSTGRES = `broken${String.fromCharCode(0)}name`;
+
+async function monitorRows(organizationId: string) {
+  return db
+    .select()
+    .from(monitors)
+    .where(eq(monitors.organizationId, organizationId));
+}
+
+function lineFor(candidate: ImportReport, sourceId: number): ReportEntry {
+  const entry = candidate.entries.find(
+    (line) => line.kind === "monitor" && line.sourceId === String(sourceId),
+  );
+  if (!entry) throw new Error(`no monitor line for ${sourceId}`);
+  return entry;
+}
+
+describe("importing the same Kuma database twice", () => {
+  beforeEach(async () => {
+    // Each import in this block wants the full slug range: a page
+    // refused because the previous test took `seed-status` would be a
+    // failure about the test database rather than about the importer.
+    await db.delete(statusPages).where(like(statusPages.slug, "seed-status%"));
+  });
+
+  it("creates nothing the second time, and says so on every line", async () => {
+    const org = await createTestOrg();
+    const first = await importKumaDatabase(db, org, source);
+    const second = await importKumaDatabase(db, org, source);
+
+    expect(first.totals.monitorsCreated).toBe(MAPPABLE_IDS.length);
+    // The defect this closes: at the previous release these were 27 and
+    // 54, and the second report called every one of them "imported".
+    expect(second.totals.monitorsCreated).toBe(0);
+    expect(await monitorRows(org.organizationId)).toHaveLength(
+      MAPPABLE_IDS.length,
+    );
+
+    for (const id of MAPPABLE_IDS) {
+      const entry = lineFor(second, id);
+      expect(entry.outcome, `Kuma monitor ${id}`).toBe("skipped");
+      expect(entry.monitorId, `Kuma monitor ${id}`).toBeNull();
+      expect(entry.detail).toContain("Already imported");
+      expect(entry.detail).toContain(`Kuma monitor ${id}`);
+    }
+
+    // A refused row is still refused for its own reason, not reported as
+    // a repeat of something that never arrived.
+    for (const id of REFUSED_IDS) {
+      expect(lineFor(second, id).detail).not.toContain("Already imported");
+    }
+  });
+
+  it("records where each monitor came from, and only on the ones it created", async () => {
+    const org = await createTestOrg();
+    await importKumaDatabase(db, org, source);
+    const rows = await monitorRows(org.organizationId);
+
+    expect(rows).toHaveLength(MAPPABLE_IDS.length);
+    for (const row of rows) {
+      expect(row.importSource, row.name).toBe("uptime-kuma");
+      // A digest, not the id. Some sources identify a check by a value
+      // that is also its credential, so the column keeps something that
+      // compares equal and cannot be read back.
+      expect(row.importSourceId, row.name).toMatch(/^[0-9a-f]{64}$/);
+    }
+    // One Kuma row, one Vigil monitor: every mappable id is claimed, by
+    // exactly one monitor, and nothing claims an id the source does not
+    // have.
+    const claimed = rows.map((row) => row.importSourceId);
+    expect(new Set(claimed).size).toBe(rows.length);
+    expect([...claimed].sort()).toEqual(
+      MAPPABLE_IDS.map((id) => sourceKey(String(id))).sort(),
+    );
+  });
+
+  it("still matches a monitor an operator renamed in Vigil, which a name could not", async () => {
+    const org = await createTestOrg();
+    await importKumaDatabase(db, org, source);
+    const before = await monitorRows(org.organizationId);
+    const renamed = before.find((row) => row.importSourceId === sourceKey("3"));
+    expect(renamed).toBeDefined();
+    await db
+      .update(monitors)
+      .set({ name: "Port check, renamed after the migration" })
+      .where(eq(monitors.id, renamed!.id));
+
+    const second = await importKumaDatabase(db, org, source);
+
+    expect(second.totals.monitorsCreated).toBe(0);
+    expect(await monitorRows(org.organizationId)).toHaveLength(
+      MAPPABLE_IDS.length,
+    );
+    // And the line names both names, because the only other reading of a
+    // disagreement is a second Kuma installation whose ids collide.
+    const entry = lineFor(second, 3);
+    expect(entry.detail).toContain("Port check, renamed after the migration");
+    expect(entry.detail).toContain("seed-port");
+  });
+
+  it("imports the record again once its Vigil monitor is deleted", async () => {
+    const org = await createTestOrg();
+    await importKumaDatabase(db, org, source);
+    const rows = await monitorRows(org.organizationId);
+    const gone = rows.find((row) => row.importSourceId === sourceKey("3"));
+    await db.delete(monitors).where(eq(monitors.id, gone!.id));
+
+    const second = await importKumaDatabase(db, org, source);
+
+    expect(second.totals.monitorsCreated).toBe(1);
+    expect(lineFor(second, 3).monitorId).toBeTypeOf("string");
+    expect(await monitorRows(org.organizationId)).toHaveLength(
+      MAPPABLE_IDS.length,
+    );
+  });
+
+  it("keeps two organisations' migrations of one Kuma apart", async () => {
+    // Provenance is scoped to the organisation. Two tenants migrating
+    // off the same Kuma instance are two migrations, and the second must
+    // not be told that the first already imported monitor 3.
+    const a = await createTestOrg();
+    const b = await createTestOrg();
+    const first = await importKumaDatabase(db, a, source);
+    const second = await importKumaDatabase(db, b, source);
+
+    expect(first.totals.monitorsCreated).toBe(MAPPABLE_IDS.length);
+    expect(second.totals.monitorsCreated).toBe(MAPPABLE_IDS.length);
+    expect(await monitorRows(b.organizationId)).toHaveLength(
+      MAPPABLE_IDS.length,
+    );
+  });
+
+  it("leaves a dry run neither recording provenance nor consuming its own", async () => {
+    const org = await createTestOrg();
+    const first = await importKumaDatabase(db, org, source, { dryRun: true });
+    const second = await importKumaDatabase(db, org, source, { dryRun: true });
+
+    // A preview is a real import that was rolled back, so it wrote no
+    // provenance and the next preview still says the same number.
+    expect(first.totals.monitorsCreated).toBe(MAPPABLE_IDS.length);
+    expect(second.totals.monitorsCreated).toBe(MAPPABLE_IDS.length);
+    expect(await monitorRows(org.organizationId)).toHaveLength(0);
+
+    await importKumaDatabase(db, org, source);
+    const after = await importKumaDatabase(db, org, source, { dryRun: true });
+    expect(after.status).toBe("preview");
+    expect(after.totals.monitorsCreated).toBe(0);
+  });
+});
+
+describe("one record Postgres refuses", () => {
+  beforeEach(async () => {
+    await db.delete(statusPages).where(like(statusPages.slug, "seed-status%"));
+  });
+
+  it("costs one report line, not the whole migration", async () => {
+    const broken = mutableSource();
+    const row = broken.monitors.find((candidate) => candidate.id === 3);
+    row!.name = REFUSED_BY_POSTGRES;
+
+    const org = await createTestOrg();
+    const result = await importKumaDatabase(db, org, broken);
+
+    const entry = lineFor(result, 3);
+    expect(entry.outcome).toBe("skipped");
+    expect(entry.monitorId).toBeNull();
+    expect(entry.detail).toContain("Vigil refused to store it");
+    expect(entry.detail).toContain("The rest of the import was unaffected.");
+
+    // The whole point: everything else arrived. Before the savepoint,
+    // one refused row aborted the transaction and the twenty-six after
+    // it failed with "current transaction is aborted".
+    expect(result.status).toBe("completed");
+    expect(result.totals.monitorsCreated).toBe(MAPPABLE_IDS.length - 1);
+    expect(await monitorRows(org.organizationId)).toHaveLength(
+      MAPPABLE_IDS.length - 1,
+    );
+  });
+
+  it("rolls back a monitor whose write fails after it was created", async () => {
+    // The failure lands in `carryLastHeartbeat`, which runs AFTER
+    // `createMonitor` has already inserted the row. This is what proves
+    // the savepoint wraps the whole per-monitor unit rather than just
+    // the insert: a boundary around the create alone would leave a push
+    // monitor behind with no heartbeat and no report line saying so.
+    const broken = mutableSource();
+    // The fixture keeps heartbeats for monitors 1, 2 and 9 only, and the
+    // first two are refused before a heartbeat is ever reached. So the
+    // beat this test needs is given to the push monitor rather than
+    // borrowed: `seed-push` (id 10) is the type whose carried heartbeat
+    // is the whole point, and a synthetic last beat is exactly what Kuma
+    // would have stored for one that had reported in.
+    expect(broken.monitors.find((candidate) => candidate.id === 10)?.type).toBe(
+      "push",
+    );
+    broken.heartbeats.push({
+      monitorId: 10,
+      beats: 1,
+      lastAt: "2026-08-01 09:14:00",
+      lastStatus: 1,
+      lastPingMs: null,
+      lastMessage: REFUSED_BY_POSTGRES,
+    });
+
+    const org = await createTestOrg();
+    const result = await importKumaDatabase(db, org, broken);
+
+    const entry = lineFor(result, 10);
+    expect(entry.outcome).toBe("skipped");
+    expect(entry.detail).toContain("The rest of the import was unaffected.");
+
+    const rows = await monitorRows(org.organizationId);
+    expect(rows).toHaveLength(MAPPABLE_IDS.length - 1);
+    expect(rows.find((candidate) => candidate.name === "seed-push")).toBe(
+      undefined,
+    );
+  });
+
+  it("loses only the status page when the status page is the bad record", async () => {
+    const broken = mutableSource();
+    broken.statusPages[0]!.title = REFUSED_BY_POSTGRES;
+
+    const org = await createTestOrg();
+    const result = await importKumaDatabase(db, org, broken);
+
+    const page = result.entries.find((line) => line.kind === "status-page");
+    expect(page?.outcome).toBe("skipped");
+    expect(page?.detail).toContain("Vigil refused to store it");
+
+    // Every monitor still arrived. A tenant losing a twenty-seven
+    // monitor migration to a refused page is the failure this guards.
+    expect(result.totals.monitorsCreated).toBe(MAPPABLE_IDS.length);
+    expect(await monitorRows(org.organizationId)).toHaveLength(
+      MAPPABLE_IDS.length,
+    );
   });
 });

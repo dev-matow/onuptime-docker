@@ -103,7 +103,14 @@ export function PasswordForm() {
             required
           />
         </Field>
-        <Button type="submit" disabled={pending} className="self-start">
+        {/* Outline, not a second black primary in the same viewport: the
+            page keeps one filled action, the profile card's Save. */}
+        <Button
+          type="submit"
+          variant="outline"
+          disabled={pending}
+          className="self-start"
+        >
           {pending && <Spinner />}
           Change password
         </Button>

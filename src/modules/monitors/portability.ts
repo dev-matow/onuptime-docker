@@ -6,6 +6,7 @@ import { monitors } from "@/db/schema";
 
 import { createMonitorSchema } from "./schemas";
 import { createMonitor, type Monitor } from "./service";
+import { maskTargetSecret, restoreTargetSecret } from "./spec";
 import { SECRET_MASK, secretFieldsOf } from "./types/config";
 import { requireSpec } from "./types/specs";
 
@@ -92,7 +93,14 @@ function toExported(monitor: Monitor): ExportedMonitor {
   return {
     name: monitor.name,
     checkType: monitor.checkType,
-    url: monitor.url,
+    // A target carries a secret too. `postgres` and `sqlserver` are
+    // addressed by a connection string and the catalog's placeholder
+    // tells the operator to put the password in it, so an export that
+    // masked `config.password` and wrote the same credential out inside
+    // `url` was masking one copy of a secret and publishing the other.
+    // Same rule as the config blob, same sentinel: the name travels,
+    // the password does not.
+    url: maskTargetSecret(monitor.url),
     port: monitor.port,
     method: monitor.method,
     intervalSeconds: monitor.intervalSeconds,
@@ -217,6 +225,15 @@ export async function importMonitors(
       config = incoming;
     }
 
+    // The target's own secret, by the same rule. `restoreTargetSecret`
+    // with nothing to restore drops the sentinel and keeps the user
+    // name, so the imported monitor addresses the right server as the
+    // right user and fails authentication with a message that says so —
+    // rather than dialling out with `__vigil_unchanged_secret__` as a
+    // password, which is the one thing the sentinel must never do.
+    const url = restoreTargetSecret(record.url, null);
+    if (url !== record.url) secretsToReenter.push("url");
+
     try {
       // Validated with the SAME schema the create form uses, not just
       // the export shape. `createMonitor` trusts its input — target
@@ -227,7 +244,7 @@ export async function importMonitors(
       const validated = createMonitorSchema.parse({
         name: record.name,
         checkType: record.checkType,
-        url: record.url,
+        url,
         port: record.port,
         method: record.method,
         intervalSeconds: record.intervalSeconds,

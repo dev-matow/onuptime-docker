@@ -29,12 +29,25 @@ import {
   MIN_INTERVAL_SECONDS,
   createMonitorSchema,
 } from "@/modules/monitors/schemas";
-import { createMonitor, setMonitorPaused } from "@/modules/monitors/service";
+import {
+  createMonitor,
+  setMonitorPaused,
+  type Monitor,
+} from "@/modules/monitors/service";
 import {
   createStatusPage,
   setStatusPageMonitors,
   updateStatusPage,
 } from "@/modules/status-pages/service";
+
+import {
+  KUMA_IMPORT_SOURCE,
+  alreadyImportedDetail,
+  loadImportedMonitors,
+  recordImportSource,
+} from "../provenance";
+import { insertFailure } from "../report";
+import { clamp, vigilJsonPath, vigilStatusPageSlug } from "../rewrite";
 
 import {
   NOTABLE_DROPS,
@@ -77,16 +90,48 @@ import { ReportBuilder, type ImportReport, type ReportEntry } from "./report";
  * whole thing back. An operator confirming the second click is
  * confirming a result, not a forecast.
  *
+ * A *single* record that fails to store does not take the migration down
+ * with it. Each monitor, and each status page, runs inside its own
+ * savepoint, so a row Postgres refuses becomes one `skipped` line and
+ * the other two hundred still arrive. Without it the first failure
+ * poisons the transaction and every statement after it fails with
+ * "current transaction is aborted", which reads as a total outage of the
+ * importer rather than as one bad row — and did: one refused status page
+ * slug cost a tenant its entire twenty-seven monitor migration, in a
+ * record kind that had nothing to do with any of them.
+ *
  * Two orderings matter and they are not the same one. Monitors are
  * *created* parents-first, because a member's `parentId` has to name a
  * row that exists; they are *reported* in Kuma's own id order, because
  * a report is read by a person comparing it to a Kuma screen. The
  * entries are therefore collected into a map and emitted afterwards.
  *
- * No migration accompanies this module. The report is returned to the
- * caller and rendered; it is not persisted. Storing it would put an
- * import log in the schema, and the schema is the one place where a
- * feature nobody has shipped yet costs everybody a migration.
+ * ── running it twice ─────────────────────────────────────────────────
+ *
+ * This module used to say that no migration accompanied it, that the
+ * report was rendered and never persisted, and that storing anything
+ * would put an import log in the schema. The consequence went unstated
+ * and unnoticed: nothing recorded that an import had happened, so a
+ * second run created a second copy of everything. Twenty-seven monitors
+ * became fifty-four, each duplicate probing the customer's endpoint on
+ * its own schedule and paging the on-call twice for one outage. Nothing
+ * on the second report even hinted that it was a repeat.
+ *
+ * Re-running is not an exotic act. It is what the report invites: it
+ * names the checks Vigil refused and why, and the obvious response is to
+ * fix them in Kuma and import again.
+ *
+ * So each imported monitor now records the Kuma id it came from, and a
+ * later run matches on that. A skipped record says so on its own line,
+ * naming the Vigil monitor it already is. Nothing is updated and nothing
+ * is deleted: this importer only ever adds. See `../provenance.ts`, which
+ * also states the one case this cannot cover — monitors imported before
+ * that column existed carry no id and can never truthfully be given one.
+ *
+ * Status pages have no such column and are therefore still duplicated by
+ * a re-import, under a suffixed slug. That is visible on the report line
+ * and costs an operator one deletion, where a duplicated monitor costs
+ * them a second probe against production.
  */
 
 export interface KumaImportActor {
@@ -127,9 +172,7 @@ export interface Build {
   refusals: string[];
 }
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
+export { vigilJsonPath, vigilStatusPageSlug };
 
 function filled(value: string | null): value is string {
   return value !== null && value.trim().length > 0;
@@ -329,23 +372,6 @@ function expectedStatusCodeFrom(
     `accepted status codes ${codes.join(", ")} cannot be expressed: ${reasonFor("accepted_statuscodes_json")} This monitor now accepts any 2xx or 3xx.`,
   );
   return undefined;
-}
-
-/**
- * Vigil's dotted path from Kuma's JSONPath, or null when the expression
- * is richer than a fixed location.
- *
- * A wildcard or a filter cannot be narrowed into a single path without
- * choosing a meaning the operator did not write, so it is refused.
- */
-const DOTTED_PATH =
-  /^[A-Za-z0-9_-]+(?:\[\d+\])*(?:\.[A-Za-z0-9_-]+(?:\[\d+\])*)*$/;
-
-export function vigilJsonPath(kumaPath: string): string | null {
-  let path = kumaPath.trim();
-  if (path.startsWith("$.")) path = path.slice(2);
-  else if (path === "$") return null;
-  return DOTTED_PATH.test(path) ? path : null;
 }
 
 interface KumaCondition {
@@ -1289,18 +1315,6 @@ function kumaTimestamp(value: string | null): Date | null {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-/** A slug Vigil's status page rules accept, derived from Kuma's. */
-export function vigilStatusPageSlug(kumaSlug: string): string | null {
-  const slug = kumaSlug
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 63)
-    .replace(/-+$/g, "");
-  return slug.length >= 3 ? slug : null;
-}
-
 /**
  * Imports one already-read Kuma database into an organisation.
  *
@@ -1351,8 +1365,17 @@ export async function importKumaDatabase(
   const dockerHostsUsed = new Set<number>();
   const remoteBrowsersUsed = new Set<number>();
 
-  /** Kuma monitor id → the Vigil monitor it became. */
-  const created = new Map<number, { id: string; name: string }>();
+  /**
+   * Kuma monitor id → the Vigil monitor it *is*, which is not the same
+   * as the one this run created.
+   *
+   * A record an earlier run imported belongs in here too: its children
+   * still have to be filed inside it, and a status page that published
+   * it still publishes it. Only the report distinguishes the two, and it
+   * has to — `monitorsCreated` counts entries carrying a monitor id, so
+   * a skipped line puts null there and this map holds the id instead.
+   */
+  const resolved = new Map<number, { id: string; name: string }>();
   /** Kuma monitor id → its report line, emitted in source order later. */
   const monitorEntries = new Map<number, ReportEntry>();
   /** Monitors whose last Kuma heartbeat was carried across. */
@@ -1360,10 +1383,41 @@ export async function importKumaDatabase(
   const pageEntries: ReportEntry[] = [];
 
   await withRollbackOnDryRun(db, dryRun, async (tx) => {
+    // Read once, inside the transaction. A migration cannot see a write
+    // that lands under it, and one query beats one per Kuma row.
+    const imported = await loadImportedMonitors(
+      tx,
+      actor.organizationId,
+      KUMA_IMPORT_SOURCE,
+    );
+
     for (const row of creationOrder(source.monitors)) {
       const label = monitorName(row);
       const sourceId = String(row.id);
       const mapping = typeMappingFor(row.type ?? "");
+
+      // Asked before the type matrix is even consulted: a row a previous
+      // run imported has already been mapped once, and every other key
+      // this module could match on is a value an operator may have
+      // edited in Vigil since.
+      const already = imported.get(sourceId);
+      if (already !== undefined) {
+        resolved.set(row.id, already);
+        monitorEntries.set(row.id, {
+          kind: "monitor",
+          sourceId,
+          label,
+          outcome: "skipped",
+          detail: alreadyImportedDetail(
+            "Kuma monitor",
+            sourceId,
+            already,
+            label,
+          ),
+          monitorId: null,
+        });
+        continue;
+      }
 
       if (mapping === undefined || mapping.checkType === null) {
         monitorEntries.set(row.id, {
@@ -1386,7 +1440,7 @@ export async function importKumaDatabase(
       });
 
       if (row.parent !== null) {
-        const parent = created.get(row.parent);
+        const parent = resolved.get(row.parent);
         if (parent === undefined) {
           built.notes.push(
             `Belonged to the Kuma group "${monitorNames.get(row.parent) ?? row.parent}", which did not import, so this monitor arrives without a group.`,
@@ -1447,27 +1501,59 @@ export async function importKumaDatabase(
         continue;
       }
 
-      const monitor = await createMonitor(tx, actor, parsed.data);
-      created.set(row.id, { id: monitor.id, name: monitor.name });
-      if (!row.active) {
-        await setMonitorPaused(tx, actor, monitor.id, true);
+      // One savepoint for the whole per-monitor unit, not just for the
+      // insert. Pausing it, stamping its provenance and carrying its last
+      // heartbeat all write AFTER the monitor exists; a failure in any of
+      // them outside the savepoint poisons the transaction and every
+      // remaining Kuma row fails with "current transaction is aborted",
+      // which is the whole migration lost to one row.
+      //
+      // Note what is NOT in here. `resolved`, `dockerHostsUsed`,
+      // `remoteBrowsersUsed` and `heartbeatsCarried` are updated only
+      // after the savepoint releases, because a rolled-back monitor that
+      // left its id in `resolved` would be handed to a later row as its
+      // `parentId` and fail a foreign key, turning one bad row into every
+      // bad row underneath it.
+      let written: { monitor: Monitor; carried: string | null };
+      try {
+        written = await tx.transaction(async (sp) => {
+          const monitor = await createMonitor(sp, actor, parsed.data);
+          await recordImportSource(
+            sp,
+            monitor.id,
+            KUMA_IMPORT_SOURCE,
+            sourceId,
+          );
+          if (!row.active) {
+            await setMonitorPaused(sp, actor, monitor.id, true);
+          }
+          const carried =
+            mapping.checkType === "push"
+              ? await carryLastHeartbeat(sp, source, row.id, monitor.id)
+              : null;
+          return { monitor, carried };
+        });
+      } catch (error) {
+        monitorEntries.set(row.id, {
+          kind: "monitor",
+          sourceId,
+          label,
+          outcome: "skipped",
+          detail: `Vigil refused to store it: ${insertFailure(error)}. The rest of the import was unaffected.`,
+          monitorId: null,
+        });
+        continue;
       }
+
+      const monitor = written.monitor;
+      resolved.set(row.id, { id: monitor.id, name: monitor.name });
       if (row.docker_host !== null) dockerHostsUsed.add(row.docker_host);
       if (row.remote_browser !== null) {
         remoteBrowsersUsed.add(row.remote_browser);
       }
-
-      if (mapping.checkType === "push") {
-        const carried = await carryLastHeartbeat(
-          tx,
-          source,
-          row.id,
-          monitor.id,
-        );
-        if (carried !== null) {
-          heartbeatsCarried.add(row.id);
-          built.notes.push(carried);
-        }
+      if (written.carried !== null) {
+        heartbeatsCarried.add(row.id);
+        built.notes.push(written.carried);
       }
 
       const spec = requireSpec(mapping.checkType);
@@ -1491,7 +1577,7 @@ export async function importKumaDatabase(
       });
     }
 
-    await importStatusPages(tx, actor, source, created, pageEntries);
+    await importStatusPages(tx, actor, source, resolved, pageEntries);
   });
 
   /* The report, in Kuma's own order. Creation had to run parents-first;
@@ -1560,7 +1646,7 @@ export async function importKumaDatabase(
       sourceId: String(window.id),
       label: window.title,
       outcome: "unsupported",
-      detail: `A "${window.strategy}" maintenance window${window.cron !== null && window.cron.length > 0 ? ` on cron "${window.cron}"` : ""}${window.timezone !== null && window.timezone.length > 0 ? ` in ${window.timezone}` : ""}. Vigil has no maintenance windows, so the imported monitors will alert during it. Pause them for planned work instead.`,
+      detail: `A "${window.strategy}" maintenance window${window.cron !== null && window.cron.length > 0 ? ` on cron "${window.cron}"` : ""}${window.timezone !== null && window.timezone.length > 0 ? ` in ${window.timezone}` : ""}. Vigil has maintenance windows of its own, but this importer does not create them: Kuma's strategies do not translate field for field, and a window imported approximately is a window that silences the wrong hours. Recreate it under Settings, Maintenance.`,
       monitorId: null,
     });
   }
@@ -1572,7 +1658,7 @@ export async function importKumaDatabase(
       label: `${monitorNames.get(link.monitorId) ?? link.monitorId} in maintenance ${link.maintenanceId}`,
       outcome: "unsupported",
       detail:
-        "Vigil has no maintenance windows to attach a monitor to. Pause the monitor for planned work instead.",
+        "The membership is not carried because the window it points at is not. Vigil has maintenance windows and they cover monitors and services; recreate the window under Settings, Maintenance and name this monitor in it.",
       monitorId: null,
     });
   }
@@ -1702,7 +1788,7 @@ async function importStatusPages(
   db: DbClient,
   actor: KumaImportActor,
   source: KumaDatabase,
-  created: ReadonlyMap<number, { id: string; name: string }>,
+  resolved: ReadonlyMap<number, { id: string; name: string }>,
   entries: ReportEntry[],
 ): Promise<void> {
   /** Vigil's status page cap; anything past it is reported, not lost. */
@@ -1750,15 +1836,20 @@ async function importStatusPages(
       continue;
     }
 
-    // Asked before inserting rather than caught afterwards. A slug is
-    // globally unique because it is a public URL, so the clash may be
-    // with another tenant's page — and a failed insert inside this
-    // transaction would take the whole migration down with it.
+    // Asked before inserting so the answer can be a suffix rather than a
+    // refusal: losing a page and its whole monitor list over a name
+    // somebody else took first is a bad trade for an operator who can
+    // rename it in one edit. The new URL is on the report; nothing about
+    // it is silent.
     //
-    // Suffixed rather than refused, because losing a page and its whole
-    // monitor list over a name somebody else took first is a bad trade
-    // for an operator who can rename it in one edit. The new URL is on
-    // the report; nothing about it is silent.
+    // What this is NOT is protection against a failed insert, and the
+    // comment here used to claim it was. A slug is globally unique
+    // because it is a public URL, so the clash may be with another
+    // tenant's page, and a SELECT only answers about the instant it was
+    // asked. Another tenant committing this slug a millisecond later
+    // still fails the insert below. That is why the write is inside a
+    // savepoint, and why it was reproducible: this exact race cost a
+    // tenant its entire twenty-seven monitor migration.
     const slug = await freeSlug(db, base);
     if (slug === null) {
       refusePage(
@@ -1772,24 +1863,11 @@ async function importStatusPages(
       );
     }
 
-    const vigilPage = await createStatusPage(db, actor, {
-      name: label.slice(0, 100),
-      slug,
-    });
-
     if (page.passwordProtected) {
       notes.push(
         "Kuma kept this page behind a shared password, which cannot be carried. Kuma hashes it with bcrypt and Vigil with scrypt, and neither can produce the other without the plaintext. The page is imported as private, visible to members of this organisation only, so a migration cannot become a disclosure. Set a password to make it shared again.",
       );
     }
-    await updateStatusPage(db, actor, {
-      statusPageId: vigilPage.id,
-      name: label.slice(0, 100),
-      slug,
-      published: page.published,
-      showBranding: page.showPoweredBy,
-      visibility: page.passwordProtected ? "private" : "public",
-    });
 
     const untheme = [
       page.hasCustomCss ? "custom CSS" : null,
@@ -1807,25 +1885,32 @@ async function importStatusPages(
 
     // Kuma's public groups, in their own order, flattened into the one
     // ordered list a Vigil page holds.
+    //
+    // Computed before anything is written, and into local arrays rather
+    // than straight onto `placed`, `reportedGroups` and `entries`. The
+    // write below can fail, and bookkeeping already committed for a page
+    // that does not exist would report sections of nothing and mark
+    // monitors as published on a page nobody can visit.
     const members: { monitorId: string; displayName: null }[] = [];
+    const placedHere: number[] = [];
+    const groupEntries: ReportEntry[] = [];
     for (const group of groups) {
       const inGroup = source.statusPageGroupMonitors.filter(
         (member) => member.groupId === group.id,
       );
       let carried = 0;
       for (const member of inGroup) {
-        const monitor = created.get(member.monitorId);
+        const monitor = resolved.get(member.monitorId);
         if (monitor === undefined) continue;
         if (members.some((existing) => existing.monitorId === monitor.id)) {
           continue;
         }
         if (members.length >= MAX_PAGE_MONITORS) continue;
         members.push({ monitorId: monitor.id, displayName: null });
-        placed.add(member.monitorId);
+        placedHere.push(member.monitorId);
         carried += 1;
       }
-      reportedGroups.add(group.id);
-      entries.push({
+      groupEntries.push({
         kind: "status-page-group",
         sourceId: String(group.id),
         label: group.name,
@@ -1835,10 +1920,40 @@ async function importStatusPages(
       });
     }
 
-    await setStatusPageMonitors(db, actor, {
-      statusPageId: vigilPage.id,
-      monitors: members,
-    });
+    // One savepoint for the page, its settings and its member list,
+    // because the three are one thing: a page that exists with the wrong
+    // visibility, or with nothing on it, is worse than no page at all.
+    // The password case makes that concrete, since the visibility is set
+    // by the update rather than by the create.
+    try {
+      await db.transaction(async (sp) => {
+        const vigilPage = await createStatusPage(sp, actor, {
+          name: label.slice(0, 100),
+          slug,
+        });
+        await updateStatusPage(sp, actor, {
+          statusPageId: vigilPage.id,
+          name: label.slice(0, 100),
+          slug,
+          published: page.published,
+          showBranding: page.showPoweredBy,
+          visibility: page.passwordProtected ? "private" : "public",
+        });
+        await setStatusPageMonitors(sp, actor, {
+          statusPageId: vigilPage.id,
+          monitors: members,
+        });
+      });
+    } catch (error) {
+      refusePage(
+        `Vigil refused to store it: ${insertFailure(error)}. The rest of the import was unaffected, so the monitors this page published are imported and only the page itself has to be recreated by hand.`,
+      );
+      continue;
+    }
+
+    for (const monitorId of placedHere) placed.add(monitorId);
+    for (const group of groups) reportedGroups.add(group.id);
+    for (const entry of groupEntries) entries.push(entry);
 
     entries.push({
       kind: "status-page",
@@ -1869,7 +1984,7 @@ async function importStatusPages(
 
   // Every monitor a Kuma page showed, whether or not it made the trip.
   for (const member of source.statusPageGroupMonitors) {
-    const monitor = created.get(member.monitorId);
+    const monitor = resolved.get(member.monitorId);
     const onPage = placed.has(member.monitorId);
     entries.push({
       kind: "status-page-monitor",

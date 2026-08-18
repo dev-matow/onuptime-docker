@@ -58,7 +58,16 @@ export interface FactDescriptor {
  */
 export type TargetKind = "url" | "hostname" | "domain" | "label";
 
-/** Optional form sections a type opts into. */
+/**
+ * Optional form sections a type opts into.
+ *
+ * These name controls for the *flat columns* — the ones that predate the
+ * `config` blob and are stored as their own columns on the row. A type's
+ * own settings live in the blob and are declared as {@link ConfigField}s
+ * instead. The two lists are separate because the storage is separate;
+ * collapsing them means rewriting `monitorColumnsFor`, which is a
+ * breaking change and belongs to 2.0.
+ */
 export type FormSection =
   | "method"
   | "expectedStatusCode"
@@ -69,6 +78,91 @@ export type FormSection =
   | "expiryWarning"
   | "heartbeatGrace"
   | "manualStatus";
+
+/**
+ * How one config field is edited. Data, not JSX.
+ *
+ * Written as data so that the dialog and the conformance suite read the
+ * same declaration. The alternative — a hand-written section per type —
+ * is what produced the gap this exists to close: `buildConfig()` wrote
+ * the blob for four types, twenty-four others stored settings no control
+ * could reach, and nothing failed, because there was nothing to compare
+ * the form against.
+ */
+export type ConfigControl =
+  | { kind: "text"; placeholder?: string; maxLength?: number; mono?: boolean }
+  | { kind: "secret"; placeholder?: string; maxLength?: number }
+  | { kind: "number"; min?: number; max?: number; step?: number; unit?: string }
+  | { kind: "boolean" }
+  | {
+      kind: "select";
+      /** `value: ""` is the renderer's "not set", submitted as null. */
+      options: readonly { value: string; label: string }[];
+    };
+
+/**
+ * One control the monitor form renders for this type's `config` blob.
+ *
+ * Nothing here validates. Bounds repeated from `storedSchema` are a
+ * courtesy to the operator; `storedSchema` stays the only authority, and
+ * the two disagreeing fails safe — the server refuses the write.
+ */
+export interface ConfigField {
+  /** A key in this type's `storedSchema`. The conformance suite proves it. */
+  name: string;
+  label: string;
+  control: ConfigControl;
+  help?: string;
+  /**
+   * What this control starts on when the monitor has no stored value.
+   *
+   * Only meaningful where blank is not a legal answer. A select whose
+   * schema has a default and no empty option cannot render blank
+   * honestly: it would show nothing, submit nothing, and any field
+   * whose {@link showWhen} keys on it would disappear. That is not
+   * hypothetical. SNMP's `version` defaults to `2c` and its community
+   * string only applies to v1 and v2c, so on the create dialog the
+   * select came up empty, the `showWhen` matched neither branch, and a
+   * new SNMP monitor could not be given the credential it needs. The
+   * whole point of this work was that a monitor cannot be created
+   * unconfigurable, and the first version of it shipped one.
+   *
+   * Derived from the schema, never typed by hand, and checked by the
+   * conformance suite against the schema's own default.
+   */
+  defaultValue?: string | boolean;
+  /**
+   * What an emptied box submits for this key. Defaults to `"omit"`.
+   *
+   * Three cases, because the schemas have three shapes and guessing
+   * wrong fails a save over a blank field:
+   *
+   * - `"null"` — the key is nullish, so empty means "cleared", which is
+   *   the case `mergeConfig` documents.
+   * - `"empty"` — the key takes `""` but not `null` (a `.default("")`
+   *   string like gRPC's service name, where empty is a real answer
+   *   meaning "ask about the whole server").
+   * - `"omit"` — the key takes neither, so the field is left out of the
+   *   patch entirely: `mergeConfig` reads that as "did not say" and the
+   *   stored value stands, or the schema's own default applies on
+   *   create. Sending `null` into a key that refuses it would turn an
+   *   emptied box into a zod error about a field the operator thought
+   *   was blank.
+   *
+   * Derived from the schema rather than typed by hand — the conformance
+   * suite re-derives it and fails when this disagrees, so it cannot rot.
+   */
+  emptyValue?: "null" | "empty" | "omit";
+  /**
+   * Render only while another field holds one of these values. Purely
+   * presentational: a hidden field is still submitted with the value it
+   * holds, because dropping it would clear a stored credential — the
+   * data-loss shape `types/config.ts` was written to close.
+   */
+  showWhen?: { field: string; equals: readonly string[] };
+  /** Which part of the dialog. Defaults to "primary". */
+  group?: "primary" | "advanced";
+}
 
 /**
  * How a monitor of this type comes to have a state.
@@ -126,6 +220,24 @@ export interface CheckTypeDescriptor<
   port: { required: boolean; default: number | null } | null;
   facts: readonly FactDescriptor[];
   form: readonly FormSection[];
+  /**
+   * Controls for this type's own `config` blob, in render order.
+   *
+   * {@link form} covers the flat columns; this covers the blob. Absent
+   * means the type stores no blob — the conformance suite checks that
+   * claim against `storedSchema` rather than believing it.
+   */
+  configFields?: readonly ConfigField[];
+  /**
+   * Stored keys that deliberately have no control, and why.
+   *
+   * Written down rather than quietly exempted. `push.token` is the only
+   * honest member: it is generated, never typed, and revealed through
+   * the push-endpoint control instead. An exemption nobody can read is
+   * indistinguishable from a gap nobody noticed, which is the whole
+   * reason this file grew a coverage rule.
+   */
+  configFieldsOmitted?: Readonly<Record<string, string>>;
   /**
    * A host capability the probe needs (e.g. ICMP sockets). When it is
    * missing the monitor reports `misconfigured`, never `down` — an

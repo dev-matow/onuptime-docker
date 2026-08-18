@@ -8,6 +8,7 @@ import {
   EgressBlockedError,
   egressFetch,
   egressPolicyFor,
+  pinnedLookup,
   type EgressException,
   type EgressLookup,
   type EgressPolicy,
@@ -990,5 +991,53 @@ describe("the pinned transport", () => {
     expect(failure).toBeInstanceOf(TypeError);
     expect((failure as TypeError).cause).toBeInstanceOf(Error);
     expect(String((failure as TypeError).cause)).toContain("ECONNREFUSED");
+  });
+
+  it("answers the connector on a later turn, so a connect that fails in the same stack cannot escape uncaught", async () => {
+    // The crash this prevents, and it is a worker crash, not a test
+    // problem. Answering synchronously means node runs connect(2) inside
+    // this callback - inside `transport.request(...)`, before that call
+    // has returned and before `request.once("error", ...)` exists. When
+    // the kernel refuses in that same stack (ENETUNREACH: no route to
+    // the pinned address, which is a container that lost its default
+    // route or an uplink that just went down) the socket is destroyed
+    // underneath the TLS layer, which then throws on its null handle,
+    // and the real ENETUNREACH is emitted a tick later on an
+    // EventEmitter that nobody is listening to. An unhandled 'error'
+    // event takes the process down - monitoring stops at the exact
+    // moment the network broke.
+    //
+    // Reproduced end to end in a network namespace with no route, where
+    // it exited non-zero with the test itself reported as passing. It
+    // cannot be reproduced from a test: every address whose connect(2)
+    // fails synchronously (broadcast, multicast, unspecified,
+    // link-local) is classified non-public and refused by the guard long
+    // before a socket exists, so there is no route-less pin a portable
+    // test can ask for. The property that makes the crash impossible is
+    // directly assertable instead: this resolver never answers in its
+    // caller's stack.
+    const answers: unknown[] = [];
+    const lookup = pinnedLookup({ address: "93.184.216.34", family: 4 });
+
+    // Both shapes node asks in: `all: true` from `net.connect`, the
+    // single address everywhere else.
+    lookup("pinned.test", { all: true }, (_error, address) =>
+      answers.push(address),
+    );
+    lookup("pinned.test", { all: false }, (_error, address, family) =>
+      answers.push([address, family]),
+    );
+
+    // The whole regression, in one assertion: nothing has connected yet.
+    expect(answers).toHaveLength(0);
+
+    await new Promise((resolve) => setImmediate(resolve));
+
+    // And the answer, once it arrives, is still the one address the
+    // guard classified, in the shape that was asked for.
+    expect(answers).toEqual([
+      [{ address: "93.184.216.34", family: 4 }],
+      ["93.184.216.34", 4],
+    ]);
   });
 });

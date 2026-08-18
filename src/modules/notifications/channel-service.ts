@@ -27,7 +27,16 @@ import { logger } from "@/lib/logger";
 import { writeAudit } from "@/modules/audit";
 import { EgressBlockedError } from "@/modules/monitors/egress";
 import { isForbiddenEgressUrl } from "@/modules/monitors/net";
+// Registers the commercial dispatch policy and the maintenance incident
+// handler. Here rather than in `worker/index.ts` because this module is
+// the one every dispatch path in both processes already loads - see the
+// module's own docstring.
 
+import {
+  askRoutes,
+  askSuppression,
+  type DispatchSubject,
+} from "./dispatch-policy";
 import { classifyEvent, eventSeverity, EVENT_CLASS_IDS } from "./events";
 import { enqueueMany, type DeliveryOutcome, type OutboxRow } from "./outbox";
 import {
@@ -874,6 +883,81 @@ export interface DispatchInput {
    * because a channel that asked for one monitor did not ask for this.
    */
   monitorId?: string | null;
+  /**
+   * The incident this event belongs to, when there is one.
+   *
+   * Carried for the dispatch policy and for nothing else — no message
+   * renders it, because the payload already holds everything a message
+   * says. A policy needs it because "is this incident being held by a
+   * maintenance window" is a different question from "is this monitor in
+   * maintenance", and only the first one keeps talking about an outage
+   * that was announced before the window began.
+   */
+  incidentId?: string | null;
+}
+
+/**
+ * What the dispatch policy is shown. Assembled here so Core and every
+ * edition see the same fields computed the same way — `severity` in
+ * particular, which a policy must not be left to derive for itself.
+ */
+function subjectOf(input: DispatchInput): DispatchSubject {
+  return {
+    organizationId: input.organizationId,
+    event: input.event,
+    causeKey: input.causeKey,
+    monitorId: input.monitorId ?? null,
+    monitorType: input.monitorType ?? null,
+    incidentId: input.incidentId ?? null,
+    severity: eventSeverity(input.event),
+  };
+}
+
+/**
+ * The channels a policy named, in the order it named them.
+ *
+ * Disabled and deleted ones are dropped HERE rather than at delivery,
+ * and the difference is visible to an operator. A row enqueued for a
+ * disabled channel fails permanently at send time and lands in the
+ * delivery ledger as an error, which reads like something went wrong; a
+ * destination the operator switched off is a configuration, and the
+ * routing decision says so with the rest of the working.
+ *
+ * `secrets` is never selected, matching `resolveRoutes` — a policy
+ * naming a hundred channels moves no credential material and decrypts
+ * nothing.
+ */
+async function channelsByIds(
+  db: DbClient,
+  organizationId: string,
+  channelIds: readonly string[],
+): Promise<
+  { id: string; provider: string; destination: string; name: string }[]
+> {
+  if (channelIds.length === 0) return [];
+  const rows = await db
+    .select({
+      id: notificationChannels.id,
+      provider: notificationChannels.provider,
+      destination: notificationChannels.destination,
+      name: notificationChannels.name,
+    })
+    .from(notificationChannels)
+    .where(
+      and(
+        eq(notificationChannels.organizationId, organizationId),
+        eq(notificationChannels.enabled, true),
+        inArray(notificationChannels.id, [...new Set(channelIds)]),
+      ),
+    );
+  // Returned in the policy's order, not the database's. The order is
+  // what an operator wrote down, and `uuidv7()` makes the outbox deliver
+  // roughly in insertion order, so the first destination on the rung
+  // tends to be the first message out.
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  return channelIds
+    .map((id) => byId.get(id))
+    .filter((row): row is NonNullable<typeof row> => Boolean(row));
 }
 
 /**
@@ -937,13 +1021,35 @@ export async function resolveRoutes(
   return rows;
 }
 
-/** How many outbox rows one dispatch produced. */
+/**
+ * How many outbox rows one dispatch produced.
+ *
+ * Three steps, and the first two are no-ops in Core. The policy is asked
+ * whether anything may go out; then which channels; then the fan-out
+ * happens exactly as it always has. With no policy registered both
+ * questions answer "no opinion" and this function is the one that
+ * shipped in 1.16.
+ */
 export async function dispatchToChannels(
   db: DbClient,
   input: DispatchInput,
 ): Promise<number> {
-  const matching = await resolveRoutes(db, input);
-  if (matching.length === 0) return 0;
+  const subject = subjectOf(input);
+
+  const suppressed = await askSuppression(db, subject);
+  if (suppressed) return 0;
+
+  const selection = await askRoutes(db, subject);
+  const matching = selection?.channelIds
+    ? await channelsByIds(db, input.organizationId, selection.channelIds)
+    : await resolveRoutes(db, input);
+  if (matching.length === 0) {
+    // Still recorded. "Nothing was sent" is the answer an operator most
+    // often comes looking for, and a decision written only when
+    // something was enqueued cannot give it.
+    if (selection) await selection.record(0);
+    return 0;
+  }
 
   const message: ChannelMessage = {
     kind: "channel",
@@ -984,6 +1090,7 @@ export async function dispatchToChannels(
         payload: message as unknown as Record<string, unknown>,
       })),
   );
+  if (selection) await selection.record(queued);
   return queued;
 }
 

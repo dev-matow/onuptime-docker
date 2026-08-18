@@ -51,15 +51,15 @@ export function ResponseTimeChart({
       <div className="text-muted-foreground mb-2 flex items-center justify-between gap-4 text-[11px]">
         <div className="flex items-center gap-3" aria-hidden>
           <span className="flex items-center gap-1.5">
-            <span className="bg-faint size-2" />
+            <span className="bg-chart-1 size-2 rounded-[2px]" />
             Healthy
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="bg-foreground size-2" />
+            <span className="bg-warn-dot size-2 rounded-[2px]" />
             Degraded
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="bg-destructive size-2" />
+            <span className="bg-destructive size-2 rounded-[2px]" />
             Failed
           </span>
         </div>
@@ -86,11 +86,14 @@ export function ResponseTimeChart({
                   : Math.round((responseMs / maxMs) * CHART_HEIGHT),
                 2,
               );
+          // The same state palette as every other surface: quiet moss for
+          // healthy, ochre for degraded, red for failed. A chart that
+          // invents its own vocabulary makes the operator translate.
           const barClass = failed
             ? "fill-destructive"
             : responseMs !== null && responseMs > degradedThresholdMs
-              ? "fill-foreground"
-              : "fill-faint";
+              ? "fill-warn-dot"
+              : "fill-chart-1";
           const label = failed
             ? (check.error ?? "Check failed")
             : responseMs !== null

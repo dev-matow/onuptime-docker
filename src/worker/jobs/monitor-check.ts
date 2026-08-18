@@ -11,7 +11,11 @@ import type { CheckOptions } from "@/modules/monitors/check";
 import { evaluateMonitor } from "@/modules/monitors/evaluate";
 import { applyOutcome } from "@/modules/monitors/outcome";
 import { highFrequencyClaims } from "@/modules/monitors/highfreq";
-import type { Monitor } from "@/modules/monitors/service";
+import {
+  ENQUEUE_LEASE_SECONDS,
+  type Monitor,
+  reserveMonitorForFollowUp,
+} from "@/modules/monitors/service";
 import { checkTypeKind } from "@/modules/monitors/types/catalog";
 import { isScheduledKind } from "@/modules/monitors/types/contract";
 
@@ -71,22 +75,69 @@ const TICK_PERIOD_MS = 60_000;
  * The scheduling policy can ask for the next evaluation sooner than the
  * next tick — that is the whole point of tightening on a suspicious
  * monitor. pg-boss's cron cannot fire faster than once a minute, so
- * when the policy asks for sooner, the check enqueues its own
- * follow-up. The queue's `stately` policy with the monitor id as
- * singleton key means this can never race the tick into a double probe:
- * whichever arrives second is dropped.
+ * when the policy asks for sooner, the check enqueues its own follow-up.
  *
  * The floor this delivers is pg-boss's job poll interval — a couple of
  * seconds — which is comfortably below the shortest interval an operator
  * can configure, so a 10s monitor really is checked every 10s. Going
  * faster than that is the 2.0 scheduler's job.
+ *
+ * Three things here are load-bearing, and this path had all three wrong.
+ *
+ * The interval is measured from `lastCheckedAt`, not from the clock. Both
+ * timestamps are written from one `now` inside `recordCheckOutcome`, so
+ * the subtraction is exact. Reading the clock again a few milliseconds
+ * later instead made the comparison depend on how long the write took.
+ *
+ * The boundary is INCLUSIVE, and that is a measured decision rather than
+ * a taste. A monitor whose interval equals the tick period has no slack
+ * at all: the tick probes it at the first tick at or after
+ * `next_evaluation_at - TICK_GRACE_SECONDS`, so the moment queue delay
+ * exceeds the grace, that instant falls past a tick boundary and the
+ * monitor waits a whole further cycle - 120 seconds for a 60-second
+ * monitor. Excluding the equal case cost 5 checks per second of a
+ * thousand-monitor fleet at two workers, 16.57/s down to 11.58/s, and
+ * the loss shrank as workers were added because a faster drain keeps
+ * more monitors inside the grace. `docs/SCALING.md` has both runs.
+ *
+ * So: an interval at or below the tick period schedules itself, and
+ * anything longer belongs to the tick.
+ *
+ * And it reserves the monitor before enqueueing. The queue's `stately`
+ * policy drops a second job only while the first is still `created`; once
+ * pg-boss moves it to `active` the singleton key permits another, so a
+ * tick firing in that window enqueues a monitor already being probed.
+ * Sharing the scheduler's claim column closes it — the follow-up and the
+ * tick now compete for the same lease instead of for a queue index, and
+ * losing means somebody else already owns the next dispatch.
+ *
+ * Exported for the tests. The window where the reservation is lost opens
+ * between `applyOutcome` clearing the claim and this function taking it,
+ * which is microseconds wide and cannot be staged through
+ * `runMonitorCheck` - and an untestable branch in a concurrency guard is
+ * how the guard stops being one.
  */
-async function scheduleFastFollowUp(
+export async function scheduleFastFollowUp(
   monitor: Monitor,
   boss: Enqueuer | undefined,
 ): Promise<void> {
   if (!boss || monitor.paused || monitor.nextEvaluationAt === null) return;
-  if (monitor.nextEvaluationAt.getTime() - Date.now() >= TICK_PERIOD_MS) return;
+  const decidedAt = monitor.lastCheckedAt?.getTime() ?? Date.now();
+  if (monitor.nextEvaluationAt.getTime() - decidedAt > TICK_PERIOD_MS) return;
+
+  // Until it runs, plus room to run in. A lease that expired at the
+  // moment the job became due would free the monitor for the very tick
+  // this reservation exists to exclude.
+  const untilDueMs = Math.max(
+    0,
+    monitor.nextEvaluationAt.getTime() - Date.now(),
+  );
+  const reserved = await reserveMonitorForFollowUp(
+    db,
+    monitor.id,
+    Math.ceil(untilDueMs / 1000) + ENQUEUE_LEASE_SECONDS,
+  );
+  if (!reserved) return;
 
   await boss.send(
     QUEUES.monitorCheck,

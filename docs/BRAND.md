@@ -1,24 +1,32 @@
 # The mark
 
-Vigil's logo is a pixel eye. One drawing, monochrome, on a 25 x 11 grid
-of whole pixels: white on dark surfaces, black on light ones, and never
-paired with lettering inside the same file. The wordmark beside it in the
-header is text, and stays text.
+Vigil's logo is two curved blades around a narrow waist, one closed
+vector path in an 80 x 128 box. Monochrome: graphite on light surfaces,
+white on dark ones, and never paired with lettering inside the same
+file. The wordmark beside it is text, widely tracked, and stays text.
 
-![The three frames](brand/vigil-mark.svg)
+![The mark](brand/vigil-mark-dark.svg)
+
+The drawing has two optical cuts. `display` is the mark as the identity
+board draws it: a tight waist and a fine aperture, for surfaces with
+room. `small` widens the aperture and thickens the stems, because below
+about 32px the display cut's counter seals into a blob; it is what the
+navbars, footers, favicons and app chrome carry. Same rule every text
+face in this repository follows; the mark gets it too.
 
 ## Where it comes from
 
-`scripts/brand-mark.mjs` and nowhere else. The grid is written there as
-runs of ink per row; everything that carries a logo is generated from it:
+`scripts/brand-mark.mjs` and nowhere else. The left blade is written
+there as one set of numbers; the right blade is derived by mirroring,
+and everything that carries a logo is generated from both:
 
 | Surface                                   | What it gets                           |
 | ----------------------------------------- | -------------------------------------- |
-| `src/lib/brand-mark.ts`                   | the three frame paths, for the app     |
+| `src/lib/brand-mark.ts`                   | the path, for the application          |
 | `landing/**/*.html`                       | the inline mark in every `.brand` link |
-| `landing/favicon.svg`, `src/app/icon.svg` | the open frame on a dark tile          |
-| `docs/brand/`                             | standalone assets, white and black     |
-| the two social card sources               | the open frame, sized                  |
+| `landing/favicon.svg`, `src/app/icon.svg` | the mark centred on an icon tile       |
+| `docs/brand/`                             | standalone assets, white and graphite  |
+| the social card sources                   | the mark, sized, between markers       |
 
 ```bash
 npm run brand         # redraw every surface
@@ -26,39 +34,25 @@ npm run brand:check   # a required CI job
 ```
 
 The check is what makes this a single source rather than a claim about
-one. It fails when a surface disagrees with the grid, when the retired
-pulse mark reappears anywhere, and when a brand link is handed a picture
-of the logo instead of the logo. Before this existed the mark was a
-stroked polyline pasted into twenty-eight places, and changing it meant
-finding all of them.
+one. It fails when a surface disagrees with the geometry, when a retired
+mark reappears anywhere (the stroked pulse polylines, the pixel eye's
+subpaths, or the eye's blink plumbing), and when a brand link is handed
+a picture of the logo instead of the logo. `e2e/brand.spec.ts` asserts
+the same facts against a real rendered page.
 
-The two PNGs are rendered by hand from committed HTML, and each file
+The raster cards are rendered from committed HTML, and each file
 carries the command:
 
 - `scripts/brand/og-card.html` renders `landing/assets/og-card.png`
 - `.github/social-preview.html` renders `.github/social-preview.png`
+- `scripts/core-overlay/social-preview.html` renders the Core repo's card
 
-## The blink
+## The mark is still
 
-The eye blinks. Rarely, and by swapping whole frames:
-
-    open -> half -> closed -> half -> open        60ms + 70ms + 50ms
-
-once every 7 to 15 seconds, twice in a row a quarter of the time.
-Nothing interpolates, nothing scales, nothing fades, and the mark never
-moves a subpixel: every frame shares the viewBox, the centre and the two
-corner pixels of the eye, so a blink cannot read as the logo shifting.
-
-It is paused while the document is hidden, and it does not run at all
-under `prefers-reduced-motion: reduce`, where the open frame is what
-renders. Both are asserted in `e2e/brand.spec.ts` against a real page,
-because the way this feature fails is silently.
-
-There is at most **one** blinking mark on a page: the site header, and
-the application's own brand mark. The footer's copy, the favicons, the
-demo export, screenshots and printed reports all take the static open
-frame. Two eyes blinking on their own schedules reads as a rendering
-fault rather than as a detail.
+Its predecessor, the pixel eye, blinked. The blink retired with it on
+2026-08-17: the blades are a quiet form, and animating them would be
+decoration rather than behaviour. There is no frame swapping, no
+scheduler and no motion preference to honour, because nothing moves.
 
 ## What is not Vigil's to brand
 

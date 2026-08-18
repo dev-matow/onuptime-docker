@@ -48,6 +48,41 @@ function readRegistry() {
         assertions: spec.assertions.map((a) => a.id),
         requiresCapability: spec.descriptor.requiresCapability ?? null,
         label: spec.descriptor.label,
+        // Whether every setting this type stores can be entered from
+        // the monitor dialog. Derived by walking the stored schema
+        // rather than by trusting the descriptor: the gap this column
+        // exists for was twenty-four types whose settings the dialog
+        // never rendered, and a descriptor that simply failed to
+        // mention them would have reported the same "yes" as one that
+        // covered them.
+        configurable: (() => {
+          const legacy = {
+            dnsRecord: ["recordType", "expectedValue"],
+            expiryWarning: ["warnDays"],
+            heartbeatGrace: ["graceSeconds"],
+            manualStatus: ["status", "note"],
+          };
+          let node = spec.storedSchema;
+          let shape = null;
+          for (let i = 0; i < 30 && node; i++) {
+            if (node.shape && typeof node.shape === "object") {
+              shape = node.shape;
+              break;
+            }
+            const def = node._zod?.def ?? node._def ?? node.def;
+            if (!def) break;
+            node = def.innerType ?? def.in ?? def.schema ?? null;
+          }
+          if (!shape) return "n/a";
+          const reachable = new Set([
+            ...(spec.descriptor.configFields ?? []).map((f) => f.name),
+            ...Object.keys(spec.descriptor.configFieldsOmitted ?? {}),
+            ...(spec.descriptor.form ?? []).flatMap((s) => legacy[s] ?? []),
+          ]);
+          const keys = Object.keys(shape);
+          if (keys.length === 0) return "n/a";
+          return keys.every((k) => reachable.has(k));
+        })(),
       };
     }
     process.stdout.write("@@" + JSON.stringify(out) + "@@");
@@ -214,6 +249,13 @@ async function main() {
       unitTest: owned.length > 0,
       protocolFixture:
         !dials || id in FIXTURE_EXEMPT ? "n/a" : hasProtocolFixture(unit),
+      // Can an operator actually set everything this type stores? A
+      // "yes" everywhere else on this row and a "no" here is a type
+      // that is registered, probed, asserted, tested and documented,
+      // and that a customer still cannot configure. Twenty-four of the
+      // forty were in exactly that state, and this matrix certified
+      // them complete because it had no column for the question.
+      configurable: spec.configurable,
       documented: existsSync(docPath),
       capability: spec.requiresCapability,
       // Whether a remote probe agent can execute this type. Derived
@@ -244,11 +286,11 @@ async function main() {
 
   const mark = (v) => (v === "n/a" ? "-" : v ? "yes" : "**no**");
   const table = [
-    "| Type | Kind | Probe | Remote probe | Assertions | Secrets declared | Config preserved | Export/import | Unit test | Protocol fixture |",
-    "|---|---|---|---|---|---|---|---|---|---|",
+    "| Type | Kind | Probe | Remote probe | Assertions | Secrets declared | Configurable | Config preserved | Export/import | Unit test | Protocol fixture |",
+    "|---|---|---|---|---|---|---|---|---|---|---|",
     ...rows.map(
       (r) =>
-        `| \`${r.id}\` | ${r.kind} | ${mark(r.probeOrKindFn)} | ${mark(r.remoteProbe)} | ${mark(r.assertions)} | ${mark(r.secretsDeclared)} | ${mark(r.configPreserved)} | ${mark(r.exportImport)} | ${mark(r.unitTest)} | ${mark(r.protocolFixture)} |`,
+        `| \`${r.id}\` | ${r.kind} | ${mark(r.probeOrKindFn)} | ${mark(r.remoteProbe)} | ${mark(r.assertions)} | ${mark(r.secretsDeclared)} | ${mark(r.configurable)} | ${mark(r.configPreserved)} | ${mark(r.exportImport)} | ${mark(r.unitTest)} | ${mark(r.protocolFixture)} |`,
     ),
   ].join("\n");
 

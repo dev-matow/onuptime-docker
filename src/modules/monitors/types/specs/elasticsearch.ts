@@ -1,6 +1,9 @@
 import { z } from "zod";
 
-import { elasticsearchDescriptor } from "../catalog";
+import {
+  ACCEPTABLE_CLUSTER_STATUSES,
+  elasticsearchDescriptor,
+} from "../catalog";
 import type { Assertion, CheckTypeSpec, MonitorRowView } from "../contract";
 import { monitorUrlSchema } from "../targets";
 import { latencyAssertion } from "./shared";
@@ -27,7 +30,6 @@ export const CLUSTER_STATUSES = ["green", "yellow", "red"] as const;
 export type ClusterStatus = (typeof CLUSTER_STATUSES)[number];
 
 /** The colours an operator can call healthy. Red is never one of them. */
-export const ACCEPTABLE_CLUSTER_STATUSES = ["green", "yellow"] as const;
 
 export interface ElasticsearchConfig {
   /**

@@ -57,12 +57,16 @@ export default async function DashboardPage() {
         </p>
       </header>
 
-      {/* The counters are the positive signal. There are no green dots in
-          the list below, on purpose, so "everything is fine" has to be
-          readable here in one number instead of scanned for down a
-          column of fifteen rows, or five hundred. */}
-      <div className="grid border sm:grid-cols-2 lg:grid-cols-4">
-        <StatCell label="Operational" value={`${up}/${active.length}`} />
+      {/* The counters are the aggregate signal: "everything is fine" is
+          readable here in one number before the list confirms it row by
+          row. The rows below carry the same dot vocabulary, so the legend
+          and the list stay one language. */}
+      <div className="bg-card grid grid-cols-2 rounded-lg border lg:grid-cols-4">
+        <StatCell
+          label="Operational"
+          value={`${up}/${active.length}`}
+          tone="ok"
+        />
         <StatCell label="Down" value={String(down)} tone="down" />
         <StatCell label="Degraded" value={String(degraded)} tone="degraded" />
         <StatCell
@@ -87,15 +91,20 @@ export default async function DashboardPage() {
                 <li key={incident.id}>
                   <Link
                     href={`/incidents/${incident.id}`}
-                    className="hover:bg-accent -mx-2 flex flex-wrap items-center gap-3 px-2 py-3"
+                    className="hover:bg-accent -mx-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-md px-2 py-3"
                   >
                     <SeverityBadge severity={incident.severity} />
-                    <span className="min-w-0 flex-1 truncate font-medium">
+                    {/* The title is what an operator opened the app for:
+                        it wins the space fight, and the process badges
+                        wrap to a second line before it loses a letter. */}
+                    <span className="min-w-0 flex-1 basis-[55%] truncate font-medium">
                       {incident.title}
                     </span>
-                    <IncidentStatusBadge status={incident.status} />
-                    <span className="text-muted-foreground text-xs">
-                      {formatRelativeTime(incident.startedAt)}
+                    <span className="flex items-center gap-3">
+                      <IncidentStatusBadge status={incident.status} />
+                      <span className="text-muted-foreground text-xs">
+                        {formatRelativeTime(incident.startedAt)}
+                      </span>
                     </span>
                   </Link>
                 </li>
@@ -108,7 +117,12 @@ export default async function DashboardPage() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center justify-between">
-            Monitors
+            <span>
+              Monitors
+              <span className="text-muted-foreground ml-2 text-xs font-normal">
+                uptime, last 24h
+              </span>
+            </span>
             <Button asChild variant="ghost" size="sm">
               <Link href="/monitors">
                 View all
@@ -144,13 +158,15 @@ export default async function DashboardPage() {
                     <MonitorStatusIndicator
                       status={monitor.currentStatus}
                       paused={monitor.paused}
-                      className="w-32 shrink-0"
+                      className="w-28 shrink-0 sm:w-32"
                     />
+                    {/* On a phone the name is the row; the uptime figure
+                        returns when there is room for both. */}
                     <span className="min-w-0 flex-1 truncate text-sm font-medium">
                       {monitor.name}
                     </span>
-                    <span className="text-muted-foreground font-mono text-xs tabular-nums">
-                      {formatUptime(monitor.uptime24hPct)} · 24h
+                    <span className="text-muted-foreground hidden font-mono text-xs tabular-nums sm:inline">
+                      {formatUptime(monitor.uptime24hPct)}
                     </span>
                   </Link>
                 </li>
@@ -164,10 +180,10 @@ export default async function DashboardPage() {
 }
 
 /**
- * A counter carries the same square as the rows it is counting, so the
+ * A counter carries the same dot as the rows it is counting, so the
  * legend and the list are one vocabulary rather than two. The number is
- * mono: the console is instruments, and a counter is an instrument that
- * happens to be large.
+ * set in the sans like every other sentence the product speaks; the
+ * digits share the mono's cell anyway, so the column still holds.
  */
 function StatCell({
   label,
@@ -176,27 +192,32 @@ function StatCell({
 }: {
   label: string;
   value: string;
-  tone?: "down" | "degraded";
+  tone?: "ok" | "down" | "degraded";
 }) {
   const zero = value === "0";
   return (
-    <div className="border-line-inner border-l px-4 py-3 first:border-l-0">
-      <div className="text-muted-foreground flex items-center gap-2 text-[10px] font-medium tracking-[0.08em] uppercase">
+    // 2x2 on phones, one row on desktop. The hairlines follow the shape:
+    // stacked rows rule the top edge, the desktop band rules the left.
+    <div className="border-line-inner border-l px-5 py-4 nth-[2n+1]:border-l-0 nth-[n+3]:border-t lg:border-t-0 lg:first:border-l-0 lg:nth-[2n+1]:border-l">
+      <div className="text-muted-foreground flex items-center gap-2 text-[10.5px] font-medium tracking-[0.09em] uppercase">
         <span
           aria-hidden
           className={cn(
-            "inline-block size-1.5 shrink-0 border",
-            tone === "down" && !zero && "border-destructive bg-destructive",
-            tone === "degraded" && !zero && "border-foreground bg-foreground",
-            (!tone || zero) && "border-muted-foreground",
+            "inline-block size-2 shrink-0 rounded-full",
+            tone === "down" && !zero && "bg-destructive",
+            tone === "degraded" && !zero && "bg-warn-dot",
+            tone === "ok" && "bg-ok-dot",
+            (!tone || (zero && tone !== "ok")) &&
+              "border-line-quiet border bg-transparent",
           )}
         />
         {label}
       </div>
       <div
         className={cn(
-          "mt-1 font-mono text-[36px] leading-none font-bold tabular-nums",
+          "mt-1.5 text-[34px] leading-none font-semibold tracking-[-0.02em]",
           tone === "down" && !zero && "text-destructive",
+          tone === "degraded" && !zero && "text-warn",
         )}
       >
         {value}

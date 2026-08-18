@@ -65,6 +65,15 @@ node .next/standalone/server.js     # app, PORT=3000
 npm run worker                      # worker
 ```
 
+Running more than one worker is supported and needs no configuration:
+Postgres arbitrates who fires the cron, who runs the scheduler tick and
+who takes each check, so a second replica is capacity rather than a
+coordination problem. Give each one a distinct `VIGIL_ACTOR_NAME` (its
+ledger identity; sharing one means sharing a chain and contending on its
+sequence). `MONITOR_SCHEDULER_BATCH` bounds how many due monitors one
+tick enqueues; the default of 5000 suits fleets far larger than most
+installations run.
+
 ## Environment
 
 See [sample.env.production](../sample.env.production) for the full

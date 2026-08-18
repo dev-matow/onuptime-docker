@@ -461,9 +461,10 @@ describe("dispatch and delivery", () => {
  * The dispatcher entry used to be `sendIncidentWebhook`, called after
  * the mutation had committed. There is no such function now: a
  * transition records an intent inside its own transaction and the
- * expansion turns it into rows. These two tests assert the same two
- * things they always did - the rows appear, and nothing throws - through
- * the path that replaced it.
+ * expansion turns it into rows. These two tests assert what the old
+ * ones did - the rows appear, and nothing throws - through the path
+ * that replaced it, and now also the part that path is named after:
+ * that the message is on its way out before the call returns.
  */
 describe("intent expansion (the dispatcher entry)", () => {
   it("enqueues for subscribed channels and drains inline", async () => {
@@ -474,13 +475,22 @@ describe("intent expansion (the dispatcher entry)", () => {
       severity: "major",
     });
 
-    // The inline drain runs with the real fetch seam, which this test
-    // cannot intercept, so the row may end delivered=false; what must
-    // hold is that dispatch created the row and never threw.
+    // Both seams, not just the transport. `authorizeEgress` resolves the
+    // hostname BEFORE it decides which transport to use, so an injected
+    // `fetchImpl` on its own still sends a real getaddrinfo for
+    // hooks.slack.com. Until `dispatchIntentsNow` forwarded a seam at
+    // all this was the only test in the suite that reached the public
+    // internet, and it was written around that: it asserted the row
+    // existed and gave up on the delivery, so the drain half of "drains
+    // inline" was never actually checked.
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("ok"));
     // `createIncident` already recorded the intent; expanding it is
     // what creates the row.
     await expect(
-      dispatchIntentsNow(db, actor.organizationId),
+      dispatchIntentsNow(db, actor.organizationId, {
+        fetchImpl,
+        lookup: publicLookup,
+      }),
     ).resolves.toBeUndefined();
 
     const rows = await db
@@ -489,6 +499,21 @@ describe("intent expansion (the dispatcher entry)", () => {
       .where(eq(notificationOutbox.organizationId, actor.organizationId));
     expect(rows).toHaveLength(1);
     expect(rows[0]!.event).toBe("incident.opened");
+
+    // The half this test used to skip. Inline means the row is delivered
+    // by the time the call returns, not merely enqueued for the worker's
+    // next minute tick - which is the entire reason this function exists
+    // rather than letting the tick pick the intent up.
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const [target, init] = fetchImpl.mock.calls[0]!;
+    expect(String(target)).toBe(SLACK_URL);
+    expect(init?.method).toBe("POST");
+    expect(rows[0]!.state).toBe("delivered");
+    expect(rows[0]!.deliveredAt).not.toBeNull();
+    // Exactly one attempt: a second one here would mean the inline drain
+    // and the expansion both claimed the same row, which is a duplicate
+    // alert in somebody's channel.
+    expect(rows[0]!.attempts).toBe(1);
   });
 
   it("is a no-op with no channels", async () => {
@@ -506,14 +531,21 @@ describe("intent expansion (the dispatcher entry)", () => {
         payload: operatorIntent({ incident, event: "incident.opened" }),
       });
     });
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("ok"));
     await expect(
-      dispatchIntentsNow(db, actor.organizationId),
+      dispatchIntentsNow(db, actor.organizationId, {
+        fetchImpl,
+        lookup: publicLookup,
+      }),
     ).resolves.toBeUndefined();
     const rows = await db
       .select()
       .from(notificationOutbox)
       .where(eq(notificationOutbox.organizationId, actor.organizationId));
     expect(rows).toHaveLength(0);
+    // "No-op" is a claim about the network too: an intent with no
+    // subscribed channel must expand to nothing and send nothing.
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 });
 

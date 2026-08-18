@@ -72,7 +72,7 @@ async function capture(
     scenario: file.replace(/\.png$/, ""),
     command: null,
     shows,
-    viewport: `${VIEWPORT.width}x${VIEWPORT.height}`,
+    viewport: `${VIEWPORT.width}x${VIEWPORT.height}@2x`,
     bytes: readFileSync(path).byteLength,
     sha256: sha256(path),
   });
@@ -136,7 +136,13 @@ async function main() {
   const ids = await resolveIds();
 
   const browser = await chromium.launch();
-  const page = await browser.newPage({ viewport: VIEWPORT });
+  // DPR 2: the site and the docs display these at up to their full
+  // logical width, and a 1x capture reads soft on any dense display.
+  // Crop arithmetic downstream stays in logical 1440x900 coordinates.
+  const page = await browser.newPage({
+    viewport: VIEWPORT,
+    deviceScaleFactor: 2,
+  });
   await signIn(page);
 
   await fullPage(

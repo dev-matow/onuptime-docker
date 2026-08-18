@@ -5,6 +5,7 @@ import { afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import {
   monitorChecks,
+  monitorHfLeases,
   monitorHfRollups,
   monitorHfSamples,
   monitors,
@@ -16,6 +17,9 @@ import {
   releaseShards,
 } from "@/modules/monitors/highfreq/leases";
 import { runHighFrequencyRollup } from "@/modules/monitors/highfreq/rollup";
+import { shardOf } from "@/modules/monitors/highfreq/shards";
+import { runMonitorTick } from "@/worker/jobs/monitor-tick";
+import { QUEUES as TICK_QUEUES } from "@/worker/queues";
 import { setHighFrequency } from "@/modules/monitors/highfreq/service";
 import { achievedCadence } from "@/modules/monitors/highfreq/stats";
 import { SampleWriter } from "@/modules/monitors/highfreq/writer";
@@ -724,5 +728,104 @@ describe("enabling high frequency", () => {
     expect(off.highFrequencyIntervalMs).toBeNull();
     // Due now, not whenever the last high-frequency promotion decided.
     expect(off.nextEvaluationAt!.getTime()).toBeLessThanOrEqual(Date.now());
+  });
+});
+
+const TICK_QUEUE = TICK_QUEUES.monitorCheck;
+
+/**
+ * The ordinary scheduler's view of a monitor this plane owns.
+ *
+ * These live here rather than beside the tick's other tests because they
+ * claim SHARD LEASES, and `monitor_hf_leases` is one global table keyed
+ * by shard with no tenancy in it. Two test files claiming shards at once
+ * fight over the same rows however carefully each scopes its monitors:
+ * this file's plane could not claim a shard the other file held, and the
+ * other file could not produce a shard with no holder. Same file, same
+ * worker, one at a time.
+ */
+function tickBoss() {
+  const ids: string[] = [];
+  return {
+    ids,
+    insert: async (
+      name: string,
+      jobs: { data: object; singletonKey?: string }[],
+    ) => {
+      if (name === TICK_QUEUE) {
+        for (const job of jobs) {
+          ids.push((job.data as { monitorId: string }).monitorId);
+        }
+      }
+      return jobs.map((_, index) => `job-${index}`);
+    },
+  };
+}
+
+/** A monitor this plane owns, overdue enough to head the fair ranking. */
+async function makeTickMonitor(actor: TestActor): Promise<string> {
+  const monitor = await makeMonitor(actor);
+  await db
+    .update(monitors)
+    .set({
+      highFrequency: true,
+      highFrequencyIntervalMs: 500,
+      nextEvaluationAt: new Date(Date.now() - 365 * 24 * 3_600_000),
+    })
+    .where(eq(monitors.id, monitor.id));
+  await claimShards(db, `tick-${randomUUID()}`, [shardOf(monitor.id)]);
+  // The plane caches live shards for a second, so a snapshot taken
+  // before this lease existed would still be current.
+  await sleep(1_100);
+  return monitor.id;
+}
+
+describe("the ordinary tick, and monitors this plane owns", () => {
+  it("defers a monitor a live shard lease covers, instead of reselecting it forever", async () => {
+    // Nothing advances `next_evaluation_at` while that plane owns a
+    // monitor, so without the deferral it is permanently the most
+    // overdue row in its tenant and heads the ranking on every tick for
+    // as long as the flag is on - spending a selection slot each time
+    // that can never become work. With enough of them in one tenant that
+    // is the fairness ordering starving the monitors it was written to
+    // protect.
+    const actor = await createTestOrg();
+    const monitorId = await makeTickMonitor(actor);
+    await claimShards(db, `test-${randomUUID()}`, [shardOf(monitorId)]);
+    // The plane caches live shards for a second, so a snapshot taken
+    // before this lease existed would still be current. Waiting past the
+    // TTL is what makes the tick below read the lease rather than
+    // whatever an earlier test left cached.
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+
+    const boss = tickBoss();
+    await runMonitorTick(db, boss, actor.organizationId);
+
+    expect(boss.ids.filter((id) => id === monitorId)).toEqual([]);
+    const [row] = await db
+      .select({ at: monitors.nextEvaluationAt })
+      .from(monitors)
+      .where(eq(monitors.id, monitorId));
+    expect(row!.at!.getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it("still schedules a high-frequency monitor whose plane has died", async () => {
+    // The failover the deferral must not cost. The test is on the LEASE,
+    // never on the flag: degrading from 500ms to the ordinary cadence is
+    // a service level, degrading to silence is an outage nobody sees.
+    const actor = await createTestOrg();
+    const monitorId = await makeTickMonitor(actor);
+    await claimShards(db, `test-${randomUUID()}`, [shardOf(monitorId)]);
+    // The plane dies: its lease expires and is never renewed.
+    await db
+      .update(monitorHfLeases)
+      .set({ expiresAt: new Date(Date.now() - 1_000) })
+      .where(eq(monitorHfLeases.shard, shardOf(monitorId)));
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+
+    const boss = tickBoss();
+    await runMonitorTick(db, boss, actor.organizationId);
+
+    expect(boss.ids).toContain(monitorId);
   });
 });

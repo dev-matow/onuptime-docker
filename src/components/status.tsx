@@ -6,46 +6,42 @@ import { cn } from "@/lib/utils";
  * status page — renders condition through this file, so a monitor that
  * is down cannot look like one thing here and another thing there.
  *
- * The encoding is three axes and only the last one is colour:
+ * On the porcelain ground the encoding is a dot and a weight:
  *
- *   fill        answers "is this row an exception". A hollow square is
- *               the background a filled one breaks against.
- *   luminance   answers "how loud". A degraded row goes white and bold
- *               without spending any hue on it.
- *   hue         is the last rung and only the last rung. Red means down.
+ *   dot      a small filled disc in the state's colour. Moss means
+ *            operational, ochre means degraded, red means down. A hollow
+ *            ring means the monitor is not reporting (pending, paused).
+ *   weight   answers "how loud". Exceptions set their label semibold and
+ *            take the state's colour into the text; operational rows stay
+ *            body-quiet, because an operator scanning five hundred rows
+ *            is verifying exceptions, not confirmations.
  *
- * Which is why a screen where nothing is wrong contains no colour at
- * all, and why the red means something when it finally appears. An
- * operator scanning fifteen rows — or five hundred — is verifying
- * exceptions, not confirmations, so there is no green here: the positive
- * signal lives in the aggregate counter, one number instead of five
- * hundred dots, and it survives red-green colourblindness for free.
- *
- * Squares, never circles. The mark is drawn on an integer grid and so is
- * everything that reports to it.
+ * Red remains the only alarm. Moss and ochre are report colours, chosen
+ * to survive red-green colourblindness by weight and fill as well as
+ * hue, and every text use clears AA on the lightest surface.
  */
 type MonitorStatus = "up" | "down" | "degraded" | "unknown";
 
-type StateStyle = { square: string; row: string; label: string };
+type StateStyle = { dot: string; row: string; label: string };
 
 const MONITOR_STATUS_STYLES: Record<MonitorStatus, StateStyle> = {
   unknown: {
-    square: "border-muted-foreground",
+    dot: "border border-line-quiet bg-transparent",
     row: "text-muted-foreground font-normal",
     label: "Pending",
   },
   up: {
-    square: "border-muted-foreground",
+    dot: "bg-ok-dot",
     row: "text-body font-normal",
     label: "Operational",
   },
   degraded: {
-    square: "border-foreground bg-foreground",
-    row: "text-foreground font-semibold",
+    dot: "bg-warn-dot",
+    row: "text-warn font-semibold",
     label: "Degraded",
   },
   down: {
-    square: "border-destructive bg-destructive",
+    dot: "bg-destructive",
     row: "text-destructive font-semibold",
     label: "Down",
   },
@@ -54,11 +50,11 @@ const MONITOR_STATUS_STYLES: Record<MonitorStatus, StateStyle> = {
 /**
  * Paused sits off the ladder rather than on it, because the schema says
  * so: pausing is an operator setting, not an observed state. A paused
- * monitor is not reporting anything, so it gets the quietest square in
- * the system and no rung.
+ * monitor is not reporting anything, so it gets the quietest ring in
+ * the system and no colour.
  */
 const PAUSED_STYLE: StateStyle = {
-  square: "border-faint",
+  dot: "border border-line-tag bg-transparent",
   row: "text-muted-foreground font-normal",
   label: "Paused",
 };
@@ -67,10 +63,16 @@ export function MonitorStatusIndicator({
   status,
   paused,
   className,
+  compactLabel = false,
 }: {
   status: MonitorStatus;
   paused?: boolean;
   className?: string;
+  /**
+   * On phone-width tables the dot carries the state and the word yields
+   * its column to the name; the label stays for screen readers.
+   */
+  compactLabel?: boolean;
 }) {
   const style = paused ? PAUSED_STYLE : MONITOR_STATUS_STYLES[status];
   return (
@@ -82,18 +84,20 @@ export function MonitorStatusIndicator({
       )}
     >
       <span
-        className={cn("inline-block size-1.5 shrink-0 border", style.square)}
+        className={cn("inline-block size-2 shrink-0 rounded-full", style.dot)}
         aria-hidden
       />
-      {style.label}
+      <span className={cn(compactLabel && "max-sm:sr-only")}>
+        {style.label}
+      </span>
     </span>
   );
 }
 
 /**
  * The lifecycle tag. A quiet outlined word, not a coloured pill: which
- * state an incident is in is a fact about process, and the screen has
- * already spent its one colour on whether the thing is down.
+ * state an incident is in is a fact about process, and the screen
+ * reserves colour for whether the thing is down.
  */
 type IncidentStatus =
   "investigating" | "identified" | "monitoring" | "resolved";
@@ -110,7 +114,7 @@ export function IncidentStatusBadge({ status }: { status: IncidentStatus }) {
     <Badge
       variant="outline"
       className={cn(
-        "px-2 py-[3px] text-[11px] font-semibold capitalize",
+        "px-2 py-[3px] text-[11px] font-medium capitalize",
         INCIDENT_STATUS_STYLES[status],
       )}
     >
@@ -121,13 +125,13 @@ export function IncidentStatusBadge({ status }: { status: IncidentStatus }) {
 
 /**
  * Severity is the one badge allowed to be red, and only at critical.
- * Major and minor are the same outline in white and grey: they are
+ * Major and minor are the same outline at two text weights: they are
  * degrees of a thing that has not taken the site down.
  */
 type IncidentSeverity = "critical" | "major" | "minor";
 
 const SEVERITY_STYLES: Record<IncidentSeverity, string> = {
-  critical: "border-destructive text-destructive",
+  critical: "border-destructive/45 bg-destructive/6 text-destructive",
   major: "border-line-tag text-foreground",
   minor: "border-line-tag text-muted-foreground",
 };

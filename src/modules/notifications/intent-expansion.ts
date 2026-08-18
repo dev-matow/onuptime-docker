@@ -5,6 +5,8 @@ import { notificationIntents } from "@/db/schema";
 import { logger } from "@/lib/logger";
 
 import { dispatchToChannels } from "./channel-service";
+import { askSuppression } from "./dispatch-policy";
+import { eventSeverity } from "./events";
 import { enqueueMemberEmails } from "./incident-emails";
 import {
   pendingIntentsSql,
@@ -77,6 +79,7 @@ export interface ExpansionResult {
 async function expandPayload(
   tx: DbClient,
   organizationId: string,
+  incidentId: string | null,
   payload: DispatchIntentPayload,
 ): Promise<number> {
   let queued = 0;
@@ -91,24 +94,77 @@ async function expandPayload(
       data: dispatch.data,
       monitorType: dispatch.monitorType ?? null,
       monitorId: dispatch.monitorId ?? null,
+      incidentId,
     });
   }
+
+  // The two audiences `dispatchToChannels` cannot speak for.
+  //
+  // Channel routing is a per-channel decision and lives in that
+  // function; the responder email and the status-page audience are
+  // neither channels nor routable, so a policy that silences an outage
+  // has to be asked about them separately or it silences a third of the
+  // notification and looks like it worked. The question is the same one,
+  // asked with this audience's own event.
+  const subjectMonitor = payload.dispatches.find(
+    (dispatch) => dispatch.monitorId,
+  );
+  const monitorId =
+    subjectMonitor?.monitorId ?? payload.subscribers?.monitorId ?? null;
+  const monitorType = subjectMonitor?.monitorType ?? null;
+
   if (payload.memberEmail) {
-    queued += await enqueueMemberEmails(
-      tx,
+    const suppressed = await askSuppression(tx, {
       organizationId,
-      payload.memberEmail,
-    );
+      event: payload.memberEmail.event,
+      causeKey: payload.memberEmail.causeKey,
+      monitorId,
+      monitorType,
+      incidentId,
+      severity: eventSeverity(payload.memberEmail.event),
+    });
+    if (!suppressed) {
+      queued += await enqueueMemberEmails(
+        tx,
+        organizationId,
+        payload.memberEmail,
+      );
+    }
   }
+
   if (payload.subscribers) {
-    queued += await enqueueSubscriberEmails(
-      tx,
+    const event = SUBSCRIBER_EVENT[payload.subscribers.kind];
+    const suppressed = await askSuppression(tx, {
       organizationId,
-      payload.subscribers,
-    );
+      event,
+      causeKey: payload.subscribers.causeKey,
+      monitorId,
+      monitorType,
+      incidentId,
+      severity: eventSeverity(event),
+    });
+    if (!suppressed) {
+      queued += await enqueueSubscriberEmails(
+        tx,
+        organizationId,
+        payload.subscribers,
+      );
+    }
   }
   return queued;
 }
+
+/** The public lifecycle event each subscriber mailing corresponds to.
+ * Held here rather than on the payload because it is the same mapping
+ * `intents.ts` inverted to build it, and two copies would drift. */
+const SUBSCRIBER_EVENT: Record<
+  "opened" | "updated" | "resolved",
+  WebhookEvent
+> = {
+  opened: "incident.opened",
+  updated: "incident.updated",
+  resolved: "incident.resolved",
+};
 
 /**
  * One intent, in one transaction: lock it, write its rows, mark it
@@ -140,6 +196,7 @@ async function expandOne(
     const queued = await expandPayload(
       tx,
       row.organizationId,
+      row.incidentId,
       row.payload as unknown as DispatchIntentPayload,
     );
 

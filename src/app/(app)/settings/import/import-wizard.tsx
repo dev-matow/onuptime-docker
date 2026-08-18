@@ -3,7 +3,6 @@
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Field,
@@ -13,18 +12,14 @@ import {
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
-import type {
-  ImportOutcome,
-  ImportReport,
-  ReportEntry,
-  SourceKind,
-} from "@/modules/importers/kuma";
+import type { ImportReport } from "@/modules/importers/kuma";
 
 import {
   previewKumaImportAction,
   runKumaImportAction,
   type KumaImportPreview,
 } from "./actions";
+import { ReportBody } from "./report-view";
 
 /**
  * Choose a file, read what will happen, confirm.
@@ -40,70 +35,7 @@ import {
  * directory of half-imported databases on the server.
  */
 
-const OUTCOME_LABEL: Record<ImportOutcome, string> = {
-  imported: "imported",
-  transformed: "imported, with changes",
-  skipped: "not imported",
-  unsupported: "no Vigil equivalent",
-};
-
-const OUTCOME_VARIANT: Record<
-  ImportOutcome,
-  "default" | "secondary" | "outline" | "destructive"
-> = {
-  imported: "default",
-  transformed: "secondary",
-  skipped: "destructive",
-  unsupported: "outline",
-};
-
-const KIND_LABEL: Record<SourceKind, string> = {
-  monitor: "Monitors",
-  notification: "Notification providers",
-  "notification-link": "Monitor-notification links",
-  "status-page": "Status pages",
-  "status-page-group": "Status page sections",
-  "status-page-monitor": "Monitors on a status page",
-  tag: "Tags",
-  "tag-application": "Tag applications",
-  maintenance: "Maintenance windows",
-  "maintenance-link": "Monitors in maintenance",
-  "docker-host": "Docker hosts",
-  "remote-browser": "Remote browsers",
-  proxy: "Proxies",
-  "heartbeat-history": "Heartbeat history",
-};
-
-function EntryList({ entries }: { entries: ReportEntry[] }) {
-  return (
-    <ul className="flex flex-col gap-3">
-      {entries.map((entry) => (
-        <li key={`${entry.kind}:${entry.sourceId}`} className="text-sm">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-medium">{entry.label}</span>
-            <Badge variant={OUTCOME_VARIANT[entry.outcome]}>
-              {OUTCOME_LABEL[entry.outcome]}
-            </Badge>
-          </div>
-          <p className="text-muted-foreground mt-0.5">{entry.detail}</p>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
 function Summary({ report }: { report: ImportReport }) {
-  const monitors = report.entries.filter((entry) => entry.kind === "monitor");
-  const refused = monitors.filter((entry) => entry.monitorId === null);
-  const changed = report.entries.filter(
-    (entry) => entry.kind !== "monitor" && entry.outcome !== "imported",
-  );
-
-  const byKind = new Map<SourceKind, ReportEntry[]>();
-  for (const entry of changed) {
-    byKind.set(entry.kind, [...(byKind.get(entry.kind) ?? []), entry]);
-  }
-
   return (
     <div className="flex flex-col gap-6">
       {report.drift.length > 0 && (
@@ -123,49 +55,11 @@ function Summary({ report }: { report: ImportReport }) {
           </p>
         </div>
       )}
-
-      <p className="text-sm">
-        <strong className="text-lg font-semibold">
-          {report.totals.monitorsCreated}
-        </strong>{" "}
-        of {monitors.length} monitors
-        {report.status === "preview" ? " will be imported" : " imported"}.{" "}
-        {refused.length > 0 && (
-          <>
-            {refused.length}{" "}
-            {refused.length === 1 ? "does not come" : "do not come"} across,
-            each is listed below with the rule that refused it.
-          </>
-        )}
-      </p>
-
-      {refused.length > 0 && (
-        <section className="flex flex-col gap-3">
-          <h3 className="text-sm font-medium">
-            Monitors that will not be imported
-          </h3>
-          <EntryList entries={refused} />
-        </section>
-      )}
-
-      {[...byKind.entries()].map(([kind, entries]) => (
-        <details key={kind} className="border-border border-t pt-3">
-          <summary className="cursor-pointer text-sm font-medium">
-            {KIND_LABEL[kind]}{" "}
-            <span className="text-muted-foreground font-normal">
-              ({entries.length})
-            </span>
-          </summary>
-          <div className="mt-3">
-            <EntryList entries={entries.slice(0, 25)} />
-            {entries.length > 25 && (
-              <p className="text-muted-foreground mt-2 text-sm">
-                and {entries.length - 25} more of the same.
-              </p>
-            )}
-          </div>
-        </details>
-      ))}
+      <ReportBody
+        status={report.status}
+        totals={report.totals}
+        entries={report.entries}
+      />
     </div>
   );
 }

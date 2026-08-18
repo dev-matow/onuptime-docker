@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import { NavUser } from "@/components/nav-user";
+import { VigilMark } from "@/components/vigil-mark";
 import {
   Sidebar,
   SidebarContent,
@@ -24,9 +25,10 @@ import { cn } from "@/lib/utils";
  * Monitors and Incidents say nothing the words did not already say, and
  * seven of them is most of the decoration in the console.
  *
- * The marker in their place is the ladder's square: filled where you
- * are, hollow where you are not. It is one mark doing two jobs, and it
- * still occupies the rail when the sidebar collapses to it.
+ * The marker in their place is a small disc, the same round mark the
+ * status vocabulary uses: filled where you are, a hollow ring where you
+ * are not. It is one mark doing two jobs, and it still occupies the
+ * rail when the sidebar collapses to it.
  */
 const NAV_ITEMS = [
   { title: "Dashboard", href: "/dashboard" },
@@ -50,6 +52,15 @@ export function AppSidebar({
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
+        {/* The brand lockup, the same one the public site wears: the mark
+            and a widely tracked wordmark. The wordmark yields when the
+            sidebar collapses to its rail. */}
+        <div className="flex h-9 items-center gap-2.5 px-2 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
+          <VigilMark className="h-[19px] shrink-0" />
+          <span className="text-[13px] font-medium tracking-[0.28em] group-data-[collapsible=icon]:hidden">
+            VIGIL
+          </span>
+        </div>
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
@@ -68,10 +79,10 @@ export function AppSidebar({
                         <span
                           aria-hidden
                           className={cn(
-                            "inline-block size-1.5 shrink-0 border",
+                            "inline-block size-1.5 shrink-0 rounded-full",
                             active
-                              ? "border-foreground bg-foreground"
-                              : "border-faint",
+                              ? "bg-foreground"
+                              : "border-line-quiet border",
                           )}
                         />
                         <span>{item.title}</span>

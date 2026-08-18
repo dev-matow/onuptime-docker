@@ -32,48 +32,48 @@ never sits on a fleet reporting nothing. See
 
 40 types: 37 run on probes, 3 run only on the controller.
 
-| Type             | Kind      | Probe | Remote probe | Assertions | Secrets declared | Config preserved | Export/import | Unit test | Protocol fixture |
-| ---------------- | --------- | ----- | ------------ | ---------- | ---------------- | ---------------- | ------------- | --------- | ---------------- |
-| `dns`            | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | -                |
-| `docker`         | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
-| `domain-expiry`  | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
-| `elasticsearch`  | active    | yes   | yes          | yes        | yes              | yes              | yes           | yes       | yes              |
-| `ftp`            | active    | yes   | yes          | yes        | yes              | yes              | yes           | yes       | yes              |
-| `gamedig`        | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
-| `globalping`     | active    | yes   | yes          | yes        | yes              | yes              | yes           | yes       | yes              |
-| `group`          | aggregate | yes   | -            | yes        | -                | yes              | yes           | yes       | -                |
-| `grpc`           | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
-| `http`           | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
-| `imap`           | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
-| `json-query`     | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
-| `kafka-producer` | active    | yes   | yes          | yes        | yes              | yes              | yes           | yes       | yes              |
-| `ldap`           | active    | yes   | yes          | yes        | yes              | yes              | yes           | yes       | yes              |
-| `manual`         | manual    | yes   | -            | yes        | -                | yes              | yes           | yes       | -                |
-| `memcached`      | active    | yes   | yes          | yes        | yes              | yes              | yes           | yes       | yes              |
-| `mongodb`        | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
-| `mqtt`           | active    | yes   | yes          | yes        | yes              | yes              | yes           | yes       | yes              |
-| `mysql`          | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
-| `ntp`            | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
-| `oracledb`       | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
-| `ping`           | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
-| `postgres`       | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
-| `push`           | passive   | yes   | -            | yes        | yes              | yes              | yes           | yes       | -                |
-| `rabbitmq`       | active    | yes   | yes          | yes        | yes              | yes              | yes           | yes       | yes              |
-| `radius`         | active    | yes   | yes          | yes        | yes              | yes              | yes           | yes       | yes              |
-| `real-browser`   | active    | yes   | yes          | yes        | yes              | yes              | yes           | yes       | yes              |
-| `redis`          | active    | yes   | yes          | yes        | yes              | yes              | yes           | yes       | yes              |
-| `sip`            | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
-| `smtp`           | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
-| `snmp`           | active    | yes   | yes          | yes        | yes              | yes              | yes           | yes       | yes              |
-| `sqlserver`      | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
-| `ssh`            | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
-| `steam`          | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
-| `system-service` | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
-| `tailscale-ping` | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
-| `tcp`            | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
-| `tls-expiry`     | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
-| `udp`            | active    | yes   | yes          | yes        | -                | yes              | yes           | yes       | yes              |
-| `websocket`      | active    | yes   | yes          | yes        | yes              | yes              | yes           | yes       | yes              |
+| Type             | Kind      | Probe | Remote probe | Assertions | Secrets declared | Configurable | Config preserved | Export/import | Unit test | Protocol fixture |
+| ---------------- | --------- | ----- | ------------ | ---------- | ---------------- | ------------ | ---------------- | ------------- | --------- | ---------------- |
+| `dns`            | active    | yes   | yes          | yes        | -                | yes          | yes              | yes           | yes       | -                |
+| `docker`         | active    | yes   | yes          | yes        | -                | yes          | yes              | yes           | yes       | yes              |
+| `domain-expiry`  | active    | yes   | yes          | yes        | -                | yes          | yes              | yes           | yes       | yes              |
+| `elasticsearch`  | active    | yes   | yes          | yes        | yes              | yes          | yes              | yes           | yes       | yes              |
+| `ftp`            | active    | yes   | yes          | yes        | yes              | yes          | yes              | yes           | yes       | yes              |
+| `gamedig`        | active    | yes   | yes          | yes        | -                | yes          | yes              | yes           | yes       | yes              |
+| `globalping`     | active    | yes   | yes          | yes        | yes              | yes          | yes              | yes           | yes       | yes              |
+| `group`          | aggregate | yes   | -            | yes        | -                | -            | yes              | yes           | yes       | -                |
+| `grpc`           | active    | yes   | yes          | yes        | -                | yes          | yes              | yes           | yes       | yes              |
+| `http`           | active    | yes   | yes          | yes        | -                | -            | yes              | yes           | yes       | yes              |
+| `imap`           | active    | yes   | yes          | yes        | -                | yes          | yes              | yes           | yes       | yes              |
+| `json-query`     | active    | yes   | yes          | yes        | -                | yes          | yes              | yes           | yes       | yes              |
+| `kafka-producer` | active    | yes   | yes          | yes        | yes              | yes          | yes              | yes           | yes       | yes              |
+| `ldap`           | active    | yes   | yes          | yes        | yes              | yes          | yes              | yes           | yes       | yes              |
+| `manual`         | manual    | yes   | -            | yes        | -                | yes          | yes              | yes           | yes       | -                |
+| `memcached`      | active    | yes   | yes          | yes        | yes              | yes          | yes              | yes           | yes       | yes              |
+| `mongodb`        | active    | yes   | yes          | yes        | -                | -            | yes              | yes           | yes       | yes              |
+| `mqtt`           | active    | yes   | yes          | yes        | yes              | yes          | yes              | yes           | yes       | yes              |
+| `mysql`          | active    | yes   | yes          | yes        | -                | -            | yes              | yes           | yes       | yes              |
+| `ntp`            | active    | yes   | yes          | yes        | -                | yes          | yes              | yes           | yes       | yes              |
+| `oracledb`       | active    | yes   | yes          | yes        | -                | -            | yes              | yes           | yes       | yes              |
+| `ping`           | active    | yes   | yes          | yes        | -                | yes          | yes              | yes           | yes       | yes              |
+| `postgres`       | active    | yes   | yes          | yes        | -                | -            | yes              | yes           | yes       | yes              |
+| `push`           | passive   | yes   | -            | yes        | yes              | yes          | yes              | yes           | yes       | -                |
+| `rabbitmq`       | active    | yes   | yes          | yes        | yes              | yes          | yes              | yes           | yes       | yes              |
+| `radius`         | active    | yes   | yes          | yes        | yes              | yes          | yes              | yes           | yes       | yes              |
+| `real-browser`   | active    | yes   | yes          | yes        | yes              | yes          | yes              | yes           | yes       | yes              |
+| `redis`          | active    | yes   | yes          | yes        | yes              | yes          | yes              | yes           | yes       | yes              |
+| `sip`            | active    | yes   | yes          | yes        | -                | yes          | yes              | yes           | yes       | yes              |
+| `smtp`           | active    | yes   | yes          | yes        | -                | -            | yes              | yes           | yes       | yes              |
+| `snmp`           | active    | yes   | yes          | yes        | yes              | yes          | yes              | yes           | yes       | yes              |
+| `sqlserver`      | active    | yes   | yes          | yes        | -                | -            | yes              | yes           | yes       | yes              |
+| `ssh`            | active    | yes   | yes          | yes        | -                | yes          | yes              | yes           | yes       | yes              |
+| `steam`          | active    | yes   | yes          | yes        | -                | -            | yes              | yes           | yes       | yes              |
+| `system-service` | active    | yes   | yes          | yes        | -                | -            | yes              | yes           | yes       | yes              |
+| `tailscale-ping` | active    | yes   | yes          | yes        | -                | yes          | yes              | yes           | yes       | yes              |
+| `tcp`            | active    | yes   | yes          | yes        | -                | -            | yes              | yes           | yes       | yes              |
+| `tls-expiry`     | active    | yes   | yes          | yes        | -                | yes          | yes              | yes           | yes       | yes              |
+| `udp`            | active    | yes   | yes          | yes        | -                | yes          | yes              | yes           | yes       | yes              |
+| `websocket`      | active    | yes   | yes          | yes        | yes              | yes          | yes              | yes           | yes       | yes              |
 
 ## Protocol-fixture exemptions
 

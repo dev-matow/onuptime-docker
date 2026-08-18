@@ -274,7 +274,7 @@ export default async function PublicStatusPage(
         {page.showBranding && (
           <footer className="text-muted-foreground border-t pt-6 text-center text-xs">
             <span className="inline-flex items-center gap-1.5">
-              <VigilMark className="h-[11px]" />
+              <VigilMark className="h-[16px]" />
               Powered by Vigil
             </span>
           </footer>

@@ -1,5 +1,6 @@
 import type { DbClient } from "@/db";
 import { logger } from "@/lib/logger";
+import type { ProviderNet } from "@/modules/notifications/providers";
 import { runNotificationDelivery } from "@/worker/jobs/notification-delivery";
 
 /**
@@ -31,13 +32,28 @@ import { runNotificationDelivery } from "@/worker/jobs/notification-delivery";
  * Bounded by what the expansion actually created: a transition that
  * queued three messages drains three, not a whole batch. Zero drained is
  * normal and means the worker tick got there first.
+ *
+ * `net` is the same network seam every other delivery entry takes, and
+ * it is here for the same reason `testChannel` and
+ * `runNotificationDelivery` have one: without it this function is the
+ * one delivery path a test cannot intercept. It fell back to the real
+ * transport, so a test that only wanted to prove the row was enqueued
+ * also opened a socket to whatever webhook the fixture named - an
+ * unbounded `dns.lookup` plus a provider hop budgeted at ten seconds,
+ * inside a test whose own timeout is five. Production callers pass
+ * nothing and get exactly what they got before.
  */
 export async function dispatchIntentsNow(
   db: DbClient,
   organizationId: string,
+  net: ProviderNet = {},
 ): Promise<void> {
   try {
-    await runNotificationDelivery(db, { organizationId, inlineBound: true });
+    await runNotificationDelivery(db, {
+      organizationId,
+      inlineBound: true,
+      net,
+    });
   } catch (error) {
     logger.warn(
       { organizationId, err: error },

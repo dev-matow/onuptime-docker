@@ -28,7 +28,7 @@ export function SettingsNav() {
       aria-label="Settings sections"
       className="[scrollbar-width:none] overflow-x-auto border-b [&::-webkit-scrollbar]:hidden"
     >
-      <ul className="-mb-px flex w-max gap-4">
+      <ul className="-mb-px flex w-max gap-3">
         {TABS.map((tab) => {
           const active = tab.exact
             ? pathname === tab.href
@@ -39,7 +39,7 @@ export function SettingsNav() {
                 href={tab.href}
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "inline-block border-b-2 px-1 pb-2 text-sm whitespace-nowrap transition-colors",
+                  "inline-block border-b-2 px-1 pb-2 text-[13.5px] whitespace-nowrap transition-colors",
                   active
                     ? "border-foreground font-medium"
                     : "text-muted-foreground hover:text-foreground border-transparent",

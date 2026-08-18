@@ -85,14 +85,26 @@ export default async function MonitorsPage() {
           <Card className="gap-0 py-0">
             <Table>
               <TableHeader>
+                {/* Phones keep the columns an on-call engineer acts on:
+                    status, name, uptime. The rest returns with room. */}
                 <TableRow className="hover:bg-transparent">
-                  <TableHead className="w-32 pl-4">Status</TableHead>
+                  <TableHead className="w-10 pl-4 sm:w-32">
+                    <span className="max-sm:sr-only">Status</span>
+                  </TableHead>
                   <TableHead>Name</TableHead>
-                  <TableHead>URL</TableHead>
-                  <TableHead className="text-right">Uptime · 24h</TableHead>
-                  <TableHead className="text-right">Avg response</TableHead>
-                  <TableHead className="text-right">Interval</TableHead>
-                  <TableHead className="text-right">Last checked</TableHead>
+                  <TableHead className="hidden lg:table-cell">URL</TableHead>
+                  <TableHead className="text-right">
+                    Uptime<span className="hidden sm:inline"> · 24h</span>
+                  </TableHead>
+                  <TableHead className="hidden text-right md:table-cell">
+                    Avg response
+                  </TableHead>
+                  <TableHead className="hidden text-right md:table-cell">
+                    Interval
+                  </TableHead>
+                  <TableHead className="hidden text-right sm:table-cell">
+                    Last checked
+                  </TableHead>
                   <TableHead className="w-12 pr-4 text-right">
                     <span className="sr-only">Actions</span>
                   </TableHead>
@@ -106,17 +118,18 @@ export default async function MonitorsPage() {
                         status={monitor.currentStatus}
                         paused={monitor.paused}
                         className="text-xs"
+                        compactLabel
                       />
                     </TableCell>
                     <TableCell>
                       <Link
                         href={`/monitors/${monitor.id}`}
-                        className="font-medium hover:underline"
+                        className="block max-w-[44vw] truncate font-medium hover:underline sm:max-w-none"
                       >
                         {monitor.name}
                       </Link>
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="hidden lg:table-cell">
                       <span className="text-muted-foreground block max-w-56 truncate font-mono">
                         {monitor.url}
                       </span>
@@ -124,15 +137,15 @@ export default async function MonitorsPage() {
                     <TableCell className="text-right font-mono tabular-nums">
                       {formatUptime(monitor.uptime24hPct)}
                     </TableCell>
-                    <TableCell className="text-right font-mono tabular-nums">
+                    <TableCell className="hidden text-right font-mono tabular-nums md:table-cell">
                       {monitor.avgResponseMs === null
                         ? "-"
                         : formatDuration(monitor.avgResponseMs)}
                     </TableCell>
-                    <TableCell className="text-muted-foreground text-right font-mono tabular-nums">
+                    <TableCell className="text-muted-foreground hidden text-right font-mono tabular-nums md:table-cell">
                       {formatDuration(monitor.intervalSeconds * 1000)}
                     </TableCell>
-                    <TableCell className="text-muted-foreground text-right">
+                    <TableCell className="text-muted-foreground hidden text-right sm:table-cell">
                       {monitor.lastCheckedAt
                         ? formatRelativeTime(monitor.lastCheckedAt)
                         : "-"}

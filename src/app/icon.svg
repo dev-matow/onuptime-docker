@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 31 31" width="31" height="31" shape-rendering="crispEdges">
-  <rect width="31" height="31" rx="7" fill="#0a0a0a"/>
-  <path transform="translate(3 10)" fill="#fafafa" d="M9 0h7v2h-7zM6 1h3v1h-3zM16 1h3v1h-3zM4 2h2v1h-2zM19 2h2v1h-2zM2 3h2v1h-2zM11 3h3v5h-3zM21 3h2v1h-2zM1 4h2v1h-2zM10 4h1v3h-1zM14 4h1v3h-1zM22 4h2v1h-2zM0 5h2v1h-2zM23 5h2v1h-2zM1 6h2v1h-2zM22 6h2v1h-2zM2 7h2v1h-2zM21 7h2v1h-2zM4 8h2v1h-2zM19 8h2v1h-2zM6 9h13v1h-13zM9 10h7v1h-7z"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <rect width="64" height="64" rx="14" fill="#0a0a0a"/>
+  <path transform="translate(19.5 12) scale(0.3125)" fill="#fafafa" d="M8 4L30 14C37 46 37 82 30 114L8 124C17 82 17 46 8 4ZM72 4L50 14C43 46 43 82 50 114L72 124C63 82 63 46 72 4Z"/>
 </svg>

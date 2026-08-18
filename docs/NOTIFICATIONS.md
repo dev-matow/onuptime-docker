@@ -226,6 +226,26 @@ exhausted; attempts in between are timeline entries. Probe quorum events
 are edge-triggered on the outcome class changing, so a monitor stuck in
 `partial_failure` for an hour is one message, not one per round.
 
+### Two questions asked before the query above
+
+Since 1.20.0 the dispatch path asks a registry two questions before it
+resolves any of the above, and Core answers both with "no opinion":
+
+1. **May anything go out about this?** A commercial maintenance window
+   answers no, and that covers the responder email and the status-page
+   audience as well as the channels.
+2. **Which channels?** A commercial routing policy may name them
+   explicitly, replacing the subscription query for that dispatch.
+
+The registry is `modules/notifications/dispatch-policy.ts` and it is
+Core: with nothing registered, which is what Core is, `resolveRoutes`
+runs exactly as it is described above and this paragraph changes nothing
+about Core's behaviour. A policy that throws degrades toward sending, not
+toward silence.
+
+See `docs/ALERT-ROUTING.md` and `docs/MAINTENANCE.md` for the commercial
+half.
+
 ## Credentials at rest
 
 Channel secrets are encrypted (AES-256-GCM) under a key derived from

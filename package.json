@@ -1,6 +1,6 @@
 {
   "name": "vigil-core",
-  "version": "1.18.3",
+  "version": "1.21.0",
   "private": false,
   "license": "Apache-2.0",
   "scripts": {
@@ -30,7 +30,10 @@
     "dod": "node scripts/dod-matrix.mjs",
     "kuma:matrix": "node scripts/kuma-matrix.mjs",
     "kuma:check": "node scripts/kuma-matrix.mjs --check",
+    "migration:matrix": "node scripts/migration-matrix.mjs",
+    "migration:check": "node scripts/migration-matrix.mjs --check",
     "bench:check": "node scripts/bench-check.mjs",
+    "bench:tables": "node scripts/bench/scaling-tables.mjs",
     "dod:check": "node scripts/dod-matrix.mjs --check",
     "bench:channels": "tsx scripts/bench/channel-fanout.ts",
     "bench:queue": "tsx scripts/bench/queue-depth.ts"

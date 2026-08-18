@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { z } from "zod";
 
 import {
   CHECK_TYPE_DESCRIPTORS,
@@ -6,11 +7,101 @@ import {
   findDescriptor,
   UNSCHEDULED_CHECK_TYPE_IDS,
 } from "@/modules/monitors/types/catalog";
-import { redactTargetCredentials } from "@/modules/monitors/spec";
+import {
+  maskTargetSecret,
+  redactTargetCredentials,
+  restoreTargetSecret,
+} from "@/modules/monitors/spec";
+import { SECRET_MASK } from "@/modules/monitors/types/config";
 import { connectionErrorMessage } from "@/modules/monitors/types/probes/guard";
 import { isScheduledKind } from "@/modules/monitors/types/contract";
 import { CHECK_TYPES } from "@/modules/monitors/types/registry";
 import { CHECK_TYPE_SPECS } from "@/modules/monitors/types/specs";
+
+/**
+ * A stored config schema unwrapped to its object shape.
+ *
+ * `.superRefine` and friends wrap the object, and the wrapper has no
+ * shape of its own — SNMP's four cross-field rules are the reason this
+ * has to walk rather than read `.shape` directly. Types that store no
+ * blob at all (`flatColumnsOnly`, `groupStoredSchema`) are a transform
+ * over `z.unknown()` with no shape anywhere, and correctly yield null.
+ */
+function storedConfigShape(schema: unknown): Record<string, z.ZodType> | null {
+  let node = schema as Record<string, unknown> | null;
+  for (let depth = 0; depth < 30 && node; depth++) {
+    const shape = (node as { shape?: unknown }).shape;
+    if (shape && typeof shape === "object") {
+      return shape as Record<string, z.ZodType>;
+    }
+    const def =
+      (node._zod as { def?: Record<string, unknown> } | undefined)?.def ??
+      (node._def as Record<string, unknown> | undefined) ??
+      (node.def as Record<string, unknown> | undefined);
+    if (!def) return null;
+    node = (def.innerType ?? def.in ?? def.schema ?? null) as Record<
+      string,
+      unknown
+    > | null;
+  }
+  return null;
+}
+
+function storedConfigKeys(schema: unknown): Set<string> {
+  return new Set(Object.keys(storedConfigShape(schema) ?? {}));
+}
+
+/** The default a key carries, or undefined when it has none. */
+function schemaDefault(schema: unknown): unknown {
+  let node = schema as Record<string, unknown> | null;
+  for (let depth = 0; depth < 30 && node; depth++) {
+    const def =
+      (node._zod as { def?: Record<string, unknown> } | undefined)?.def ??
+      (node._def as Record<string, unknown> | undefined) ??
+      (node.def as Record<string, unknown> | undefined);
+    if (!def) return undefined;
+    if (def.type === "default" || def.typeName === "ZodDefault") {
+      const value = def.defaultValue;
+      return typeof value === "function" ? (value as () => unknown)() : value;
+    }
+    node = (def.innerType ?? def.in ?? def.schema ?? null) as Record<
+      string,
+      unknown
+    > | null;
+  }
+  return undefined;
+}
+
+/**
+ * What an emptied box must submit for this key, from the schema alone.
+ *
+ * Three cases, and the middle one is the one worth stating: a key is
+ * given `"empty"` only when the empty string is its own default, so
+ * blanking the box and never touching it agree. A key whose default is
+ * something else — `jsonPath` defaulting to `status` — takes `"omit"`,
+ * because there a blank box means "the default", and submitting `""`
+ * would create a monitor asserting that the health endpoint returns an
+ * empty string.
+ */
+function derivedEmptyValue(key: z.ZodType): "null" | "empty" | "omit" {
+  if (key.safeParse(null).success) return "null";
+  return schemaDefault(key) === "" ? "empty" : "omit";
+}
+
+/**
+ * The config keys each legacy {@link FormSection} writes.
+ *
+ * Four sections predate `configFields` and build the blob themselves in
+ * `buildConfig()`. Stated here so the coverage rule can credit them,
+ * and stated once so that a section which stops writing a key cannot
+ * quietly leave that key unreachable.
+ */
+const FORM_SECTION_CONFIG_KEYS: Partial<Record<string, readonly string[]>> = {
+  dnsRecord: ["recordType", "expectedValue"],
+  expiryWarning: ["warnDays"],
+  heartbeatGrace: ["graceSeconds"],
+  manualStatus: ["status", "note"],
+};
 
 /**
  * The conformance suite.
@@ -110,6 +201,160 @@ describe("check type registry conformance", () => {
     const keys = type.descriptor.facts.map((f) => f.key);
     expect(new Set(keys).size).toBe(keys.length);
   });
+
+  /**
+   * The rule that would have caught the gap this section exists for.
+   *
+   * `buildConfig()` used to write the config blob for four types and
+   * return null for the rest, so twenty-four types stored settings no
+   * control could reach. Nothing failed, because nothing compared the
+   * dialog against the registry. A JSON-query monitor checked a path
+   * nobody chose; a Redis monitor with no password box answered `PING`
+   * unauthenticated, got an error rather than a pong, and read **up**.
+   *
+   * These four assertions are that comparison. They are per-type and
+   * mechanical: the forty-first type inherits them without anyone
+   * remembering to write them, which is the point of a registry.
+   */
+  it.each(entries)(
+    "%s: every stored config field has a form control",
+    (_id, type) => {
+      const stored = storedConfigKeys(type.storedSchema);
+      const declared = new Set(
+        (type.descriptor.configFields ?? []).map((f) => f.name),
+      );
+      const omitted = new Set(
+        Object.keys(type.descriptor.configFieldsOmitted ?? {}),
+      );
+      // The four sections that predate `configFields` write the blob
+      // themselves; a key one of them owns is reachable too.
+      const legacy = new Set(
+        type.descriptor.form.flatMap(
+          (section) => FORM_SECTION_CONFIG_KEYS[section] ?? [],
+        ),
+      );
+      // A field an operator cannot set is a monitor an operator cannot
+      // fix — and, for most of these types, a healthy server reported
+      // as down.
+      expect(
+        [...stored].filter(
+          (key) => !declared.has(key) && !omitted.has(key) && !legacy.has(key),
+        ),
+      ).toEqual([]);
+    },
+  );
+
+  it.each(entries)(
+    "%s: declares no control for a key it does not store",
+    (_id, type) => {
+      const stored = storedConfigKeys(type.storedSchema);
+      expect(
+        (type.descriptor.configFields ?? [])
+          .map((f) => f.name)
+          .filter((name) => !stored.has(name)),
+      ).toEqual([]);
+    },
+  );
+
+  it.each(entries)("%s: every secret renders as a secret", (_id, type) => {
+    // Both directions. A credential in a text box is shoulder-readable
+    // and offered to a password manager as a login; a public identifier
+    // behind dots is a field the operator cannot check they typed right.
+    const secrets = new Set(type.secretFields ?? []);
+    for (const field of type.descriptor.configFields ?? []) {
+      expect([field.name, field.control.kind === "secret"]).toEqual([
+        field.name,
+        secrets.has(field.name),
+      ]);
+    }
+  });
+
+  it.each(entries)(
+    "%s: every control's empty value is one the schema takes",
+    (_id, type) => {
+      // `emptyValue` is derived from the schema, not typed by hand, and
+      // this is where that is enforced. Getting it wrong fails a save
+      // over a blank box, or — worse — writes an empty string where the
+      // operator meant "use the default".
+      const shape = storedConfigShape(type.storedSchema);
+      for (const field of type.descriptor.configFields ?? []) {
+        if (field.control.kind === "boolean") continue;
+        const key = shape?.[field.name];
+        if (!key) continue;
+        expect([field.name, field.emptyValue ?? "omit"]).toEqual([
+          field.name,
+          derivedEmptyValue(key),
+        ]);
+      }
+    },
+  );
+
+  it.each(entries)(
+    "%s: a control that cannot render blank starts on the schema's default",
+    (_id, type) => {
+      // The bug this exists for shipped in the first version of the
+      // config renderer and was caught by opening the dialog, not by a
+      // test. SNMP's `version` defaults to `2c`; on create there was no
+      // stored value, so the select rendered empty, and the community
+      // field, which applies only to v1 and v2c, was conditional on it
+      // and never appeared. A brand new SNMP monitor could not be given
+      // the one credential it has - the exact failure the whole change
+      // set out to remove.
+      // The EFFECTIVE default, taken by parsing an empty config through
+      // the whole schema. Reading `ZodDefault` alone is not enough:
+      // several types supply their default with `.nullish().transform()`
+      // instead, and RADIUS's `expectAccept` is one, so a rule that only
+      // understood `.default()` would have called it undeclared.
+      const parsed = type.storedSchema.safeParse({});
+      const effective = parsed.success
+        ? (parsed.data as Record<string, unknown>)
+        : {};
+      const shape = storedConfigShape(type.storedSchema);
+      for (const field of type.descriptor.configFields ?? []) {
+        const key = shape?.[field.name];
+        if (!key) continue;
+        const fallback = effective[field.name] ?? schemaDefault(key);
+        // Blank is a legal answer for a select that offers an empty
+        // option, and for text and number controls, which carry a
+        // placeholder and an `emptyValue` instead.
+        const mustRender =
+          field.control.kind === "boolean" ||
+          (field.control.kind === "select" &&
+            !field.control.options.some((o) => o.value === "") &&
+            fallback !== undefined &&
+            fallback !== null);
+        if (!mustRender) continue;
+        expect([field.name, field.defaultValue]).toEqual([
+          field.name,
+          field.control.kind === "boolean"
+            ? fallback === true
+            : String(fallback),
+        ]);
+      }
+    },
+  );
+
+  it.each(entries)(
+    "%s: every select option is a value the schema accepts",
+    (_id, type) => {
+      const shape = storedConfigShape(type.storedSchema);
+      for (const field of type.descriptor.configFields ?? []) {
+        if (field.control.kind !== "select") continue;
+        const key = shape?.[field.name];
+        if (!key) continue;
+        for (const option of field.control.options) {
+          // "" is the renderer's "not set" and is submitted as null or
+          // as an omission, never as the empty string itself.
+          if (option.value === "") continue;
+          expect([field.name, option.value, true]).toEqual([
+            field.name,
+            option.value,
+            key.safeParse(option.value).success,
+          ]);
+        }
+      }
+    },
+  );
 
   it.each(entries)(
     "%s: a required port with no default is asked for in the form",
@@ -231,6 +476,85 @@ describe("target redaction", () => {
     ["db.example.com", "db.example.com"],
   ])("redacts %s", (input, expected) => {
     expect(redactTargetCredentials(input)).toBe(expected);
+  });
+});
+
+/**
+ * The edit dialog's half of the same rule.
+ *
+ * Redaction is right for a label and wrong for a form: an operator who
+ * opens the dialog to change a port must not save the target back with
+ * its user name gone. So the form is handed the target with only the
+ * password replaced, and `updateMonitor` puts the stored one back when
+ * the sentinel comes home untouched.
+ */
+describe("target secret masking", () => {
+  it.each([
+    [
+      "postgres://app:hunter2@db.example.com:5432/prod",
+      `postgres://app:${SECRET_MASK}@db.example.com:5432/prod`,
+    ],
+    // No password to mask. A bare user name is configuration, and hiding
+    // it would remove something the operator needs in order to edit.
+    [
+      "postgres://app@db.example.com:5432/prod",
+      "postgres://app@db.example.com:5432/prod",
+    ],
+    [
+      "postgres://db.example.com:5432/prod",
+      "postgres://db.example.com:5432/prod",
+    ],
+    ["https://example.com/a@b", "https://example.com/a@b"],
+    ["db.example.com", "db.example.com"],
+  ])("masks %s", (input, expected) => {
+    expect(maskTargetSecret(input)).toBe(expected);
+  });
+
+  it("never leaves the real password anywhere in the masked target", () => {
+    const masked = maskTargetSecret(
+      "postgres://app:hunter2@db.example.com:5432/prod",
+    );
+    expect(masked).not.toContain("hunter2");
+  });
+
+  it("restores the stored password when the mask comes back untouched", () => {
+    const stored = "postgres://app:hunter2@db.example.com:5432/prod";
+    expect(restoreTargetSecret(maskTargetSecret(stored), stored)).toBe(stored);
+  });
+
+  it("restores around an edit to the rest of the target", () => {
+    const stored = "postgres://app:hunter2@db.example.com:5432/prod";
+    // The operator changed the host and the database but did not retype
+    // the password. That is the case masking exists for.
+    const edited = `postgres://app:${SECRET_MASK}@db2.example.com:5432/staging`;
+    expect(restoreTargetSecret(edited, stored)).toBe(
+      "postgres://app:hunter2@db2.example.com:5432/staging",
+    );
+  });
+
+  it("takes a retyped password over the stored one", () => {
+    const stored = "postgres://app:hunter2@db.example.com:5432/prod";
+    const retyped = "postgres://app:correct-horse@db.example.com:5432/prod";
+    expect(restoreTargetSecret(retyped, stored)).toBe(retyped);
+  });
+
+  it("clears the password when the operator removes it", () => {
+    const stored = "postgres://app:hunter2@db.example.com:5432/prod";
+    const cleared = "postgres://app@db.example.com:5432/prod";
+    expect(restoreTargetSecret(cleared, stored)).toBe(cleared);
+  });
+
+  /**
+   * The invariant the sentinel exists to hold. With nothing stored to
+   * restore — an import into a fresh organization — writing the mask
+   * through would dial a real server with `__vigil_unchanged_secret__`
+   * as its password.
+   */
+  it("drops the sentinel rather than writing it when there is nothing to restore", () => {
+    const masked = `postgres://app:${SECRET_MASK}@db.example.com:5432/prod`;
+    const restored = restoreTargetSecret(masked, null);
+    expect(restored).toBe("postgres://app@db.example.com:5432/prod");
+    expect(restored).not.toContain(SECRET_MASK);
   });
 });
 

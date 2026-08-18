@@ -11,6 +11,7 @@ import {
 } from "@/modules/monitors/portability";
 import type { CreateMonitorInput } from "@/modules/monitors/schemas";
 import { createMonitor, setMonitorPaused } from "@/modules/monitors/service";
+import { maskTargetSecret, restoreTargetSecret } from "@/modules/monitors/spec";
 import { SECRET_MASK } from "@/modules/monitors/types/config";
 import { CHECK_TYPE_SPECS } from "@/modules/monitors/types/specs";
 
@@ -260,7 +261,15 @@ describe("every registered type survives an export and re-import", () => {
       .where(eq(monitors.id, report.outcomes[0]!.monitorId!));
 
     expect(copy?.checkType).toBe(original.checkType);
-    expect(copy?.url).toBe(original.url);
+    // The target round-trips except for the password inside it. A
+    // `postgres` or `sqlserver` target is a connection string, so it
+    // carries a credential exactly like `config` does, and it follows
+    // the same rule the config blob has always followed here: the user
+    // name is configuration and travels, the password does not. Targets
+    // with no userinfo — every other type — are unchanged by this.
+    expect(copy?.url).toBe(
+      restoreTargetSecret(maskTargetSecret(original.url), null),
+    );
     expect(copy?.port).toBe(original.port);
     expect(copy?.intervalSeconds).toBe(original.intervalSeconds);
     expect(copy?.timeoutMs).toBe(original.timeoutMs);
@@ -283,6 +292,45 @@ describe("every registered type survives an export and re-import", () => {
 });
 
 describe("secrets never travel in an export", () => {
+  it("masks a credential carried inside the target itself", async () => {
+    const actor = await createTestOrg();
+    const monitor = await createMonitor(db, actor, inputFor("postgres"));
+
+    const file = await exportMonitors(db, actor.organizationId, [monitor.id]);
+    const serialised = JSON.stringify(file);
+
+    // The password in `postgres://u:p@host/db` is a credential wherever
+    // it happens to sit. An export that masked `config.password` and
+    // wrote this one out in full was masking one copy and publishing
+    // the other.
+    expect(serialised).not.toContain("//u:p@");
+    expect(file.monitors[0]?.url).toBe(
+      `postgres://u:${SECRET_MASK}@db.export.example:5432/app`,
+    );
+  });
+
+  it("imports a masked target without the sentinel reaching the row", async () => {
+    const source = await createTestOrg();
+    const monitor = await createMonitor(db, source, inputFor("postgres"));
+    const file = await exportMonitors(db, source.organizationId, [monitor.id]);
+
+    const target = await createTestOrg();
+    const report = await importMonitors(db, target, file);
+
+    const [copy] = await db
+      .select()
+      .from(monitors)
+      .where(eq(monitors.id, report.outcomes[0]!.monitorId!));
+
+    // The user name survives so the imported monitor addresses the right
+    // server as the right user and fails authentication with a message
+    // that says so. Dialling out with the sentinel as a password is the
+    // one thing it must never do.
+    expect(copy?.url).toBe("postgres://u@db.export.example:5432/app");
+    expect(copy?.url).not.toContain(SECRET_MASK);
+    expect(report.outcomes[0]?.secretsToReenter).toContain("url");
+  });
+
   it("masks a stored credential rather than writing it to the file", async () => {
     const actor = await createTestOrg();
     const monitor = await createMonitor(db, actor, inputFor("redis"));

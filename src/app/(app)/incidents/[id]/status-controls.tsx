@@ -149,6 +149,10 @@ export function StatusControls({
           </p>
         ) : (
           <div className="flex flex-col gap-2">
+            {/* The filled weight follows the incident's state: on an
+                unacknowledged incident the next correct act is to
+                acknowledge, so that is the primary; once acknowledged,
+                resolving takes the weight. */}
             {canUpdate &&
               (acknowledged ? (
                 <p className="text-muted-foreground flex items-center gap-1.5 text-[11.5px]">
@@ -157,7 +161,6 @@ export function StatusControls({
                 </p>
               ) : (
                 <Button
-                  variant="outline"
                   className="w-full"
                   onClick={handleAcknowledge}
                   disabled={ackPending}
@@ -167,7 +170,11 @@ export function StatusControls({
                 </Button>
               ))}
             {canResolve && (
-              <Button className="w-full" onClick={() => openDialog("resolved")}>
+              <Button
+                variant={acknowledged || !canUpdate ? "default" : "outline"}
+                className="w-full"
+                onClick={() => openDialog("resolved")}
+              >
                 <CheckCircleIcon aria-hidden />
                 Resolve incident
               </Button>

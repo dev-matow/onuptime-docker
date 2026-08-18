@@ -1,0 +1,26 @@
+# What Linguist counts, and what it should not.
+#
+# GitHub reported this repository as 57.8% HTML and 39.5% TypeScript,
+# which is a false description of what somebody is buying. The product is
+# a Next.js application in strict TypeScript; the HTML is 6.8 MB of
+# machine output that happens to be tracked.
+#
+# Measured, rather than guessed: 89.4% of every tracked HTML byte is
+# `landing/demo/`, the static export of the running app, about which
+# `scripts/export-demo.ts` says in its own header, "Nothing in this
+# directory is written by hand." Another 2.4% is `landing/docs/`, the
+# published copies of this repository's own markdown. Marking those two as
+# generated leaves the hand-written marketing pages counted, which is
+# correct, because a person did write them.
+#
+# The second effect is worth as much as the first: a demo re-export churns
+# 38 files, and a generated file is collapsed in a diff instead of burying
+# the change somebody actually needs to read.
+
+landing/demo/** linguist-generated=true
+landing/docs/*.html linguist-generated=true
+
+# Fonts and captures are binary, and a diff of them helps nobody.
+*.woff2 binary
+*.png binary
+*.ico binary

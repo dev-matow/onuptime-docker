@@ -258,6 +258,37 @@ async function main() {
   );
 
 
+  // The site shows the product in whichever scheme the visitor's system
+  // prefers, so every capture the landing page embeds exists twice: the
+  // porcelain original and a charcoal `-dark` twin, photographed from
+  // the same build with the OS preference forced. Captures that only
+  // GitHub renders (the READMEs) stay light; GitHub pages are the
+  // reader's theme, not ours.
+  const darkPage = await browser.newPage({
+    viewport: VIEWPORT,
+    deviceScaleFactor: 2,
+    colorScheme: "dark",
+  });
+  await signIn(darkPage);
+  await fullPage(
+    darkPage,
+    "/dashboard",
+    "dashboard-dark.png",
+    "The dashboard in the charcoal night scheme, for the landing page's dark rendering",
+  );
+  await fullPage(
+    darkPage,
+    `/incidents/${ids.incidentId}`,
+    "incident-detail-dark.png",
+    "The open incident in the charcoal night scheme, for the landing page's dark rendering",
+  );
+  await fullPage(
+    darkPage,
+    "/settings/import",
+    "kuma-import-dark.png",
+    "The Uptime Kuma importer in the charcoal night scheme, for the landing page's dark rendering",
+  );
+
   await browser.close();
 
   writeFileSync(

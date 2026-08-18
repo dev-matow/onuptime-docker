@@ -80,7 +80,7 @@ export const viewport: Viewport = {
   // porcelain by day, graphite by night.
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#f5f5f3" },
-    { media: "(prefers-color-scheme: dark)", color: "#0d1117" },
+    { media: "(prefers-color-scheme: dark)", color: "#1c1c1a" },
   ],
 };
 

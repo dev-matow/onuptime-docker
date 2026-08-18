@@ -134,55 +134,114 @@
 }
 
 /**
- * Night: GitHub Primer's dark palette, taken from the CSS github.com
- * serves (canvas #0d1117, muted #151b23, inset #010409, borders
- * #3d444d, ink #f0f6fc), on Vigil's own structure. Every hex is a
- * Primer neutral or state color, none is invented here. The sidebar
- * stands on the inset black the way GitHub's chrome does; content
- * never does.
+ * Night: charcoal, cut from the same cloth as the porcelain. The
+ * daylight paper (#f5f5f2) becomes the ink, the daylight ink becomes
+ * the ground, and every gray keeps the porcelain's warm bias, so the
+ * two themes read as one object photographed at different hours.
+ * Nothing is pure black: the deepest surface is the sidebar's #141412,
+ * and content stands on #1c1c1a with soft, wide shadows. States are
+ * kept a step quieter than daylight: a muted jade, an amber, a
+ * vermilion that reads at 3am without shouting.
+ *
+ * The `.dark` class serves the running app (next-themes). The media
+ * block that follows repeats these tokens for documents that ship
+ * without JavaScript, such as the exported demo, so they follow the
+ * operating system by themselves. Keep the two lists identical.
  */
 .dark {
-  --background: #0d1117;
-  --foreground: #f0f6fc;
-  --card: #151b23;
-  --card-foreground: #f0f6fc;
-  --popover: #212830;
-  --popover-foreground: #f0f6fc;
-  --primary: #f0f6fc;
-  --primary-foreground: #0d1117;
-  --secondary: #212830;
-  --secondary-foreground: #f0f6fc;
-  --muted: #212830;
-  --muted-foreground: #9198a1;
-  --accent: #262c36;
-  --accent-foreground: #f0f6fc;
-  --destructive: #f85149;
-  --border: #2f3742;
-  --input: #3d444d;
-  --ring: #f0f6fc;
-  --chart-1: #238636;
-  --chart-2: #d29922;
-  --chart-3: #f85149;
-  --chart-4: #2f3742;
-  --chart-5: #9198a1;
-  --panel: #151b23;
-  --line-inner: #212830;
-  --line-tag: #3d444d;
-  --line-quiet: #656c76;
-  --faint: #656c76;
-  --body-ink: #d1d7e0;
-  --ok: #3fb950;
-  --ok-dot: #3fb950;
-  --warn: #d29922;
-  --warn-dot: #d29922;
-  --sidebar: #010409;
-  --sidebar-foreground: #d1d7e0;
-  --sidebar-primary: #f0f6fc;
-  --sidebar-primary-foreground: #0d1117;
-  --sidebar-accent: #212830;
-  --sidebar-accent-foreground: #f0f6fc;
-  --sidebar-border: #212830;
-  --sidebar-ring: #f0f6fc;
+  --background: #1c1c1a;
+  --foreground: #f5f5f2;
+  --card: #232320;
+  --card-foreground: #f5f5f2;
+  --popover: #2a2a27;
+  --popover-foreground: #f5f5f2;
+  --primary: #f5f5f2;
+  --primary-foreground: #1c1c1a;
+  --secondary: #2a2a27;
+  --secondary-foreground: #f5f5f2;
+  --muted: #2a2a27;
+  --muted-foreground: #a6a6a0;
+  --accent: #2f2f2b;
+  --accent-foreground: #f5f5f2;
+  --destructive: #f0524a;
+  --border: #343430;
+  --input: #41413d;
+  --ring: #f5f5f2;
+  --chart-1: #47825e;
+  --chart-2: #d19a2f;
+  --chart-3: #f0524a;
+  --chart-4: #343430;
+  --chart-5: #a6a6a0;
+  --panel: #232320;
+  --line-inner: #2b2b28;
+  --line-tag: #41413d;
+  --line-quiet: #55554f;
+  --faint: #767670;
+  --body-ink: #d9d9d4;
+  --ok: #55ad7d;
+  --ok-dot: #55ad7d;
+  --warn: #d19a2f;
+  --warn-dot: #d19a2f;
+  --sidebar: #141412;
+  --sidebar-foreground: #d9d9d4;
+  --sidebar-primary: #f5f5f2;
+  --sidebar-primary-foreground: #1c1c1a;
+  --sidebar-accent: #262623;
+  --sidebar-accent-foreground: #f5f5f2;
+  --sidebar-border: #262623;
+  --sidebar-ring: #f5f5f2;
+}
+
+/* Scriptless dark: the same charcoal, applied by the system preference
+   when no theme class has been set. The exported demo ships with no
+   JavaScript, so this block is the only way it can follow the OS; the
+   `.light` guard keeps an explicit light choice (the status page's
+   toggle, printed reports) in daylight. Token-identical to `.dark`
+   above by contract. */
+@media (prefers-color-scheme: dark) {
+  :root:not(.light):not(.dark) {
+    --background: #1c1c1a;
+    --foreground: #f5f5f2;
+    --card: #232320;
+    --card-foreground: #f5f5f2;
+    --popover: #2a2a27;
+    --popover-foreground: #f5f5f2;
+    --primary: #f5f5f2;
+    --primary-foreground: #1c1c1a;
+    --secondary: #2a2a27;
+    --secondary-foreground: #f5f5f2;
+    --muted: #2a2a27;
+    --muted-foreground: #a6a6a0;
+    --accent: #2f2f2b;
+    --accent-foreground: #f5f5f2;
+    --destructive: #f0524a;
+    --border: #343430;
+    --input: #41413d;
+    --ring: #f5f5f2;
+    --chart-1: #47825e;
+    --chart-2: #d19a2f;
+    --chart-3: #f0524a;
+    --chart-4: #343430;
+    --chart-5: #a6a6a0;
+    --panel: #232320;
+    --line-inner: #2b2b28;
+    --line-tag: #41413d;
+    --line-quiet: #55554f;
+    --faint: #767670;
+    --body-ink: #d9d9d4;
+    --ok: #55ad7d;
+    --ok-dot: #55ad7d;
+    --warn: #d19a2f;
+    --warn-dot: #d19a2f;
+    --sidebar: #141412;
+    --sidebar-foreground: #d9d9d4;
+    --sidebar-primary: #f5f5f2;
+    --sidebar-primary-foreground: #1c1c1a;
+    --sidebar-accent: #262623;
+    --sidebar-accent-foreground: #f5f5f2;
+    --sidebar-border: #262623;
+    --sidebar-ring: #f5f5f2;
+  }
 }
 
 @layer base {

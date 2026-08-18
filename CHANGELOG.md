@@ -6,6 +6,22 @@ free edition; entries for commercial-only features live in the other
 repository, because they are not in this one and listing them here would
 describe software you do not have.
 
+## 1.22.1 — 2026-08-18
+
+The recut night scheme is all in this edition; the screenshot swaps
+are the commercial site's.
+
+### Fixed
+
+- **The night scheme is now Vigil's own charcoal rather than a
+  borrowed palette.** Warm grays cut from the same cloth as the
+  daylight porcelain, nothing pure black, states a step quieter. Same
+  tokens, same components, and an explicit light choice still wins.
+- **Scriptless pages can follow the system.** The stylesheet carries
+  the night tokens behind `prefers-color-scheme` as well as behind the
+  theme class, so a page served without JavaScript renders dark under
+  a dark system instead of defaulting to daylight.
+
 ## 1.22.0 — 2026-08-18
 
 Everything in this release is in this edition. The night scheme is the

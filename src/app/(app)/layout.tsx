@@ -24,11 +24,11 @@ export default async function AppLayout({
   });
 
   return (
-    // The console wears the brand's porcelain in daylight: same ground,
-    // same ink, same hairlines as the public site. The terminal black it
-    // replaced retired with the pixel eye. The theme toggle lives on the
-    // public status page, where the reader is the customer's audience.
-    <SidebarProvider className="light bg-background text-foreground">
+    // The console follows the operating system: porcelain in daylight,
+    // the graphite night scheme under a dark preference. Same ground,
+    // same ink, same hairlines as the public site at the same hour. The
+    // terminal black this system replaced retired with the pixel eye.
+    <SidebarProvider className="bg-background text-foreground">
       <a
         href="#main-content"
         className="focus:bg-background focus:ring-ring sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:px-3 focus:py-2 focus:text-sm focus:ring-2"

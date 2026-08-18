@@ -6,6 +6,24 @@ free edition; entries for commercial-only features live in the other
 repository, because they are not in this one and listing them here would
 describe software you do not have.
 
+## 1.22.0 — 2026-08-18
+
+Everything in this release is in this edition. The night scheme is the
+application's own stylesheet and the README is this repository's.
+
+### Added
+
+- **The console follows the operating system's color scheme.** Light
+  is the porcelain look the redesign shipped; dark is the same
+  structure on GitHub Primer's dark palette (canvas `#0d1117`, ink
+  `#f0f6fc`, borders `#3d444d`), switching live when the system does.
+  The status page's manual toggle still outranks the system
+  preference. No component changed: the dark scheme is a token remap
+  behind the existing `.dark` class.
+- **A README that shows the product.** One dashboard screenshot became
+  a grid of ten, and every capture was taken from a running build of
+  this edition, so nothing pictured is commercial-only.
+
 ## 1.21.0 — 2026-08-12
 
 The scheduler fixes from this release are all in this edition. The fleet

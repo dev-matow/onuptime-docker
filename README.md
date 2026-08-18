@@ -12,7 +12,13 @@ install.
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Self-hosted](https://img.shields.io/badge/self--hosted-yes-brightgreen.svg)](docs/DEPLOYMENT.md)
 
-![Dashboard](docs/screenshots/dashboard.png)
+|                                                                   |                                                              |
+| ----------------------------------------------------------------- | ------------------------------------------------------------ |
+| ![Dashboard](docs/screenshots/dashboard.png)                      | ![Monitor detail](docs/screenshots/monitor-detail.png)       |
+| ![Incident detail](docs/screenshots/incident-detail.png)          | ![Public status page](docs/screenshots/status-page.png)      |
+| ![The check-type selector](docs/screenshots/monitor-types.png)    | ![Notification channels](docs/screenshots/notifications.png) |
+| ![Delivery history](docs/screenshots/notification-deliveries.png) | ![Uptime Kuma import](docs/screenshots/kuma-import.png)      |
+| ![Team roles](docs/screenshots/roles.png)                         | ![Status-page settings](docs/screenshots/branding.png)       |
 
 ---
 

@@ -134,52 +134,55 @@
 }
 
 /**
- * Night, for the public status page's toggle: the same design system on
- * graphite, not the retired terminal black. Contrast holds AA against
- * the darkest surface each value can land on.
+ * Night: GitHub Primer's dark palette, taken from the CSS github.com
+ * serves (canvas #0d1117, muted #151b23, inset #010409, borders
+ * #3d444d, ink #f0f6fc), on Vigil's own structure. Every hex is a
+ * Primer neutral or state color, none is invented here. The sidebar
+ * stands on the inset black the way GitHub's chrome does; content
+ * never does.
  */
 .dark {
-  --background: #15171b;
-  --foreground: #ebebe8;
-  --card: #1b1e23;
-  --card-foreground: #ebebe8;
-  --popover: #20232a;
-  --popover-foreground: #ebebe8;
-  --primary: #ebebe8;
-  --primary-foreground: #15171b;
-  --secondary: #23262c;
-  --secondary-foreground: #ebebe8;
-  --muted: #23262c;
-  --muted-foreground: #9a9ea5;
-  --accent: #262a31;
-  --accent-foreground: #ebebe8;
-  --destructive: #ff5449;
-  --border: #2b2e35;
-  --input: #3a3e46;
-  --ring: #ebebe8;
-  --chart-1: #5d7a66;
-  --chart-2: #d9a13c;
-  --chart-3: #ff5449;
-  --chart-4: #2b2e35;
-  --chart-5: #9a9ea5;
-  --panel: #1b1e23;
-  --line-inner: #24272d;
-  --line-tag: #3a3e46;
-  --line-quiet: #4a4e57;
-  --faint: #787d85;
-  --body-ink: #c3c5c9;
-  --ok: #6db286;
-  --ok-dot: #5aa876;
-  --warn: #d9a13c;
-  --warn-dot: #d9a13c;
-  --sidebar: #191b20;
-  --sidebar-foreground: #c3c5c9;
-  --sidebar-primary: #ebebe8;
-  --sidebar-primary-foreground: #15171b;
-  --sidebar-accent: #262a31;
-  --sidebar-accent-foreground: #ebebe8;
-  --sidebar-border: #2b2e35;
-  --sidebar-ring: #ebebe8;
+  --background: #0d1117;
+  --foreground: #f0f6fc;
+  --card: #151b23;
+  --card-foreground: #f0f6fc;
+  --popover: #212830;
+  --popover-foreground: #f0f6fc;
+  --primary: #f0f6fc;
+  --primary-foreground: #0d1117;
+  --secondary: #212830;
+  --secondary-foreground: #f0f6fc;
+  --muted: #212830;
+  --muted-foreground: #9198a1;
+  --accent: #262c36;
+  --accent-foreground: #f0f6fc;
+  --destructive: #f85149;
+  --border: #2f3742;
+  --input: #3d444d;
+  --ring: #f0f6fc;
+  --chart-1: #238636;
+  --chart-2: #d29922;
+  --chart-3: #f85149;
+  --chart-4: #2f3742;
+  --chart-5: #9198a1;
+  --panel: #151b23;
+  --line-inner: #212830;
+  --line-tag: #3d444d;
+  --line-quiet: #656c76;
+  --faint: #656c76;
+  --body-ink: #d1d7e0;
+  --ok: #3fb950;
+  --ok-dot: #3fb950;
+  --warn: #d29922;
+  --warn-dot: #d29922;
+  --sidebar: #010409;
+  --sidebar-foreground: #d1d7e0;
+  --sidebar-primary: #f0f6fc;
+  --sidebar-primary-foreground: #0d1117;
+  --sidebar-accent: #212830;
+  --sidebar-accent-foreground: #f0f6fc;
+  --sidebar-border: #212830;
+  --sidebar-ring: #f0f6fc;
 }
 
 @layer base {

@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 
 import "./globals.css";
@@ -73,6 +73,15 @@ export const metadata: Metadata = {
     description,
     images: ["/og.png"],
   },
+};
+
+export const viewport: Viewport = {
+  // The browser chrome matches whichever ground the page is standing on:
+  // porcelain by day, graphite by night.
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f5f5f3" },
+    { media: "(prefers-color-scheme: dark)", color: "#0d1117" },
+  ],
 };
 
 export default function RootLayout({

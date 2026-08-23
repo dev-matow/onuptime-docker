@@ -55,6 +55,14 @@ next-env.d.ts
 # build-process notes (not part of the product)
 .engineering_state.json
 
+# Local Claude Code state: editor-side run configurations, session data,
+# and whatever else that tool decides to keep. `launch.json` was tracked
+# from 1 August to 23 August 2026 and nothing here ever read it, but the
+# export that produces Vigil Core copies every tracked file, so one
+# developer's editor config was published into a public repository on
+# every release. It belongs to the machine, not to either edition.
+.claude/
+
 # src/lib is application source, not build output — re-include it
 # explicitly so machine-level "lib/" ignore templates can never hide it.
 !/src/lib/

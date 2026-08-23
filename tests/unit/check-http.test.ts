@@ -185,19 +185,32 @@ describe("performHttpCheck", () => {
       });
     });
 
-    it("does not read the body when no keyword is configured", async () => {
-      const body = { getReader: vi.fn() };
+    it("drains and discards the body when no keyword is configured", async () => {
+      // The old assertion here was "getReader is never called", written
+      // against a drain that buffered the WHOLE body with arrayBuffer()
+      // — the name promised no read while the code read everything. The
+      // contract now is the honest one: the body is streamed through a
+      // reader chunk by chunk, discarded, and the reader is released —
+      // nothing is retained whatever size the server sends.
+      const cancel = vi.fn(async () => undefined);
+      const read = vi.fn(async () => ({
+        done: true as const,
+        value: undefined,
+      }));
+      const body = { getReader: vi.fn(() => ({ read, cancel })) };
       const fetchImpl = vi.fn(async () => {
         const res = new Response("ok", { status: 200 });
         Object.defineProperty(res, "body", { value: body });
         return res;
       });
-      await performHttpCheck(baseTarget, {
+      const outcome = await performHttpCheck(baseTarget, {
         allowPrivateTargets: true,
         fetchImpl,
         lookup: publicLookup,
       });
-      expect(body.getReader).not.toHaveBeenCalled();
+      expect(read).toHaveBeenCalled();
+      expect(cancel).toHaveBeenCalled();
+      expect(outcome).toMatchObject({ ok: true, error: null });
     });
 
     it("skips the keyword on a HEAD request (no body to read)", async () => {

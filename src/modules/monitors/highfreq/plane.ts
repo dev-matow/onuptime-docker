@@ -123,6 +123,9 @@ interface Slot {
 
 export interface PlaneStats {
   running: boolean;
+  /** Whether the 25ms scheduler interval is armed. False on an idle
+   * plane, by design: the ticker runs exactly while slots exist. */
+  ticking: boolean;
   monitors: number;
   shards: number[];
   probes: number;
@@ -181,6 +184,33 @@ export class HighFrequencyPlane {
   private reloader: NodeJS.Timeout | null = null;
   private renewer: NodeJS.Timeout | null = null;
   private leases: Lease[] = [];
+  /**
+   * Whether the last reload saw any high-frequency monitor at all.
+   *
+   * The lease renewal loop reads this instead of claiming
+   * unconditionally. An idle installation used to pay sixteen shard
+   * upserts every two seconds — ~700k writes a day of WAL churn — to
+   * hold leases over an empty set; now the discovery query (which runs
+   * regardless, it is how monitors are found) decides whether leases
+   * are worth holding, and claims them in the same pass that first
+   * sees a monitor, so onboarding latency is unchanged.
+   */
+  private wantsLeases = false;
+  /**
+   * Bumped whenever the plane hands its shards back — the idle
+   * transition and stop(). A claim that was already in flight across
+   * that moment would otherwise assign freshly granted leases into
+   * memory AFTER the release deleted their rows (or, at shutdown,
+   * re-insert rows nothing will ever renew): memory saying "I hold all
+   * sixteen shards" while the table says nobody does is the one state
+   * the lease design must never produce, because tick() fences on
+   * memory and the ordinary plane fences on the table. A stale grant is
+   * detected by epoch and handed straight back.
+   */
+  private leaseEpoch = 0;
+  /** The reload in flight, so stop() can wait it out — a continuation
+   * resumed after the shards were released must not re-claim them. */
+  private inFlight: Promise<void> | null = null;
   private running = false;
   private probes = 0;
   private missedSlots = 0;
@@ -200,11 +230,12 @@ export class HighFrequencyPlane {
   async start(): Promise<void> {
     if (this.running) return;
     this.running = true;
-    await this.renewLeases();
-    await this.reload();
+    // The first reload claims leases itself if it finds monitors, so
+    // there is no unclaimed window on a live installation — and no
+    // claim at all on an idle one.
+    await this.trackedReload();
 
-    this.ticker = setInterval(() => this.tick(), HF_TICK_MS);
-    this.reloader = setInterval(() => void this.reload(), HF_RELOAD_MS);
+    this.reloader = setInterval(() => void this.trackedReload(), HF_RELOAD_MS);
     this.renewer = setInterval(
       () => void this.renewLeases(),
       HF_LEASE_RENEW_MS,
@@ -225,10 +256,19 @@ export class HighFrequencyPlane {
    */
   async stop(): Promise<void> {
     this.running = false;
+    // Any claim that is mid-flight from here on is stale by definition.
+    this.leaseEpoch += 1;
     for (const timer of [this.ticker, this.reloader, this.renewer]) {
       if (timer) clearInterval(timer);
     }
     this.ticker = this.reloader = this.renewer = null;
+    // A reload suspended on its discovery query cannot be cancelled,
+    // only outwaited. Skipping this made the release below reversible:
+    // the resumed continuation saw rows, saw no held shards, and
+    // re-claimed all sixteen under a dying owner — leases nothing would
+    // ever renew or release, blinding both planes for a full TTL on
+    // every rolling deploy.
+    if (this.inFlight) await this.inFlight.catch(() => undefined);
     await this.writer.stop();
     await releaseShards(
       db,
@@ -248,6 +288,7 @@ export class HighFrequencyPlane {
   stats(): PlaneStats {
     return {
       running: this.running,
+      ticking: this.ticker !== null,
       monitors: this.slots.size,
       shards: this.leases.map((lease) => lease.shard),
       probes: this.probes,
@@ -276,9 +317,46 @@ export class HighFrequencyPlane {
     return held;
   }
 
+  /** One reload at a time, and remembered, so stop() can wait it out. */
+  private trackedReload(): Promise<void> {
+    if (this.inFlight) return this.inFlight;
+    const run = this.reload().finally(() => {
+      this.inFlight = null;
+    });
+    this.inFlight = run;
+    return run;
+  }
+
   private async renewLeases(): Promise<void> {
+    // Nothing to schedule means nothing to own. The reload loop flips
+    // this the moment a monitor appears, and claims in that same pass.
+    if (!this.wantsLeases) return;
+    await this.claimNow();
+  }
+
+  private async claimNow(): Promise<void> {
+    if (!this.running) return;
+    const epoch = this.leaseEpoch;
     try {
-      this.leases = await claimShards(db, this.ownerId, ALL_SHARDS);
+      const granted = await claimShards(db, this.ownerId, ALL_SHARDS);
+      if (epoch !== this.leaseEpoch) {
+        // The plane released its shards while this claim was in flight
+        // (idle transition or shutdown). The grant is real in the
+        // database and stale in this process, so it is handed straight
+        // back — merely dropping it would leave rows this replica owns
+        // for a full TTL, during which liveShards() reports the shards
+        // held and the ordinary plane defers monitors nobody is
+        // probing: the exact blindness the release was avoiding.
+        await releaseShards(
+          db,
+          this.ownerId,
+          granted.map((lease) => lease.shard),
+        ).catch((error) =>
+          log.warn({ err: error }, "could not hand back a stale lease grant"),
+        );
+        return;
+      }
+      this.leases = granted;
     } catch (error) {
       // Left as they were: the existing expiry timestamps are still the
       // truth about what this replica was granted, and they will lapse
@@ -299,7 +377,6 @@ export class HighFrequencyPlane {
    */
   private async reload(): Promise<void> {
     if (!this.running) return;
-    const held = this.holdsShards(Date.now());
     try {
       const rows = await db
         .select()
@@ -313,6 +390,37 @@ export class HighFrequencyPlane {
           ),
         );
 
+      // stop() may have run while the SELECT was out. Its release must
+      // be the last word on the lease table — nothing below may claim.
+      if (!this.running) return;
+
+      // Leases follow the fleet. Rows and no live lease → claim in THIS
+      // pass, so a monitor created on an idle installation is probing
+      // within one reload, exactly as it was when leases were held
+      // permanently. No rows → hand the shards back once and stop
+      // renewing; the discovery query above keeps running, and is the
+      // whole idle cost of the plane.
+      if (rows.length > 0) {
+        this.wantsLeases = true;
+        if (this.holdsShards(Date.now()).size === 0) await this.claimNow();
+      } else if (this.wantsLeases || this.leases.length > 0) {
+        this.wantsLeases = false;
+        // Stale any claim the renewer already has in flight: committed
+        // before our DELETE it would be deleted with the rest, and its
+        // response would otherwise resurrect sixteen phantom in-memory
+        // leases over an empty table — tick() probing on a fence the
+        // ordinary plane cannot see.
+        this.leaseEpoch += 1;
+        const shards = this.leases.map((lease) => lease.shard);
+        this.leases = [];
+        if (shards.length > 0) {
+          await releaseShards(db, this.ownerId, shards).catch((error) =>
+            log.warn({ err: error }, "could not release idle shard leases"),
+          );
+        }
+      }
+
+      const held = this.holdsShards(Date.now());
       const mine = rows.filter((row) => held.has(shardOf(row.id)));
       const keep = new Set<string>();
       const now = this.clock.now();
@@ -358,6 +466,21 @@ export class HighFrequencyPlane {
 
       for (const id of [...this.slots.keys()]) {
         if (!keep.has(id)) this.slots.delete(id);
+      }
+
+      // The 25ms ticker exists to serve slots. With none, it fired
+      // forty times a second over an empty map — pure wake-ups — so it
+      // now runs exactly while there is something to schedule. Started
+      // here, in the same pass that fills the table, so a monitor's
+      // first probe is not delayed by a second discovery interval. The
+      // running check matters: stop() may have run during claimNow's
+      // await, and a ticker armed after stop is an interval nothing
+      // will ever clear.
+      if (this.running && this.slots.size > 0) {
+        this.ticker ??= setInterval(() => this.tick(), HF_TICK_MS);
+      } else if (this.ticker !== null) {
+        clearInterval(this.ticker);
+        this.ticker = null;
       }
     } catch (error) {
       log.error({ err: error }, "could not reload high-frequency monitors");

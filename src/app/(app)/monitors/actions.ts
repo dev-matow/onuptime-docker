@@ -19,7 +19,9 @@ import {
   createMonitorSchema,
   updateMonitorSchema,
 } from "@/modules/monitors/schemas";
+import { runMonitorNow } from "@/modules/monitors/manual-run";
 import {
+  cloneMonitor,
   createMonitor,
   deleteMonitor,
   listGroups,
@@ -93,6 +95,60 @@ export async function regeneratePushTokenAction(
     const url = await regeneratePushToken(db, ctx, monitorId);
     revalidatePath(`/monitors/${monitorId}`);
     return actionOk({ url });
+  } catch (error) {
+    return toActionError(error);
+  }
+}
+
+/**
+ * "Check it now."
+ *
+ * Guarded by `monitor: ["update"]` rather than by a read permission,
+ * because this writes: it produces a real observation, it can move the
+ * monitor's status, and it can open or resolve an incident. A viewer who
+ * could press it could page an on-call engineer.
+ *
+ * It also runs the check inline, which means this action can take tens
+ * of seconds. That is the point - an operator iterating on a journey
+ * needs the answer here rather than in a run history they have to go and
+ * refresh - and `MANUAL_RUN_BUDGET_MS` is what stops it being unbounded.
+ */
+export async function runMonitorNowAction(monitorId: string): Promise<
+  ActionResult<{
+    verdict: string;
+    error: string | null;
+    syntheticRunId: string | null;
+  }>
+> {
+  try {
+    const ctx = await requirePermission({ monitor: ["update"] });
+    const result = await runMonitorNow(db, ctx, monitorId);
+    revalidatePath(`/monitors/${monitorId}`);
+    return actionOk({
+      verdict: result.verdict,
+      error: result.error,
+      syntheticRunId: result.syntheticRunId,
+    });
+  } catch (error) {
+    return toActionError(error);
+  }
+}
+
+/**
+ * Duplicate a monitor, paused.
+ *
+ * `monitor: ["create"]` and not `["update"]`: the result of this is a
+ * new monitor, and somebody who may edit the fleet but not grow it must
+ * not be able to grow it sideways.
+ */
+export async function cloneMonitorAction(
+  monitorId: string,
+): Promise<ActionResult<{ id: string; name: string }>> {
+  try {
+    const ctx = await requirePermission({ monitor: ["create"] });
+    const monitor = await cloneMonitor(db, ctx, monitorId);
+    revalidatePath("/monitors");
+    return actionOk({ id: monitor.id, name: monitor.name });
   } catch (error) {
     return toActionError(error);
   }

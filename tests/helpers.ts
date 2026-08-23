@@ -90,6 +90,11 @@ export async function withRowLocked<T>(
    * status guard above the predicate rather than the predicate.
    */
   beforeRelease?: (client: PoolClient) => Promise<void>,
+  /** `barrierMs`: how long to wait for the callers to block before
+   * giving up and dumping what every backend was doing. Defaults to
+   * eight seconds; raise it for a suite whose callers do more work
+   * before their UPDATE than a single statement. */
+  options?: { barrierMs?: number },
 ): Promise<T> {
   const holder = new Pool({
     connectionString: process.env.DATABASE_URL,
@@ -119,7 +124,16 @@ export async function withRowLocked<T>(
     // Wait until `waiters` backends are actually blocked behind this
     // lock. Polling a fact beats sleeping a guess: on a slow machine
     // this waits, and on a fast one it proceeds immediately.
-    const deadline = Date.now() + 8_000;
+    //
+    // How long that fact is worth waiting FOR is a parameter, because it
+    // is not a property of the code under test: it is how long two
+    // callers take to open a transaction, read, and reach their UPDATE
+    // while a hundred and sixty-eight other files hammer the same
+    // Postgres. Eight seconds was enough for every suite that used this
+    // until the task suites arrived, and then failed roughly one full
+    // run in three - never alone, only under the parallel suite, which
+    // is the shape that reads as a product bug and is not one.
+    const deadline = Date.now() + (options?.barrierMs ?? 8_000);
     for (;;) {
       await new Promise((resolve) => setTimeout(resolve, 150));
       // The whole wait CHAIN rooted at this backend, not just its

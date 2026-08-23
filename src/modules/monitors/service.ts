@@ -409,6 +409,110 @@ export async function createMonitor(
   });
 }
 
+/**
+ * A copy of an existing monitor, paused, with a name the operator can
+ * find.
+ *
+ * Cloning exists because a journey is the first thing in this product
+ * that is genuinely expensive to author. Forty steps of a checkout flow
+ * are a morning's work, and "the same journey against staging" should
+ * not be that morning again - it should be a copy with one field
+ * changed. It applies to every type because there is no reason it should
+ * not: a copy of a Postgres monitor pointed at the replica is the same
+ * saving in miniature.
+ *
+ * Three decisions are load-bearing.
+ *
+ * **The config is copied server-side, never through the client.** A
+ * clone assembled in the browser would have to send back what the
+ * browser was given, and what the browser was given has `SECRET_MASK`
+ * where every credential was. The copy would silently lose them. Reading
+ * the row here means the credentials come along and never leave the
+ * server.
+ *
+ * **The copy is paused.** A clone is an unfinished edit by definition -
+ * nobody duplicates a monitor in order to watch the same target twice -
+ * and an unpaused copy would immediately double the request rate against
+ * whatever it was cloned from, and open its own incidents about it.
+ *
+ * **Provenance does not come along.** `import_source` and
+ * `import_source_id` identify one row in somebody else's system, and two
+ * rows claiming it would break the unique index that makes re-importing
+ * safe. A clone is a new monitor that a person made here.
+ */
+export async function cloneMonitor(
+  db: DbClient,
+  actor: Actor,
+  monitorId: string,
+): Promise<Monitor> {
+  return db.transaction(async (tx) => {
+    const source = await tx.query.monitors.findFirst({
+      where: and(
+        eq(monitors.id, monitorId),
+        eq(monitors.organizationId, actor.organizationId),
+      ),
+    });
+    if (!source) throw new NotFoundError("That monitor does not exist.");
+
+    const {
+      id: _id,
+      createdAt: _createdAt,
+      updatedAt: _updatedAt,
+      importSource: _importSource,
+      importSourceId: _importSourceId,
+      ...carried
+    } = source;
+
+    const [monitor] = await tx
+      .insert(monitors)
+      .values({
+        ...carried,
+        createdBy: actor.userId,
+        name: cloneName(source.name),
+        paused: true,
+        // Every observed state is left behind. A clone has never been
+        // checked, and carrying the original's status would put a copy
+        // on the dashboard reporting an outage it has no evidence for.
+        currentStatus: "unknown",
+        consecutiveFailures: 0,
+        firstFailureAt: null,
+        lastCheckedAt: null,
+        tlsDaysRemaining: null,
+        nextEvaluationAt: null,
+        dispatchClaimedUntil: null,
+      })
+      .returning();
+    if (!monitor) throw new Error("insert returned no row");
+
+    await writeAudit(tx, {
+      organizationId: actor.organizationId,
+      actorId: actor.userId,
+      action: "monitor.cloned",
+      targetType: "monitor",
+      targetId: monitor.id,
+      metadata: { clonedFrom: source.id, name: monitor.name },
+    });
+    return monitor;
+  });
+}
+
+/**
+ * `Checkout (copy)`, then `Checkout (copy 2)`.
+ *
+ * Bounded rather than made unique against the table: names are not
+ * unique in this product and never have been, so a query to avoid a
+ * collision would be enforcing a constraint that does not exist. What
+ * this avoids is `Checkout (copy) (copy) (copy)`, which is what a naive
+ * suffix produces the third time somebody clones a clone.
+ */
+function cloneName(name: string): string {
+  const match = /^(.*) \(copy(?: (\d+))?\)$/.exec(name);
+  if (match === null) return `${name} (copy)`.slice(0, 100);
+  const base = match[1] ?? name;
+  const next = match[2] === undefined ? 2 : Number(match[2]) + 1;
+  return `${base} (copy ${next})`.slice(0, 100);
+}
+
 export async function updateMonitor(
   db: DbClient,
   actor: Actor,

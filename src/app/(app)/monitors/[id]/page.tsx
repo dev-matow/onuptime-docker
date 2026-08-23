@@ -250,6 +250,7 @@ export default async function MonitorDetailPage(
 
 
 
+
       <section className="space-y-3">
         <h2 className="text-sm font-medium">Recent checks</h2>
         {recentChecks.length === 0 ? (

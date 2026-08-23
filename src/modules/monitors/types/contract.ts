@@ -244,14 +244,100 @@ export interface CheckTypeDescriptor<
    * operator error must never be indistinguishable from an outage.
    */
   requiresCapability?: string;
+  /**
+   * Which worker plane evaluates this type. Defaults to `queue`.
+   *
+   * Every check type shared one queue until scripted synthetics, and
+   * sharing was right while every check was one request finishing in
+   * under a second. A browser journey is tens of seconds of held socket,
+   * and a handful of them on the general queue is a fleet of HTTP
+   * monitors that stop being checked because every worker slot is
+   * waiting on Chromium. Naming the plane on the descriptor is what lets
+   * the scheduler route the work without knowing what a journey is - and
+   * what lets the expensive plane have its own concurrency, its own
+   * backpressure and its own saturation signal.
+   */
+  executionPlane?: "queue" | "synthetic";
   /** Whether the recovery loop can re-probe this target to verify a fix. */
   supportsRecovery: boolean;
+  /**
+   * Why a remote probe cannot run this type, when the reason is not its
+   * {@link CheckTypeKind}.
+   *
+   * `probeExecutability` refuses `passive`, `aggregate` and `manual`
+   * because there is nothing at the far end for an agent to observe.
+   * There is a second reason, and it arrived with scripted synthetics: a
+   * type can be perfectly `active` and still be unrunnable away from the
+   * controller because it writes evidence to the database. A probe agent
+   * holds no database credential by construction - that is the point of
+   * `probe-agent/env-guard.ts` - so a journey dispatched to one would
+   * produce a run record that nothing wrote and a verdict nothing could
+   * explain.
+   *
+   * Stated on the descriptor rather than inferred, because "does this
+   * type keep its own evidence" is a fact about the type and the answer
+   * has to be the same in the form, the service, the dispatcher and the
+   * capability list.
+   */
+  controllerOnly?: string;
   /**
    * RBAC fragments this type contributes. Merged into the permission
    * statement by the registry, so gating a future commercial-only type
    * is a property of the type rather than an edit to a central literal.
    */
   permissions?: Readonly<Record<string, readonly string[]>>;
+}
+
+/**
+ * Which monitor a probe is running for, and why it is running now.
+ *
+ * Absent from this contract until 1.23, and the omission was correct
+ * while every probe was a single request whose whole result fitted in a
+ * {@link ProbeResult}. A scripted synthetic does not fit: it produces a
+ * run with per-step timings and screenshots, that run has to be written
+ * down before the first step executes so two workers cannot both start
+ * it, and none of that is expressible as "here is a target, measure it".
+ *
+ * Optional, and every existing type ignores it. A probe that reads this
+ * is declaring that it keeps evidence of its own, which is a real and
+ * rare thing rather than the default - and making it optional is what
+ * keeps `performCheck` callable from a unit test with nothing but a URL.
+ *
+ * `scheduledFor` is the instant the evaluation was due, not the instant
+ * it started. That distinction is the whole of the deduplication story:
+ * a tick, a sub-minute follow-up and a queue replay after a rolling
+ * restart are three attempts at *one* logical evaluation, and they agree
+ * about the due time while disagreeing about every wall clock reading.
+ */
+export interface ProbeSubject {
+  monitorId: string;
+  organizationId: string;
+  name: string;
+  /** Null when nothing scheduled this - a manual run, or a test. */
+  scheduledFor: Date | null;
+  /**
+   * Why this evaluation happened. Read by the types that keep a record
+   * of their own, so a person looking at a journey's history can tell a
+   * scheduled run from one somebody asked for and from one an automation
+   * asked for. Core never produces `runbook`; nothing in Core branches
+   * on the value either, so the union costs the free edition a word.
+   */
+  trigger: "schedule" | "manual" | "recovery" | "runbook";
+  /** The operator, when a person asked for this evaluation. */
+  actorUserId: string | null;
+  /**
+   * An id the caller has already minted for this evaluation's own
+   * record, for the types that keep one.
+   *
+   * Null means "mint your own". It is not null on the scheduled path,
+   * and that is the whole point: the *worker* claims the logical run
+   * before it evaluates anything, so a replica that loses the claim
+   * stops without opening a browser, without issuing the journey's POST
+   * requests, and without writing an observation about a check it never
+   * performed. A probe that minted its own id could only discover it had
+   * lost after doing the work.
+   */
+  runId: string | null;
 }
 
 export interface ProbeContext<Config> {
@@ -281,6 +367,21 @@ export interface ProbeContext<Config> {
    * in the browser bundle.
    */
   lookup?: (hostname: string) => Promise<{ address: string; family: number }[]>;
+  /**
+   * See {@link ProbeSubject}. Present for every scheduled evaluation;
+   * absent when a caller probes a bare target.
+   */
+  subject?: ProbeSubject;
+  /**
+   * Cooperative cancellation, for a probe whose work outlives a single
+   * socket.
+   *
+   * `AbortSignal.timeout(timeoutMs)` is enough for a probe that makes
+   * one request; a probe that makes seven, or that waits on another
+   * process, needs to be told when the worker is shutting down so it can
+   * stop rather than be killed with a browser session still open.
+   */
+  signal?: AbortSignal;
 }
 
 export interface ProbeResult {
@@ -298,6 +399,27 @@ export interface ProbeResult {
    */
   unavailable?: string | null;
   statusCode?: number | null;
+  /**
+   * Per-type evidence too large or too structured to be a fact, for the
+   * caller to store if it can.
+   *
+   * `FactBag` holds scalars, deliberately: facts are what assertions
+   * read, and an assertion that reads a nested object is a rules engine.
+   * A scripted synthetic still produces something a `FactBag` cannot
+   * hold - seven steps with their own timings, messages and screenshots -
+   * and that evidence is the whole reason the feature is worth having.
+   *
+   * It is returned rather than written, and that is the point. The first
+   * version of this had the probe write it, which put `@/db` inside the
+   * check registry and therefore inside the *probe agent's* import graph
+   * - a remote agent that holds no database credential by construction.
+   * A test caught it; the architecture caught it first, and this is what
+   * the architecture was saying: probes measure, callers persist.
+   *
+   * Opaque here on purpose. The contract does not know what a journey
+   * is, and a caller that does not recognise a type's evidence drops it.
+   */
+  evidence?: unknown;
 }
 
 export type AssertionSeverity = "down" | "degraded";
@@ -606,9 +728,14 @@ export interface ProbeExecutability {
 }
 
 export function probeExecutability(
-  descriptor: Pick<CheckTypeDescriptor, "kind" | "label">,
+  descriptor: Pick<CheckTypeDescriptor, "kind" | "label" | "controllerOnly">,
 ): ProbeExecutability {
   const label = descriptor.label;
+  // Checked before the kind, because a type can be active and still be
+  // controller-only. See {@link CheckTypeDescriptor.controllerOnly}.
+  if (descriptor.controllerOnly !== undefined) {
+    return { executable: false, reason: descriptor.controllerOnly };
+  }
   switch (descriptor.kind) {
     case "active":
       return { executable: true, reason: null };

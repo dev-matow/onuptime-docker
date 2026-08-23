@@ -22,6 +22,15 @@ describe("formatDuration", () => {
   it("renders hours with a minutes remainder", () => {
     expect(formatDuration(5_700_000)).toBe("1h 35m");
   });
+
+  it("switches to days past two of them", () => {
+    // 720h is a number the eye has to divide before it means anything,
+    // and a thirty-day objective reports its measured time in this unit.
+    expect(formatDuration(47 * 3_600_000)).toBe("47h");
+    expect(formatDuration(48 * 3_600_000)).toBe("2d");
+    expect(formatDuration(30 * 86_400_000)).toBe("30d");
+    expect(formatDuration(30 * 86_400_000 + 5 * 3_600_000)).toBe("30d 5h");
+  });
 });
 
 describe("formatUptime", () => {

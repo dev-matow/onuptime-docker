@@ -262,7 +262,8 @@ export function MonitorForm({
     // `null`, which is how twenty-four types came to store settings no
     // operator could reach.
     if (configFields.length > 0) {
-      return buildConfigFromFields(configFields, configState);
+      const declared = buildConfigFromFields(configFields, configState);
+      return declared;
     }
     if (shows("dnsRecord")) {
       const expected = expectedValue.trim();
@@ -804,7 +805,20 @@ export function MonitorForm({
             Cancel
           </Button>
         </DialogClose>
-        <Button type="submit" disabled={pending}>
+        <Button
+          type="submit"
+          // Anything that refuses the save, as a list rather than a
+          // chain of `||`. `strip-ee` deletes whole lines, and a deleted
+          // operand in the middle of a boolean chain is a syntax error
+          // where a deleted element of an array literal is only a
+          // shorter array. The commercial term is a journey whose
+          // problems the editor is already showing: the same stored
+          // schema the server parses with has refused it, so offering
+          // Save would be offering a round trip that ends in a toast.
+          disabled={[
+            pending,
+          ].some(Boolean)}
+        >
           {pending && <Spinner />}
           {submitLabel}
         </Button>

@@ -45,6 +45,7 @@ export interface MonitorCheckJob {
   monitorId: string;
 }
 
+
 /**
  * The incident generation a recovery job observed when it was
  * scheduled, compared against `incidents.status_revision` before the job
@@ -84,6 +85,7 @@ export interface RecoveryEscalateJob extends RecoveryFence {
   monitorId: string;
 }
 
+
 /** The rung, as it stood when the ladder was scheduled. */
 export interface EscalationStepSnapshot {
   target: "on_call" | "responders" | "user";
@@ -113,3 +115,54 @@ export interface EscalationStepJob {
 }
 
 export const CHECK_RETENTION_DAYS = 90;
+
+/**
+ * How long a finished job row stays in `pgboss.job` before maintenance
+ * deletes it, for the queues that produce one per check or per minute.
+ *
+ * pg-boss's own default is seven DAYS, and its maintenance sweep runs
+ * once a DAY — tuned for queues where a job is a business event worth
+ * keeping. Here a completed job is pure transport: the observation it
+ * carried is already in `monitor_checks`, the run in `synthetic_runs`,
+ * the delivery in `notification_outbox`. Measured on a development
+ * database, a `monitor-check` job row costs ~437 bytes with its indexes,
+ * so a 1,000-monitor installation on a 60-second cadence accumulates
+ * ~10 million rows — about 4 GB of Postgres — before the default window
+ * even starts deleting. An hour keeps enough to debug a dispatch problem
+ * that just happened and bounds the table at tens of thousands of rows.
+ *
+ * Failed jobs share the window. That is a judgement: failures worth
+ * keeping longer than an hour are visible as incidents and ledger rows,
+ * not as queue archaeology.
+ */
+export const HIGH_CHURN_DELETE_AFTER_SECONDS = 3_600;
+
+/**
+ * How often pg-boss runs its maintenance sweep — the DELETION of
+ * finished jobs. (Expiring stuck active jobs is the supervisor's, on
+ * its own sixty-second cadence; this knob does not touch it.)
+ *
+ * The retention above is enforced BY this sweep, so leaving the sweep at
+ * its one-day default would make the one-hour window above a fiction:
+ * the table would still grow for a day between deletions. Ten minutes
+ * keeps the high-churn queues within ~17% of their nominal bound.
+ */
+export const QUEUE_MAINTENANCE_INTERVAL_SECONDS = 600;
+
+/**
+ * The queues whose completed jobs are transport rather than record —
+ * one row per check, or one per minute per cron. `recovery-*`,
+ * `escalation-step` and `retention` are NOT here on purpose: they are
+ * rare, and their job rows are evidence an operator may want when asking
+ * why somebody was or was not paged.
+ *
+ * Exported so the retention test asserts against the same list the boot
+ * path applies — a list that drifts from the loop it feeds is how a
+ * queue silently returns to seven-day retention.
+ */
+export const HIGH_CHURN_QUEUES: readonly string[] = [
+  QUEUES.monitorTick,
+  QUEUES.monitorCheck,
+  QUEUES.notificationDelivery,
+  QUEUES.highFrequencyRollup,
+];

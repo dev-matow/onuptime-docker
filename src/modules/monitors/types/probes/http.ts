@@ -2,6 +2,7 @@ import type { LookupFunction } from "node:net";
 import tls from "node:tls";
 
 import {
+  drainBodyCapped,
   EgressBlockedError,
   egressFetch,
   type ResolvedAddress,
@@ -179,8 +180,21 @@ async function request(ctx: ProbeContext<HttpConfig>): Promise<RequestAttempt> {
       monitorEgress(ctx),
     );
 
-    // A keyword assertion needs the body (GET only); otherwise drain and
-    // discard so keep-alive sockets are reusable.
+    // A keyword assertion needs the body (GET only); otherwise the body
+    // is read and DISCARDED up to the same cap the keyword path has
+    // always had, then the download stops.
+    //
+    // It used to be `arrayBuffer()`, justified as keeping keep-alive
+    // sockets reusable — a premise that was never true here: the egress
+    // transport runs `agent: false`, so every check opens its own socket
+    // and nothing could reuse it. What the full read actually did was
+    // buffer the monitored server's entire body in worker memory,
+    // bounded only by bandwidth × timeout — a monitor mispointed at a
+    // download URL was a per-check spike in the hundreds of megabytes.
+    // The cap changes one observable: `responseTimeMs` on a body LARGER
+    // than the cap now stops counting at the cap instead of at the end
+    // of the download, which for a body that size is the difference
+    // between measuring the endpoint and measuring its file size.
     const wantsKeyword = config.bodyKeyword !== null && config.method === "GET";
     let keywordPresent: boolean | undefined;
     if (wantsKeyword) {
@@ -189,7 +203,7 @@ async function request(ctx: ProbeContext<HttpConfig>): Promise<RequestAttempt> {
       );
       keywordPresent = body.includes(config.bodyKeyword!);
     } else {
-      await response.arrayBuffer().catch(() => undefined);
+      await drainBodyCapped(response, MAX_KEYWORD_BODY_BYTES);
     }
 
     const responseTimeMs = elapsedSince(startedAt);

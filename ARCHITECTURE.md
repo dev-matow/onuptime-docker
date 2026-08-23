@@ -6,7 +6,7 @@ For setup and product docs, see the [README](README.md).
 ## 1. System overview
 
 Vigil is an uptime-monitoring and incident-management platform: organizations
-create monitors of any of forty check types. HTTP(S), TCP port, ping, DNS
+create monitors of any of forty-two check types. HTTP(S), TCP port, ping, DNS
 record, TLS-certificate expiry, domain expiry, PostgreSQL, MySQL/MariaDB,
 MongoDB, Redis, Docker, MQTT, SMTP, JSON query, a real browser engine, and
 twenty-two more spanning messaging, directory, mail and infrastructure
@@ -87,6 +87,7 @@ src/
 │   ├── monitors/   #   check engine, schemas, service
 │   ├── incidents/  #   lifecycle state machine, service
 │   ├── recovery/   #   verified recovery loop: engine, schemas, service
+│   ├── runbooks/   #   typed remediation: definition, engine, registry, runs
 │   ├── status-pages/
 │   ├── notifications/ #   email/webhook + escalation channels (email/sms/voice)
 │   ├── oncall/        #   on-call rotation math, schedules, escalation policies
@@ -491,6 +492,72 @@ and quiet self-healed incidents never reach them; the resolve path is
 gated on `notifiedAt`, matching the team's own "quiet recovery stays
 quiet" rule. The subscribe action is rate-limited per address so the
 confirmation email can't be weaponised.
+
+## 8a. Runbooks _(commercial)_
+
+Typed remediation, executed durably. `docs/RUNBOOKS.md` is the product
+document; what belongs here is the shape and the two decisions that are
+architectural rather than product.
+
+**PostgreSQL is the source of truth and pg-boss is an alarm clock.** A
+run exists, is due, is leased and is finished entirely in
+`runbook_runs`; a queue message only wakes a worker up to look at the
+table. Delete every pg-boss row and the minute tick still drains it, so
+a queue outage is a latency problem rather than a correctness one. The
+claim is the same fair, leased, fenced claim `notification_outbox` uses:
+ranked per tenant so one organization cannot own the head of the queue,
+leased so a dead worker's work is picked up, and fenced so a worker
+paused past its lease commits nothing over its replacement.
+
+The unit of concurrency is the RUN, not the step. A forward-only
+sequence has exactly one live step, so two workers on different steps of
+one run is a race with no upside.
+
+```mermaid
+stateDiagram-v2
+    [*] --> queued: trigger commits a run
+    queued --> running: claimed, leased, fenced
+    running --> waiting: timer, approval, busy resource
+    waiting --> running: due again
+    running --> succeeded
+    running --> failed
+    running --> unknown: an effect may have happened
+    running --> cancelled: an operator asked, between steps
+```
+
+**The two-table split is the same one the outbox makes.** `runbook_runs`
+and `runbook_run_steps` are the current state, updated in place;
+`runbook_step_attempts` and `runbook_run_transitions` are append-only
+evidence. A single mutable row cannot answer "did this go twice?", which
+is the only question that matters when the effect was a POST to
+somebody else's restart endpoint.
+
+`runbook_step_attempts.dispatched_at` is the one column with no
+counterpart in the outbox, and it is what makes crash recovery useful
+rather than merely safe. It is committed immediately before the request
+leaves the process, so the next worker can tell an attempt that cannot
+have had an effect (retry it) from one that may have (stop, and say so).
+Without it every crash mid-step would have to be treated as the second,
+and a worker restart would strand every run in flight.
+
+**Why the recovery action was not folded in.** Vigil has two automations
+that can restart something. `recovery_actions` is one endpoint per
+monitor with a fixed shape; a runbook is the general case. Merging them
+would mean rewriting a shipped remediation path to gain nothing an
+operator asked for, so instead they share the primitives:
+`signedPostOnce` (one request, one signature, one egress policy, one
+classification of failure), `buildRecoveryPayload`, and
+`findEnabledRecoveryAction`. A runbook step that fires a recovery
+endpoint takes the same resource lease the built-in path would.
+
+**The trigger seams.** Runs are started from four places and each uses
+the seam that already existed rather than a new one: the two-question
+incident-handler registry (`incident.opened`), `applyOutcome` for a
+monitor state change and an auto-resolve, the burn-episode transaction
+in `modules/slo/burn.ts`, and the recovery verdict transaction. The last
+two commit the run WITH its cause; the first two have the same window
+the recovery action's own scheduling has, and the run's dedupe key makes
+a repeat harmless.
 
 ## 9. Deployment
 

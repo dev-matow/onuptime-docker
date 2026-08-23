@@ -262,6 +262,7 @@ export async function applyOutcome(
     }
   }
 
+
   await refreshGroups(updated.parentId, deps);
   return updated;
 }

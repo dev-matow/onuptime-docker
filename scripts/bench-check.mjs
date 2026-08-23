@@ -25,6 +25,7 @@
  * only thing that answers the second question.
  */
 
+import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -780,6 +781,257 @@ for (const [pattern, key, expected, what] of PROSE_CLAIMS) {
     );
   }
 }
+
+/* ── service level objectives ──────────────────────────────────────── */
+//
+// `docs/SLOS.md` quotes a table of its own, copied by hand out of
+// `slo-scale.json` exactly as the high-frequency table is copied out of
+// its artefacts - and until this block existed nothing compared the two.
+// The capacity sentence under it ("roughly three hundred objectives per
+// worker") is not quoted at all: it is DERIVED from the measured tick
+// and the tick budget, so it goes stale the moment either moves, silently
+// and in the direction that oversells.
+
+const SLO_ARTEFACT = join(
+  ROOT,
+  "docs",
+  "evidence",
+  "slo-bench",
+  "slo-scale.json",
+);
+const SLO_PAGE = join(ROOT, "docs", "SLOS.md");
+
+/** The tick's wall-clock budget, from `modules/slo/materialize.ts`. */
+const TICK_BUDGET_MS = 5_000;
+
+if (!existsSync(SLO_ARTEFACT)) {
+  fail(`no SLO benchmark artefact at ${SLO_ARTEFACT}`);
+} else {
+  const slo = JSON.parse(readFileSync(SLO_ARTEFACT, "utf8"));
+  const sloPage = readFileSync(SLO_PAGE, "utf8");
+
+  for (const field of ["what", "method", "doesNotMeasure", "cases"]) {
+    if (!slo[field]) fail(`slo-scale.json has no ${field}`);
+  }
+  for (const field of ["commit", "node", "postgres", "historyDays"]) {
+    if (!slo.environment?.[field]) {
+      fail(`slo-scale.json has no environment.${field}: it cannot be audited`);
+    }
+  }
+
+  // A run on a cluster with durability switched off measured this
+  // feature three times faster than the same code on a normal one, which
+  // is enough to move the published per-worker ceiling. Numbers from such
+  // a run are fine to look at and not fine to publish.
+  const durability = slo.environment?.durability;
+  if (!durability) {
+    fail(
+      "slo-scale.json records no durability settings, so nobody can tell " +
+        "whether it was measured on a database anybody would run",
+    );
+  } else {
+    for (const [name, value] of Object.entries(durability)) {
+      if (value !== "on") {
+        fail(
+          `slo-scale.json was measured with ${name}=${value}: those numbers ` +
+            `describe a cluster that does not keep its writes`,
+        );
+      }
+    }
+  }
+
+  // The artefact must describe the tree it is published beside. A
+  // benchmark carried forward from an older commit is the exact shape of
+  // claim this file exists to refuse.
+  const head = (() => {
+    try {
+      return execFileSync("git", ["rev-parse", "HEAD"], {
+        cwd: ROOT,
+        encoding: "utf8",
+      }).trim();
+    } catch {
+      return null;
+    }
+  })();
+  const touched = (() => {
+    if (!head || !slo.environment?.commit) return null;
+    try {
+      return execFileSync(
+        "git",
+        [
+          "diff",
+          "--name-only",
+          `${slo.environment.commit}..${head}`,
+          "--",
+          "src/modules/slo",
+          "src/db/schema/slo.ts",
+          "src/worker/jobs/slo.ts",
+        ],
+        { cwd: ROOT, encoding: "utf8" },
+      )
+        .split("\n")
+        .filter(Boolean);
+    } catch {
+      return null;
+    }
+  })();
+  if (touched && touched.length > 0) {
+    fail(
+      `slo-scale.json was measured at ${slo.environment.commit.slice(0, 7)}, ` +
+        `and ${touched.length} objective source file(s) have changed since ` +
+        `(${touched[0]}${touched.length > 1 ? ", ..." : ""}). Re-run ` +
+        `\`npm run bench:slo\`.`,
+    );
+  }
+
+  /** How the table renders a duration. Under a second, milliseconds. */
+  const duration = (ms) =>
+    ms < 1_000 ? `${Math.round(ms)}ms` : `${(ms / 1_000).toFixed(1)}s`;
+  /** The table separates thousands with spaces. */
+  const grouped = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+
+  const SLO_ROW =
+    /^\|\s*(\d+)\s*\|\s*(\d+)\s*\|\s*([\d  ]+?)\s*\|\s*([\d  ]+?)\s*\|\s*([\d.]+m?s)\s*\|\s*([\d.]+m?s)\s*\|\s*([\d.]+m?s)\s*\|$/gm;
+
+  const byMonitors = new Map(slo.cases.map((c) => [c.monitors, c]));
+  const quotedCases = new Set();
+  for (const match of sloPage.matchAll(SLO_ROW)) {
+    const [
+      ,
+      monitorsRaw,
+      slosRaw,
+      observations,
+      buckets,
+      backfill,
+      tick,
+      page_,
+    ] = match;
+    const monitors = Number(monitorsRaw);
+    quotedCases.add(monitors);
+    const measured = byMonitors.get(monitors);
+    if (!measured) {
+      fail(`SLOS.md quotes ${monitors} monitors, and no case for it exists`);
+      continue;
+    }
+    const check = (label, published, expected) => {
+      if (published !== expected) {
+        fail(
+          `SLO bench, ${monitors} monitors, ${label}: the page says ` +
+            `"${published}", the artefact says "${expected}"`,
+        );
+      }
+    };
+    check("objectives", Number(slosRaw), measured.slos);
+    check(
+      "observations",
+      observations.replace(/\s/g, " "),
+      grouped(measured.observations),
+    );
+    check("buckets", buckets.replace(/\s/g, " "), grouped(measured.buckets));
+    check("backfill", backfill, duration(measured.backfillPerSloMs));
+    check("tick", tick, duration(measured.tickMs.p50));
+    check("list page", page_, duration(measured.pageMs.p50));
+  }
+  if (quotedCases.size === 0) {
+    fail("SLOS.md quotes no benchmark row, so this check is matching nothing");
+  }
+  for (const measured of slo.cases) {
+    if (!quotedCases.has(measured.monitors)) {
+      fail(
+        `a case for ${measured.monitors} monitors was measured and SLOS.md does not quote it`,
+      );
+    }
+  }
+
+  // The marketing surface quotes two of these cells in prose, and until
+  // now nothing checked it. `public-facts.mjs` polices the landing page's
+  // test counts and version numbers and knows nothing about latency, so
+  // a re-measurement that updated the doc and forgot the changelog would
+  // have left the public site quoting numbers no artefact supported.
+  const LANDING = join(ROOT, "landing", "changelog.html");
+  if (existsSync(LANDING)) {
+    const landing = readFileSync(LANDING, "utf8");
+    const largest = slo.cases.reduce((a, b) =>
+      b.monitors > a.monitors ? b : a,
+    );
+    const quote =
+      // Whitespace-flexible throughout: this file is prettier-formatted,
+      // so a number changing width rewraps the sentence and a pattern
+      // that assumed single spaces would report the claim as missing
+      // rather than as wrong.
+      /render\s+in\s+([\d.]+m?s)\s+and\s+cost\s+([\d.]+m?s)\s+of\s+background\s+work\s+a\s+minute/is.exec(
+        landing,
+      );
+    if (!quote) {
+      fail(
+        "landing/changelog.html no longer quotes the measured page and tick " +
+          "figures in the shape this check reads, so it is checking nothing",
+      );
+    } else {
+      const expectedPage = duration(largest.pageMs.p50);
+      const expectedTick = duration(largest.tickMs.p50);
+      if (quote[1] !== expectedPage) {
+        fail(
+          `landing/changelog.html says the list page renders in ${quote[1]}, ` +
+            `the artefact says ${expectedPage}`,
+        );
+      }
+      if (quote[2] !== expectedTick) {
+        fail(
+          `landing/changelog.html says the tick costs ${quote[2]}, ` +
+            `the artefact says ${expectedTick}`,
+        );
+      }
+    }
+  }
+
+  // The pool claim, which is a sentence about every case at once.
+  if (/zero waiters throughout/i.test(sloPage)) {
+    const busy = slo.cases.filter((c) => c.poolWaitingAfter !== 0);
+    if (busy.length > 0) {
+      fail(
+        `SLOS.md says the pool showed zero waiters throughout, and ` +
+          `${busy.length} case(s) recorded some`,
+      );
+    }
+  } else {
+    fail("SLOS.md no longer states what the connection pool did");
+  }
+
+  // The derived ceiling. Stated as "roughly N hundred objectives per
+  // worker", and it has to stay within reach of what the largest
+  // measured case implies at the tick's own budget.
+  const stated = /roughly ([a-z]+) hundred objectives per worker/i.exec(
+    sloPage,
+  );
+  if (!stated) {
+    fail("SLOS.md no longer states the per-worker objective ceiling");
+  } else {
+    const WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6 };
+    const claimed = (WORDS[stated[1].toLowerCase()] ?? 0) * 100;
+    const largest = slo.cases.reduce((a, b) =>
+      b.monitors > a.monitors ? b : a,
+    );
+    const implied = (largest.slos * TICK_BUDGET_MS) / largest.tickMs.p50;
+    if (!claimed) {
+      fail(`SLOS.md states a ceiling this check cannot read: "${stated[1]}"`);
+    } else if (claimed > implied) {
+      fail(
+        `SLOS.md claims roughly ${claimed} objectives per worker; the ` +
+          `measured tick (${largest.tickMs.p50}ms for ${largest.slos}) implies ` +
+          `${Math.round(implied)} at a ${TICK_BUDGET_MS}ms budget`,
+      );
+    } else if (claimed < implied / 2) {
+      fail(
+        `SLOS.md claims roughly ${claimed} objectives per worker and the ` +
+          `measurement implies ${Math.round(implied)}: the published figure ` +
+          `is stale in the safe direction, which is still stale`,
+      );
+    }
+  }
+}
+
+
 
 if (problems.length > 0) {
   console.error("benchmark evidence does not hold up:");

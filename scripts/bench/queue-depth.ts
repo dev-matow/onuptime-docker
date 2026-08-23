@@ -223,9 +223,7 @@ async function main() {
       drainPerSecond: Number(drainRate.toFixed(1)),
       ticksToClearBatchesOf250: ticksToClear,
       minutesToClearAtOneTickPerMinute: ticksToClear,
-      oldestQueuedSeconds: Number(
-        (oldest[0]?.age_seconds ?? 0).toFixed(1),
-      ),
+      oldestQueuedSeconds: Number((oldest[0]?.age_seconds ?? 0).toFixed(1)),
       workerHeapMb: heapMb,
       poolMax: poolPeak.max,
       poolTotalBefore: poolBefore.total,
@@ -240,7 +238,9 @@ async function main() {
     );
 
     for (const org of orgs) {
-      await db.delete(organization).where(eq(organization.id, org.organizationId));
+      await db
+        .delete(organization)
+        .where(eq(organization.id, org.organizationId));
       await db.delete(user).where(eq(user.id, org.userId));
     }
   }

@@ -87,11 +87,17 @@ function readRegistry() {
     }
     process.stdout.write("@@" + JSON.stringify(out) + "@@");
   `;
-  const out = execFileSync("npx", ["tsx", "-e", script], {
-    cwd: ROOT,
-    encoding: "utf8",
-    maxBuffer: 32 * 1024 * 1024,
-  });
+  // `node node_modules/tsx/dist/cli.mjs`, not `npx tsx`. `execFileSync`
+  // does not go through a shell, and on Windows `npx` is `npx.cmd` - so
+  // the old line was `spawnSync npx ENOENT` on every Windows checkout
+  // and this script could not be run at all there. Invoking the resolved
+  // executable directly is also one fewer process and cannot pick up a
+  // different tsx from somewhere on PATH.
+  const out = execFileSync(
+    process.execPath,
+    [join(ROOT, "node_modules", "tsx", "dist", "cli.mjs"), "-e", script],
+    { cwd: ROOT, encoding: "utf8", maxBuffer: 32 * 1024 * 1024 },
+  );
   const match = out.match(/@@(.*)@@/s);
   if (!match) throw new Error("registry probe produced no output");
   return JSON.parse(match[1]);

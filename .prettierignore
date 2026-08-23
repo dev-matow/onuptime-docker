@@ -2,3 +2,36 @@
 node_modules
 drizzle
 package-lock.json
+
+# Generated output whose generator does NOT go through prettier. A
+# formatter and a generator cannot both be the author of the same bytes:
+# prettier reflows a short JSON array onto one line, `JSON.stringify(x,
+# null, 2)` does not, and whichever ran last wins. The result is a format
+# gate that goes red on a commit which only regenerated an artefact, and
+# that is how a gate gets switched off.
+#
+# Nothing is lost. Each of these has a --check gate of its own, which is
+# the stricter test: it compares the artefact against the code it
+# describes, not against a style.
+#
+#   landing/demo          npm run demo:build
+#   public-facts.json     npm run facts
+#   monitor-type-dod.json npm run dod
+#   kuma-mapping.json     npm run kuma:matrix
+#
+# docs/MIGRATION.md and docs/MONITOR-TYPE-DOD.md are deliberately NOT
+# here. Their generators format the page through this repository's own
+# prettier before writing it, so the two already agree - and listing them
+# breaks the generator rather than protecting it, because the prettier
+# CLI honours this file: `migration:check` started failing the moment
+# they were added, comparing an unformatted render against a formatted
+# page. docs/HIGH-FREQUENCY.md is not here either; bench:check only reads
+# it, so it is hand-written prose.
+#
+# Patterns are gitignore syntax, so a trailing comment on a pattern line
+# becomes part of the pattern and silently matches nothing. That is why
+# the generator names are listed above rather than beside each path.
+landing/demo
+public-facts.json
+monitor-type-dod.json
+kuma-mapping.json

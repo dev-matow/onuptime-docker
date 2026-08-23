@@ -196,6 +196,75 @@ report false measurements about the targets it was assigned, which is
 what the quorum is for and why the default is `majority` rather than
 `any`.
 
+## Scripted synthetics, and the browser runner
+
+A journey is **data**, never code. There is no scripting surface at all:
+no expression evaluator, no template with function calls, no regular
+expressions, and no `page.evaluate`. What an operator writes is a list of
+typed steps, and the only thing their text can become is a value - a URL,
+a CSS selector, something typed into a field, or a string compared
+against page content. The set of things a journey can be made to do is
+the set of step kinds in the language, and it cannot be extended from
+outside the repository. `docs/SYNTHETICS.md` §1 states the reasoning at
+length.
+
+API journeys execute inside the worker through the egress policy above,
+so they have the same posture as the `http` type. Browser journeys are
+executed by a **separate runner container**, and Vigil closes the gap the
+egress policy cannot cover on its own from both ends: every host a
+journey may reach is resolved and classified by the worker before
+dispatch, and the runner refuses a main-frame navigation to any host that
+was not on that list.
+
+### The runner is internal, and that is enforced
+
+The runner is not a remote agent and has no enrolment protocol. Unlike a
+probe agent, which is outbound-only and dials the controller, the worker
+dials the runner - so it has to be reachable, and what is reachable is a
+browser that renders whatever it is told to, receiving request bodies
+that carry the journey's credentials.
+
+Vigil therefore refuses unsafe deployments rather than warning about
+them, in both directions:
+
+| Where the runner is | What is required                    |
+| ------------------- | ----------------------------------- |
+| loopback            | nothing; the kernel is the boundary |
+| private network     | a shared token                      |
+| public address      | **https and a shared token**        |
+
+The controller checks this **before it builds the request body**, so a
+journey's secrets are never transmitted on a connection that would have
+been refused. The runner itself refuses to start when it listens on
+anything but loopback with no token set. A container network is not an
+exemption: everything else on it can reach the runner, including a
+browser that has just rendered somebody else's page.
+
+Tokens are compared in constant time against a SHA-256 of the presented
+value. Rotation is a restart with a new value on both sides; the runner
+holds no state, so there is nothing to migrate.
+
+### What a compromised runner has
+
+One journey at a time and the values it was given. No database
+credential, no session secret, no organization id, no monitor list, and
+no route that reports what else exists. That is asserted by a test that
+walks the runner's real import graph, not merely claimed here.
+
+### Evidence, and what is deliberately not stored
+
+Run evidence never contains a request header value, a cookie value, or an
+extracted value - only their names. A URL that a secret was interpolated
+into is stored without its query string. Every string that does reach
+evidence is scrubbed against the run's secret values in raw,
+percent-encoded, form-encoded, JSON-escaped and base64 forms, and the
+scrubber re-checks its own output and withholds anything it could not
+clean. Screenshots mask password inputs and every field a secret was
+typed into.
+
+Journeys are never dispatched to remote probes, because a run is recorded
+to a database a probe agent holds no credential for.
+
 ## Reducing the trust surface
 
 - `GITHUB_TOKEN` and any recovery/webhook receiver you build should have

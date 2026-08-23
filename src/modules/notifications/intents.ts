@@ -98,7 +98,7 @@ export async function recordDispatchIntent(
   input: {
     organizationId: string;
     causeKey: string;
-    kind: "incident" | "recovery";
+    kind: "incident" | "recovery" | "slo" | "runbook" | "task";
     incidentId?: string | null;
     payload: DispatchIntentPayload;
   },

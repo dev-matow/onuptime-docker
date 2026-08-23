@@ -33,7 +33,17 @@ export interface LedgerStamp {
  * Actor ids are stable for the life of a process, and a check writes one
  * fact — so without a cache every observation would cost an extra
  * round trip to learn something that never changes.
+ *
+ * Bounded, because the key is not always ours to choose. In the worker
+ * it holds one entry (the replica's own name); in the web process it is
+ * keyed by user id and grows with everyone who has ever acted in this
+ * process's lifetime. The bound is far above any real population — an
+ * eviction only costs the round trip back — and follows the rule
+ * `lib/rate-limit.ts` wrote down after measuring the unbounded version
+ * of exactly this shape: a Map that grows with the world is a leak with
+ * a flattering name.
  */
+const ACTOR_CACHE_MAX = 10_000;
 const actorIdCache = new Map<string, string>();
 
 export async function ensureActor(
@@ -53,6 +63,14 @@ export async function ensureActor(
   });
   if (!actor) throw new Error(`Could not resolve actor ${cacheKey}`);
 
+  if (actorIdCache.size >= ACTOR_CACHE_MAX) {
+    // Oldest-inserted first: a Map iterates in insertion order, and the
+    // long-lived entries (the worker's own identity, the active staff)
+    // re-enter on their next fact. Simpler than LRU and wrong by at
+    // most one extra query per evicted actor.
+    const oldest = actorIdCache.keys().next().value;
+    if (oldest !== undefined) actorIdCache.delete(oldest);
+  }
   actorIdCache.set(cacheKey, actor.id);
   return actor.id;
 }

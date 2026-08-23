@@ -5,12 +5,12 @@ at `/api/health/checks/alarms`, and reads the answer.
 
 |          |                                                                           |
 | -------- | ------------------------------------------------------------------------- |
-| Kind     | `active`: Vigil dials it on the monitor's interval                       |
+| Kind     | `active`: Vigil dials it on the monitor's interval                        |
 | Target   | the management plugin's base URL, e.g. `https://rabbit.example.com:15672` |
-| Port     | none. It is already in the URL                                           |
+| Port     | none. It is already in the URL                                            |
 | Settings | `username`, `password` (both optional, in practice required)              |
 | Secrets  | `password`                                                                |
-| Recovery | supported. The target can be re-probed to verify a fix                   |
+| Recovery | supported. The target can be re-probed to verify a fix                    |
 
 ## Why the management API and not AMQP
 
@@ -31,24 +31,24 @@ nobody could tell which node to look at.
 
 ## What it observes
 
-| Fact             | Meaning                                                                                        |
-| ---------------- | ---------------------------------------------------------------------------------------------- |
+| Fact             | Meaning                                                                                       |
+| ---------------- | --------------------------------------------------------------------------------------------- |
 | `statusCode`     | what the management API answered, 200 pass, 503 fail                                          |
-| `alarmsClear`    | true when the node reported a passing health check                                             |
+| `alarmsClear`    | true when the node reported a passing health check                                            |
 | `alarmReason`    | the node's own words, e.g. `resource alarm(s) in effect:[memory]`: null when the check passed |
-| `responseTimeMs` | request to last byte of the answer                                                             |
+| `responseTimeMs` | request to last byte of the answer                                                            |
 
 ## What makes it fail
 
-| Verdict          | When                                                                                                    |
-| ---------------- | ------------------------------------------------------------------------------------------------------- |
-| down             | the node answered 503, or a body saying `"status":"failed"`                                             |
+| Verdict          | When                                                                                                   |
+| ---------------- | ------------------------------------------------------------------------------------------------------ |
+| down             | the node answered 503, or a body saying `"status":"failed"`                                            |
 | down             | any status code other than 200 or 503, a 500 from the plugin, a 502 from a proxy in front of it, a 3xx |
-| degraded         | the answer took longer than the monitor's degraded threshold                                            |
-| down (transport) | the connection failed, timed out, or the body stopped arriving                                          |
+| degraded         | the answer took longer than the monitor's degraded threshold                                           |
+| down (transport) | the connection failed, timed out, or the body stopped arriving                                         |
 | indeterminate    | 401 or 403. The stored credentials were refused                                                        |
 | indeterminate    | 404, no health check at that path                                                                      |
-| indeterminate    | 200 that is not a health-check document                                                                 |
+| indeterminate    | 200 that is not a health-check document                                                                |
 
 The three `indeterminate` rows are the important ones. Each is Vigil
 saying it could not make the measurement, and each would be a lie as

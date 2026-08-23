@@ -22,7 +22,11 @@ import { runMonitorTick } from "./jobs/monitor-tick";
 // and Core's own CI reports a warning nobody there can act on.
 import { runNotificationDelivery } from "./jobs/notification-delivery";
 import { pruneOldChecks } from "./jobs/retention";
+import { drainStaleQueueBacklog } from "./queue-backlog";
 import {
+  HIGH_CHURN_DELETE_AFTER_SECONDS,
+  HIGH_CHURN_QUEUES,
+  QUEUE_MAINTENANCE_INTERVAL_SECONDS,
   QUEUES,
   type EscalationStepJob,
   type MonitorCheckJob,
@@ -44,6 +48,12 @@ async function main() {
   const boss = new PgBoss({
     connectionString: env.DATABASE_URL,
     application_name: "vigil-worker",
+    // Deletion of finished jobs happens ONLY on this sweep, and pg-boss's
+    // default is once a day — sized for queues where jobs are business
+    // records. Ours are transport (see HIGH_CHURN_DELETE_AFTER_SECONDS in
+    // queues.ts), and a day of `monitor-check` completions on a large
+    // fleet is millions of rows the product has no reader for.
+    maintenanceIntervalSeconds: QUEUE_MAINTENANCE_INTERVAL_SECONDS,
   });
 
   boss.on("error", (error) => log.error({ err: error }, "pg-boss error"));
@@ -99,8 +109,25 @@ async function main() {
   // exactly where nobody is watching the logs.
   await boss.createQueue(QUEUES.highFrequencyRollup, { policy: "singleton" });
   await boss.createQueue(QUEUES.retention);
-  // Singleton: the pass is level-triggered and idempotent, so two of
-  // them would be correct - and they would also both walk every window
+
+  // Retention for the high-churn queues, applied AFTER creation and
+  // through `updateQueue` on purpose: `create_queue` is INSERT ... ON
+  // CONFLICT DO NOTHING, so an option added there reaches new
+  // installations and silently never reaches an upgraded one. This is
+  // the single code path both get. Policy and retry options are not
+  // touched — `updateQueue` cannot change a policy at all, and the
+  // per-key COALESCE leaves every option not named here as it stands.
+  for (const queue of HIGH_CHURN_QUEUES) {
+    await boss.updateQueue(queue, {
+      deleteAfterSeconds: HIGH_CHURN_DELETE_AFTER_SECONDS,
+    });
+  }
+  // The update above reaches rows created from here on — pg-boss stamps
+  // the deletion window per row at insert — so the backlog an upgrade
+  // inherits is drained explicitly, in batches, off the boot path.
+  void drainStaleQueueBacklog(db).catch((error) =>
+    log.warn({ err: error }, "stale queue backlog drain failed"),
+  );
 
   await boss.work(QUEUES.monitorTick, async () => {
     const result = await runMonitorTick(db, boss);
@@ -180,13 +207,16 @@ async function main() {
   // A message queued just before the last shutdown should not wait a
   // minute for its first attempt.
   await boss.send(QUEUES.notificationDelivery, {});
-  // Same reasoning, sharper: a window that ended while the worker was
-  // down is holding incidents nobody has been paged about, and they wait
 
   // The high-frequency plane. Started unconditionally and idle by
-  // default: with no monitor enabled it holds its shard leases and
-  // reloads an empty set, which is one indexed query every two seconds.
-  // Gating it behind an environment variable would mean an operator can
+  // default: with no monitor enabled its whole footprint is the
+  // discovery query, one indexed SELECT every two seconds. It used to
+  // also hold all sixteen shard leases while idle — upserts every two
+  // seconds, ~700k WAL writes a day on an installation using none of it
+  // — and to run its 25ms scheduler over an empty table; both now start
+  // in the same reload pass that first sees a monitor, so onboarding
+  // latency is unchanged and the idle cost is the one query. Gating the
+  // plane behind an environment variable would mean an operator can
   // enable high frequency in the UI on a deployment where nothing is
   // running to honour it — a setting that saves and then does nothing is
   // worse than a setting that is absent.

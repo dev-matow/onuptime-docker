@@ -2,13 +2,17 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 
 import { logger } from "@/lib/logger";
 import {
+  drainBodyCapped,
   EgressBlockedError,
   egressFetch,
   egressPolicyFor,
+  MAX_DRAIN_BYTES,
   type EgressAuditSink,
   type EgressChannel,
   type EgressLookup,
 } from "@/modules/monitors/egress";
+
+import { sentNothing } from "./providers/types";
 
 /**
  * Outbound webhook delivery: compact versioned payloads, HMAC-SHA-256
@@ -37,6 +41,10 @@ export const WEBHOOK_EVENTS = [
   "incident.resolved",
   "monitor.down",
   "monitor.up",
+  // Three events and not one with a severity field, because a routing
+  // rule matches on severity and an operator reading that rule has to be
+  // able to tell what it will catch from the event name. Which of the
+  // first two a burn alert uses is the rule's own `severity` column.
 ] as const;
 
 export type WebhookEvent =
@@ -122,6 +130,9 @@ const EVENT_LABELS: Record<string, string> = {
   "recovery.failed": "🔴 Recovery failed",
   "probe.partial_failure": "🟠 Probes disagree",
   "probe.insufficient_quorum": "🟠 Probe quorum not met",
+  "slo.burn_critical": "🔴 Error budget burning fast",
+  "slo.burn_warning": "🟠 Error budget burning",
+  "slo.burn_resolved": "🟢 Error budget burn ended",
   "webhook.test": "✅ Test notification from Vigil",
   "recovery.execute": "🔧 Recovery action triggered",
   "recovery.test": "🔧 Test recovery trigger from Vigil",
@@ -205,10 +216,159 @@ const defaultSleep = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
+ * What one signed POST concluded, in the vocabulary the outbox already
+ * uses for exactly this question.
+ *
+ * Four cases, and the fourth is why this was split out of
+ * `deliverWebhook`. That function collapses everything into
+ * `{delivered, error}`, which is the right shape for a caller that only
+ * retries and gives up. It is the wrong shape for a caller that has to
+ * decide whether an effect MAY HAVE HAPPENED, which is every runbook
+ * step that reaches somebody else's infrastructure.
+ *
+ * The classification is `sentNothing`, the same walk of the cause chain
+ * the provider transports use. Sharing it is the point: a timeout after
+ * the body went out means something at the far end may have acted, and
+ * two implementations of that judgement would eventually disagree about
+ * the one call where it mattered.
+ */
+export type PostOutcome =
+  | { status: "delivered"; httpStatus: number }
+  /** It might succeed later, and NOTHING was sent that could have taken
+   * effect: a refused connection, a name that does not resolve, or a
+   * 5xx/429 the far end produced before doing anything. */
+  | { status: "retryable"; error: string; httpStatus?: number }
+  /** It will never succeed as configured: a 4xx, or an address the
+   * egress policy refuses. */
+  | { status: "permanent"; error: string; httpStatus?: number }
+  /** The request went out and its fate is unknown. */
+  | { status: "unknown"; error: string };
+
+export interface SignedPostOptions {
+  timeoutMs?: number;
+  fetchImpl?: typeof fetch;
+  channel?: EgressChannel;
+  allowPrivate?: boolean;
+  lookup?: EgressLookup;
+  onException?: EgressAuditSink;
+  /**
+   * The stable execution identity, sent as `Idempotency-Key`.
+   *
+   * A statement about what the SENDER did, never a claim about what the
+   * receiver does with it. A receiver that honours the header collapses
+   * the duplicate; one that ignores it acts twice, which is why an
+   * unknown outcome is never retried automatically whatever this header
+   * says.
+   */
+  idempotencyKey?: string;
+}
+
+/**
+ * One signed POST, classified. No retries and no sleeping: the caller
+ * owns the schedule.
+ */
+export async function signedPostOnce(
+  endpoint: WebhookEndpoint,
+  payload: WebhookPayload,
+  options: SignedPostOptions = {},
+): Promise<PostOutcome> {
+  const timeoutMs = options.timeoutMs ?? 5_000;
+  const fetchImpl = options.fetchImpl ?? fetch;
+
+  const body = buildDeliveryBody(detectWebhookFormat(endpoint.url), payload);
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    "user-agent": "vigil-webhooks/1.0",
+    "x-vigil-event": payload.event,
+    "x-vigil-signature": signBody(endpoint.secret, body),
+    ...(options.idempotencyKey
+      ? { "idempotency-key": options.idempotencyKey }
+      : {}),
+  };
+
+  try {
+    const { response } = await egressFetch(
+      endpoint.url,
+      {
+        method: "POST",
+        headers,
+        body,
+        signal: AbortSignal.timeout(timeoutMs),
+      },
+      {
+        // Re-checked on every call rather than once before a retry loop:
+        // a retry is a new connection minutes later, and the record it
+        // resolves is the attacker's to change in between.
+        policy: egressPolicyFor(
+          options.channel ?? "webhook",
+          options.allowPrivate,
+        ),
+        lookup: options.lookup,
+        onException: options.onException,
+        fetchImpl,
+        // Never follow: a redirect would downgrade the POST to a GET and
+        // drop the body and signature, silently delivering an empty
+        // unsigned request — and it would move a signed request to a host
+        // the operator never configured. Surfaced as a failure instead, so
+        // the operator fixes the URL (e.g. an http→https endpoint).
+        maxRedirects: 0,
+      },
+    );
+    // The body is irrelevant — read and discarded with a cap, not
+    // buffered. `arrayBuffer()` held the receiver's whole response in
+    // memory for a delivery that only reads the status line, and a
+    // webhook receiver is operator-configured, not trusted. There is no
+    // keep-alive to preserve: the egress transport runs `agent: false`.
+    await drainBodyCapped(response, MAX_DRAIN_BYTES);
+
+    if (response.ok) {
+      return { status: "delivered", httpStatus: response.status };
+    }
+    // Client errors other than rate limiting won't fix themselves.
+    if (response.status < 500 && response.status !== 429) {
+      return {
+        status: "permanent",
+        httpStatus: response.status,
+        error: `endpoint returned ${response.status}`,
+      };
+    }
+    return {
+      status: "retryable",
+      httpStatus: response.status,
+      error: `endpoint returned ${response.status}`,
+    };
+  } catch (error) {
+    // A policy refusal is a misconfiguration, not a transient fault:
+    // the same URL resolves to the same forbidden place next time, so
+    // retrying it is three log lines and no delivery. Reported
+    // verbatim — the operator needs to read which address it landed
+    // on to fix the endpoint.
+    if (error instanceof EgressBlockedError) {
+      logger.warn(
+        { event: payload.event, err: error.message },
+        "webhook delivery refused by egress policy",
+      );
+      return { status: "permanent", error: error.message };
+    }
+    const message =
+      error instanceof Error ? error.message : "webhook request failed";
+    return sentNothing(error)
+      ? { status: "retryable", error: message }
+      : { status: "unknown", error: message };
+  }
+}
+
+/**
  * POSTs the payload with retries. Succeeds on a 2xx; retries transient
  * failures (network errors, timeouts, 5xx, 429) with exponential
  * backoff and gives up after `attempts`. 4xx (except 429) is treated as
  * a permanent misconfiguration and not retried. Always resolves.
+ *
+ * A loop over {@link signedPostOnce}, which is where the request, the
+ * signature and the classification now live. It was a second copy of
+ * all three until the runbook engine needed the classification, and two
+ * implementations of "did this arrive" is exactly the drift this
+ * repository keeps finding.
  */
 export async function deliverWebhook(
   endpoint: WebhookEndpoint,
@@ -216,82 +376,38 @@ export async function deliverWebhook(
   options: DeliveryOptions = {},
 ): Promise<DeliveryResult> {
   const attempts = options.attempts ?? 3;
-  const timeoutMs = options.timeoutMs ?? 5_000;
   const backoffMs = options.backoffMs ?? 500;
-  const fetchImpl = options.fetchImpl ?? fetch;
   const sleep = options.sleep ?? defaultSleep;
-
-  const body = buildDeliveryBody(detectWebhookFormat(endpoint.url), payload);
-  const headers = {
-    "content-type": "application/json",
-    "user-agent": "vigil-webhooks/1.0",
-    "x-vigil-event": payload.event,
-    "x-vigil-signature": signBody(endpoint.secret, body),
-  };
-
-  const egress = {
-    // Re-checked on every attempt rather than once before the loop: a
-    // retry is a new connection minutes later, and the record it
-    // resolves is the attacker's to change in between.
-    policy: egressPolicyFor(options.channel ?? "webhook", options.allowPrivate),
-    lookup: options.lookup,
-    onException: options.onException,
-    fetchImpl,
-    // Never follow: a redirect would downgrade the POST to a GET and
-    // drop the body and signature, silently delivering an empty
-    // unsigned request — and it would move a signed request to a host
-    // the operator never configured. Surfaced as a failure instead, so
-    // the operator fixes the URL (e.g. an http→https endpoint).
-    maxRedirects: 0,
-  };
 
   let lastError: string | undefined;
   let lastStatus: number | undefined;
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    try {
-      const { response } = await egressFetch(
-        endpoint.url,
-        {
-          method: "POST",
-          headers,
-          body,
-          signal: AbortSignal.timeout(timeoutMs),
-        },
-        egress,
-      );
-      lastStatus = response.status;
-      // Drain so keep-alive sockets are reusable; body is irrelevant.
-      await response.arrayBuffer().catch(() => undefined);
+    const outcome = await signedPostOnce(endpoint, payload, {
+      timeoutMs: options.timeoutMs ?? 5_000,
+      fetchImpl: options.fetchImpl,
+      channel: options.channel,
+      allowPrivate: options.allowPrivate,
+      lookup: options.lookup,
+      onException: options.onException,
+    });
 
-      if (response.ok) {
-        return { delivered: true, attempts: attempt, status: response.status };
-      }
-      // Client errors other than rate limiting won't fix themselves.
-      if (response.status < 500 && response.status !== 429) {
-        return {
-          delivered: false,
-          attempts: attempt,
-          status: response.status,
-          error: `endpoint returned ${response.status}`,
-        };
-      }
-      lastError = `endpoint returned ${response.status}`;
-    } catch (error) {
-      // A policy refusal is a misconfiguration, not a transient fault:
-      // the same URL resolves to the same forbidden place next time, so
-      // retrying it is three log lines and no delivery. Reported
-      // verbatim — the operator needs to read which address it landed
-      // on to fix the endpoint.
-      if (error instanceof EgressBlockedError) {
-        logger.warn(
-          { event: payload.event, err: error.message },
-          "webhook delivery refused by egress policy",
-        );
-        return { delivered: false, attempts: attempt, error: error.message };
-      }
-      lastError =
-        error instanceof Error ? error.message : "webhook request failed";
+    if (outcome.status === "delivered") {
+      return { delivered: true, attempts: attempt, status: outcome.httpStatus };
+    }
+    if (outcome.status === "permanent") {
+      return {
+        delivered: false,
+        attempts: attempt,
+        ...(outcome.httpStatus === undefined
+          ? {}
+          : { status: outcome.httpStatus }),
+        error: outcome.error,
+      };
+    }
+    lastError = outcome.error;
+    if (outcome.status === "retryable" && outcome.httpStatus !== undefined) {
+      lastStatus = outcome.httpStatus;
     }
 
     if (attempt < attempts) {

@@ -81,6 +81,9 @@ export function eventSeverity(event: WebhookEvent): MessageSeverity {
     case "incident.opened":
       return "critical";
     case "incident.updated":
+    // Late work is a warning and not an alert. It is somebody's
+    // deadline, not an outage, and a channel that pages at the same
+    // volume for both is one whose pages stop being read.
       return "warning";
     case "monitor.up":
     case "incident.resolved":

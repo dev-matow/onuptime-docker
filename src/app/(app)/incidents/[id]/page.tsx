@@ -8,6 +8,7 @@ import {
   UserIcon,
 } from "@phosphor-icons/react/dist/ssr";
 
+
 import { IncidentStatusBadge, SeverityBadge } from "@/components/status";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { db } from "@/db";
@@ -38,6 +39,7 @@ export default async function IncidentDetailPage(
     },
   );
   const { incident, monitor, timeline } = detail;
+
 
   const canUpdate = hasPermission(ctx.role, { incident: ["update"] });
   const canResolve = hasPermission(ctx.role, { incident: ["resolve"] });

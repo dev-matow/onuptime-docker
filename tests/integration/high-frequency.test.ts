@@ -404,12 +404,44 @@ describe("the sample writer", () => {
   });
 });
 
+/**
+ * A recent timestamp whose whole `spanMs` window sits inside one hour
+ * and one day.
+ *
+ * Both constraints are real and they pull against each other. The rollup
+ * tests assert "one hour bucket" and "one day bucket", which is false
+ * whenever the samples straddle a boundary - a CI run at 23:5x UTC put
+ * them either side of one and failed. But `rollupMinutes` only looks
+ * back ten minutes, so the obvious fix of anchoring to a fixed point in
+ * the previous hour produces no minute buckets at all, which is how the
+ * first attempt at this failed.
+ *
+ * So: recent, truncated to the minute, and nudged back only when the
+ * window would actually cross. Worst case is five and a half minutes
+ * old, comfortably inside the ten-minute window.
+ *
+ * The sibling test below had already been patched once for the `:59`
+ * instance of this. One instance at a time is how a flake survives.
+ */
+function offBoundary(spanMs: number): Date {
+  const base = new Date(Date.now() - 90_000);
+  base.setUTCSeconds(0, 0);
+  const end = new Date(base.getTime() + spanMs);
+  if (
+    base.getUTCHours() !== end.getUTCHours() ||
+    base.getUTCDate() !== end.getUTCDate()
+  ) {
+    base.setUTCMinutes(base.getUTCMinutes() - Math.ceil(spanMs / 60_000) - 1);
+  }
+  return base;
+}
+
 describe("rollups", () => {
   it("aggregates raw samples into minute, hour and day buckets", async () => {
     const actor = await createTestOrg();
     const monitor = await makeMonitor(actor);
 
-    const base = Date.now() - 90_000;
+    const base = offBoundary(30_000).getTime();
     const rows = Array.from({ length: 60 }, (_, n) => ({
       monitorId: monitor.id,
       observedAt: new Date(base + n * 500),
@@ -448,16 +480,10 @@ describe("rollups", () => {
 
     // One minute with a single slow sample, one with many fast ones. A
     // mean of the two minute-means says ~505ms; the truth is ~14ms.
-    const base = new Date(Date.now() - 150_000);
-    base.setUTCSeconds(0, 0);
     // The two minutes have to land in the same hour, or the assertion
     // below reads whichever of the two hour buckets came back first and
-    // counts half the samples. Truncated to the minute, `base` sits at
-    // :59 for one minute in every sixty, which is how this test passed
-    // locally and failed a CI run that happened to start at 00:02 UTC.
-    if (base.getUTCMinutes() === 59) {
-      base.setUTCMinutes(58);
-    }
+    // counts half the samples. See `offBoundary`.
+    const base = offBoundary(180_000);
     await db.insert(monitorHfSamples).values([
       {
         monitorId: monitor.id,
@@ -828,4 +854,65 @@ describe("the ordinary tick, and monitors this plane owns", () => {
 
     expect(boss.ids).toContain(monitorId);
   });
+});
+
+/**
+ * The idle shape: a plane with nothing to schedule owns nothing.
+ *
+ * Before this, an idle plane held all sixteen shard leases (upserts
+ * every two seconds, ~700k WAL writes a day on an installation with no
+ * high-frequency monitor) and ran its 25ms scheduler over an empty
+ * table. Both now follow the fleet: the discovery query — which runs
+ * regardless, it is how monitors are found — flips them on in the same
+ * pass that first sees a monitor, and off in the pass that sees none.
+ * The ordinary scheduler's fallback semantics are untouched: an
+ * unclaimed shard has always meant "the pg-boss plane picks the monitor
+ * up", which is exactly what covers the sub-reload onboarding window.
+ */
+describe("idle shape", () => {
+  it("claims leases and starts ticking only while monitors exist", async () => {
+    const ownerId = `idle-test-${randomUUID().slice(0, 8)}`;
+    const probed: string[] = [];
+    const fetchImpl = (async (input: RequestInfo | URL) => {
+      probed.push(String(input));
+      return new Response("ok", { status: 200 });
+    }) as typeof fetch;
+
+    const plane = await startPlane(fetchImpl, ownerId);
+
+    // Idle: no ticker, no shards, no lease rows under this owner.
+    expect(plane.stats().ticking).toBe(false);
+    expect(plane.stats().shards).toHaveLength(0);
+    const idleRows = await db
+      .select({ shard: monitorHfLeases.shard })
+      .from(monitorHfLeases)
+      .where(eq(monitorHfLeases.ownerId, ownerId));
+    expect(idleRows).toHaveLength(0);
+
+    // A monitor appears; within one reload the plane owns and ticks.
+    const actor = await createTestOrg();
+    const monitor = await makeMonitor(actor);
+    await setHighFrequency(db, actor, monitor.id, {
+      enabled: true,
+      intervalMs: 500,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 2_600));
+    expect(plane.stats().ticking).toBe(true);
+    expect(plane.stats().shards.length).toBeGreaterThan(0);
+    // And it is genuinely probing — idling here would make "ticking"
+    // a light that lies.
+    await new Promise((resolve) => setTimeout(resolve, 1_200));
+    expect(probed.length).toBeGreaterThan(0);
+
+    // The monitor stands down; the next reload hands everything back.
+    await setHighFrequency(db, actor, monitor.id, { enabled: false });
+    await new Promise((resolve) => setTimeout(resolve, 2_600));
+    expect(plane.stats().ticking).toBe(false);
+    expect(plane.stats().shards).toHaveLength(0);
+    const releasedRows = await db
+      .select({ shard: monitorHfLeases.shard })
+      .from(monitorHfLeases)
+      .where(eq(monitorHfLeases.ownerId, ownerId));
+    expect(releasedRows).toHaveLength(0);
+  }, 20_000);
 });

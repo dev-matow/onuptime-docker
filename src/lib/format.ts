@@ -40,8 +40,17 @@ export function formatDuration(ms: number): string {
     return rest ? `${minutes}m ${rest}s` : `${minutes}m`;
   }
   const hours = Math.floor(minutes / 60);
-  const rest = minutes % 60;
-  return rest ? `${hours}h ${rest}m` : `${hours}h`;
+  if (hours < 48) {
+    const rest = minutes % 60;
+    return rest ? `${hours}h ${rest}m` : `${hours}h`;
+  }
+  // Past two days, hours stop being a unit anybody reads. A thirty-day
+  // objective's measured time is 720h, which is a number the eye has to
+  // divide before it means anything; the minutes are noise at that
+  // scale, so they are dropped rather than carried.
+  const days = Math.floor(hours / 24);
+  const rest = hours % 24;
+  return rest ? `${days}d ${rest}h` : `${days}d`;
 }
 
 /**

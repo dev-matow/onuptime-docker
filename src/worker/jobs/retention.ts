@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 
 import { db } from "@/db";
-import { monitorChecks } from "@/db/schema";
+import { monitorChecks, monitors } from "@/db/schema";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { pruneExpandedIntents } from "@/modules/notifications/intents";
@@ -35,16 +35,70 @@ const STALE_CLAIM_HOURS = 1;
  */
 const PRUNE_BATCH = 5_000;
 
+export interface RetentionOptions {
+  /**
+   * Restricts the observation sweep below to one tenant.
+   *
+   * Deliberately narrow, and named for what it actually covers rather
+   * than for the whole job: the notification, synthetic, maintenance and
+   * cluster sweeps further down are unaffected and stay
+   * installation-wide.
+   *
+   * The worker never passes it. It exists for the reason
+   * `materializeDueSlos`, `expandPendingIntents` and
+   * `reconcileMaintenance` all take one: a test that drives this job
+   * runs beside suites whose fixtures are dated months into the past, so
+   * an unscoped pass reaches over and deletes another suite's evidence
+   * mid-assertion. That is not hypothetical - it made the burn suite
+   * fail about one run in four, from a delete in a different file.
+   */
+  organizationId?: string;
+}
+
 /** Nightly: drop check rows past the retention window and close
  * recovery attempts orphaned by worker interruptions. */
-export async function pruneOldChecks(): Promise<void> {
-  const result = await db
-    .delete(monitorChecks)
-    .where(
-      sql`${monitorChecks.checkedAt} < now() - make_interval(days => ${CHECK_RETENTION_DAYS})`,
-    );
+export async function pruneOldChecks(
+  options: RetentionOptions = {},
+): Promise<void> {
+  const now = new Date();
+  const cutoff = new Date(now.getTime() - CHECK_RETENTION_DAYS * 86_400_000);
+  // Batched, like every other prune in this file — this one was the
+  // exception, and it is the biggest table in the product. A first run
+  // on an installation that had never pruned (or an SLO floor that just
+  // moved by months) was one statement deleting millions of rows: locks
+  // for the duration, a WAL burst, and Postgres memory for the whole
+  // dead set at once. `ctid`-batched, it converges in bounded bites and
+  // the last short batch says it is done.
+  let deleted = 0;
+  let batches = 0;
+  for (;;) {
+    const result = await db.execute(sql`
+      delete from ${monitorChecks}
+      where ctid in (
+        select ctid from ${monitorChecks}
+        where ${monitorChecks.checkedAt} < ${cutoff}::timestamptz
+        ${
+          options.organizationId
+            ? sql`and ${monitorChecks.monitorId} in (
+                select ${monitors.id} from ${monitors}
+                where ${monitors.organizationId} = ${options.organizationId}
+              )`
+            : sql``
+        }
+        limit ${PRUNE_BATCH}
+      )
+    `);
+    deleted += result.rowCount ?? 0;
+    batches += 1;
+    if ((result.rowCount ?? 0) < PRUNE_BATCH) break;
+  }
   logger.info(
-    { deleted: result.rowCount, retentionDays: CHECK_RETENTION_DAYS },
+    {
+      deleted,
+      batches,
+      retentionDays: CHECK_RETENTION_DAYS,
+      cutoff: cutoff.toISOString(),
+    },
     "pruned old monitor checks",
   );
 
@@ -67,6 +121,7 @@ export async function pruneOldChecks(): Promise<void> {
       "pruned notification history",
     );
   }
+
 
   // Expanded dispatch intents, on the same clock as the deliveries they
   // produced. A PENDING intent is never pruned however old it is: it is

@@ -197,13 +197,14 @@ it only if both agree.
 every event belongs to exactly one class - so one logical event can
 never reach the same channel twice:
 
-| Class    | Events                                                            |
-| -------- | ----------------------------------------------------------------- |
-| monitor  | `monitor.down`, `monitor.up`                                      |
-| incident | `incident.opened`, `incident.updated`, `incident.resolved`        |
-| expiry   | monitor down/up for TLS/domain-expiry monitors                    |
-| recovery | `recovery.succeeded`, `recovery.failed` (commercial)              |
-| probes   | `probe.partial_failure`, `probe.insufficient_quorum` (commercial) |
+| Class    | Events                                                                    |
+| -------- | ------------------------------------------------------------------------- |
+| monitor  | `monitor.down`, `monitor.up`                                              |
+| incident | `incident.opened`, `incident.updated`, `incident.resolved`                |
+| expiry   | monitor down/up for TLS/domain-expiry monitors                            |
+| recovery | `recovery.succeeded`, `recovery.failed` (commercial)                      |
+| probes   | `probe.partial_failure`, `probe.insufficient_quorum` (commercial)         |
+| slo      | `slo.burn_critical`, `slo.burn_warning`, `slo.burn_resolved` (commercial) |
 
 **Scope.** A channel with no monitor targeting is an organization
 default: it hears about every monitor, and about the events that belong

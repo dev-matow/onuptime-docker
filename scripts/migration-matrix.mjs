@@ -22,6 +22,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const TSX_CLI = join(ROOT, "node_modules", "tsx", "dist", "cli.mjs");
 const PAGE = join(ROOT, "docs/MIGRATION.md");
 
 /**
@@ -49,7 +50,10 @@ function render() {
         `process.stdout.write("<<<JSON>>>" + JSON.stringify(parts));`,
       ].join("\n"),
     );
-    const out = execFileSync("npx", ["tsx", probe], {
+    // `node node_modules/tsx/dist/cli.mjs`, not `npx tsx`. `execFileSync`
+    // does not go through a shell, and on Windows `npx` is `npx.cmd`, so
+    // the old line was `spawnSync npx ENOENT` on every Windows checkout.
+    const out = execFileSync(process.execPath, [TSX_CLI, probe], {
       cwd: ROOT,
       encoding: "utf8",
       env: { ...process.env, LOG_LEVEL: "error" },
@@ -82,9 +86,17 @@ function splice(page, name, body) {
  * would train everybody to ignore it.
  */
 function formatted(markdown) {
+  // Prettier's own CLI entry point, invoked by node. `npx` is `npx.cmd`
+  // on Windows and `execFileSync` does not go through a shell, so the
+  // shorter spelling made this script unrunnable on every Windows
+  // checkout.
   return execFileSync(
-    "npx",
-    ["prettier", "--stdin-filepath", "docs/MIGRATION.md"],
+    process.execPath,
+    [
+      join(ROOT, "node_modules", "prettier", "bin", "prettier.cjs"),
+      "--stdin-filepath",
+      "docs/MIGRATION.md",
+    ],
     { cwd: ROOT, input: markdown, encoding: "utf8" },
   );
 }

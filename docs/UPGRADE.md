@@ -14,6 +14,22 @@ Migrations are ordered SQL and always additive within a major version.
 Take a backup first anyway: `pg_dump -Fc` costs seconds and the one
 time you need it is the one time you skipped it.
 
+## 1.22.x → 1.26.0
+
+Nothing to do beyond the four commands above. The four migrations this
+line carries (`0033` to `0036`) belong to commercial features
+(synthetics, objectives, runbooks, tasks); in Core each is an empty file
+whose journal entry keeps the lineage shared, so they create no table
+Core has and change no row Core holds.
+
+**Expect the `pgboss` schema to shrink, once, at first worker start.**
+This release bounds job-queue retention: finished high-churn job rows
+are deleted after an hour rather than pg-boss's seven-day default, and
+the first boot after the upgrade drains the inherited backlog in
+batches. A large installation can reclaim gigabytes of PostgreSQL. The
+deletion touches only `pgboss.job`, which is transport, never
+`monitor_checks`, `incidents` or any other record.
+
 ## 1.13.0 → 1.14.0
 
 Nothing to do beyond the four commands above. The commercial edition

@@ -192,3 +192,9 @@ recreate it here deliberately.
 See also [ALERT-ROUTING.md](ALERT-ROUTING.md), which is evaluated after
 suppression, and [NOTIFICATIONS.md](NOTIFICATIONS.md) for the delivery
 pipeline underneath both.
+
+A window does **not** decide whether its minutes count against a service
+level objective. That is a policy of the objective, set per objective,
+and it does not read the suppression level. A window silencing only the
+on-call ladder is still planned maintenance to an objective that excludes
+it. See [SLOS.md](SLOS.md).

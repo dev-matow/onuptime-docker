@@ -6,6 +6,105 @@ free edition; entries for commercial-only features live in the other
 repository, because they are not in this one and listing them here would
 describe software you do not have.
 
+## 1.26.0 — 2026-08-23
+
+Operations tasks are a commercial feature and none of it is here: the
+inbox, the recurring templates, the runbook hand-over actions and the
+pages that show them live in the other repository. What this edition gets
+from the same commit:
+
+- **A finished queue job now lives an hour, not seven days.** pg-boss's
+  defaults keep a completed row seven days and delete once a day; on a
+  large installation checking every minute that is millions of rows and
+  gigabytes of PostgreSQL holding jobs whose outcome is already recorded
+  in `monitor_checks` and `notification_outbox`. High-churn queues now
+  delete finished rows after an hour, the sweep enforcing the window
+  runs every ten minutes, and a worker booting onto a backlog written by
+  an earlier build drains it in 5,000-row batches. Expect the `pgboss`
+  schema to shrink, once, at the first start after upgrading.
+- **Response bodies a check or a delivery does not need are drained
+  under a 64 KiB cap** — HTTP probes, webhook deliveries and redirect
+  hops — and a stream that errors mid-drain destroys its socket rather
+  than leaking the decompressor. Keyword assertions read at most 1 MB.
+  Outbound transports run `agent: false`: measured under the checker's
+  request pattern, keep-alive never reused a socket.
+- **Bounds where the world could grow into a process.** The ledger's
+  actor cache holds at most 10,000 entries; check-history pruning walks
+  `monitor_checks` in ctid batches instead of one unbounded delete; the
+  worker image starts `tsx` directly, so PID 1 is the process that
+  receives a shutdown signal.
+- A Web Push key-pair check that actually checks. `webpushProvider.check`
+  used to import the two halves together and treat a throw as proof they
+  did not match, which is a proof Node 24 does not supply: it accepts a
+  JWK whose public point does not belong to its private scalar. So an
+  operator who pasted halves of two different pairs was told nothing was
+  wrong, and found out from deliveries that never arrived. The check now
+  derives the public key from the private one and compares.
+
+The commercial feature adds four tables, a module, a worker pass and a
+page, all of them behind edition markers, and it reaches people through
+the dispatch-intent path this edition already has.
+
+## 1.25.0 — 2026-08-20
+
+Runbooks are a commercial feature and none of it is here: the engine, the
+typed action registry, the approvals and the pages that show them live in
+the other repository. What this edition gets from the same commit:
+
+- One implementation of a signed outbound POST. `deliverWebhook` is now
+  a retry loop over `signedPostOnce`, which owns the request, the
+  signature, the egress policy and the classification of what a failure
+  means. Behaviour is unchanged in this edition; what changed is that
+  there is one copy of "did this arrive" instead of two, and the
+  classification it uses is the one the notification transports already
+  used.
+- `ProbeSubject.trigger` accepts one more value, for evaluations an
+  automation asked for. Nothing in this edition produces it and nothing
+  branches on it; it is a label the commercial edition writes onto its
+  own records.
+
+## 1.24.0 — 2026-08-20
+
+Service level objectives are a commercial feature and none of it is here:
+the objectives, their error budgets, the burn-rate alerting and the pages
+that show them live in the other repository. What this edition gets from
+the same commit:
+
+- `formatDuration` switches to days past forty-eight hours. A four-day
+  incident read "97h 12m", which is a number the eye has to divide before
+  it means anything.
+- The duration-weighted uptime expression now also emits each
+  observation's verdict and round-trip time. Nothing in this edition
+  reads the two new columns; they are there so the commercial edition
+  does not need a second copy of the coverage-horizon rule, which is
+  exactly how the count-weighted and duration-weighted uptime numbers
+  drifted apart before 1.13.0. The uptime rule itself, and the parity
+  test that pins its two implementations together, are unchanged.
+
+## 1.23.0 — 2026-08-19
+
+Scripted synthetics is a commercial feature and none of it is here: the
+two journey check types, the runner image and the run history live in the
+other repository. What this edition does get from the same commit:
+
+- **Check now**, for every scheduled check type, producing a real
+  observation rather than a preview.
+- **Duplicate a monitor**, paused, with its credentials copied on the
+  server so they never pass through a browser.
+- The monitor config layer now understands a credential field that holds
+  a _map_ of named secrets, with the same round-trip rule the single ones
+  have always had.
+- `real-browser` is unchanged.
+
+Fixed:
+
+- The probe agent's dependency guard could not see multi-line imports,
+  which is the house style for anything importing more than two names, so
+  it was proving much less than it claimed.
+- `dod-matrix`, `kuma-matrix` and `migration-matrix` invoked `npx`
+  through `execFileSync`, which spawns no shell, so none of them could
+  run on Windows at all.
+
 ## 1.22.1 — 2026-08-18
 
 The recut night scheme is all in this edition; the screenshot swaps

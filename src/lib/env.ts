@@ -74,6 +74,7 @@ const envSchema = z.object({
    */
   BROWSER_SERVICE_URL: z.url({ protocol: /^https?$/ }).optional(),
 
+
   /* ---- Notification delivery ----------------------------------------
    *
    * Five dials, all validated, all with defaults that are the shipped

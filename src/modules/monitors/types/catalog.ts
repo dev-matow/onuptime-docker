@@ -2012,6 +2012,7 @@ export const realBrowserDescriptor: CheckTypeDescriptor<"active"> = {
   supportsRecovery: true,
 };
 
+
 /**
  * Globalping's own API. Here rather than in the spec because the form's
  * placeholder quotes it, and the form cannot import a spec.
@@ -2179,6 +2180,14 @@ export function describeCheckType(id: string): CheckTypeDescriptor {
 export const CHECK_TYPE_IDS = CHECK_TYPE_DESCRIPTORS.map(
   (descriptor) => descriptor.id,
 ) as readonly string[];
+
+/**
+ * The kind of a stored monitor's type — `active` for one this build
+ * does not know, for the reason `unknownDescriptor` gives.
+ */
+export function checkTypePlane(id: string): "queue" | "synthetic" {
+  return describeCheckType(id).executionPlane ?? "queue";
+}
 
 /**
  * The kind of a stored monitor's type — `active` for one this build

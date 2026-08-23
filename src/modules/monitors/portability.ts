@@ -37,6 +37,19 @@ import { requireSpec } from "./types/specs";
 /** Bumped when the shape changes in a way an older importer misreads. */
 export const EXPORT_FORMAT_VERSION = 1;
 
+/**
+ * Whether a secret field holds a map of named credentials rather than
+ * one value.
+ *
+ * The same predicate `types/config.ts` uses, and decided from the data
+ * for the same reason: a second declaration on the spec could disagree
+ * with the shape actually stored, and the direction it would disagree in
+ * is a map written into an export file under a scalar rule.
+ */
+function isSecretMap(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 const exportedMonitorSchema = z.object({
   name: z.string().min(1).max(200),
   checkType: z.string().min(1),
@@ -83,9 +96,27 @@ function toExported(monitor: Monitor): ExportedMonitor {
       ...(config as Record<string, unknown>),
     };
     for (const field of secrets) {
-      if (masked[field] !== null && masked[field] !== undefined) {
-        masked[field] = SECRET_MASK;
+      const value = masked[field];
+      if (value === null || value === undefined) continue;
+      if (isSecretMap(value)) {
+        // A map of named credentials: the NAMES are configuration and
+        // the values are not. Masking the whole map would take the names
+        // with it, and for a journey the names are load-bearing - a step
+        // that references `{{apiKey}}` cannot even be validated once
+        // `apiKey` has stopped existing, so the export would produce a
+        // file that no importer could accept. Empty values are left
+        // alone: an empty credential is not one, and showing it as
+        // masked would tell the reader a secret exists to re-enter when
+        // none does.
+        const perKey: Record<string, unknown> = {};
+        for (const [key, entry] of Object.entries(value)) {
+          perKey[key] =
+            typeof entry === "string" && entry.length === 0 ? "" : SECRET_MASK;
+        }
+        masked[field] = perKey;
+        continue;
       }
+      masked[field] = SECRET_MASK;
     }
     config = masked;
   }
@@ -217,9 +248,30 @@ export async function importMonitors(
         ...(config as Record<string, unknown>),
       };
       for (const field of secrets) {
-        if (incoming[field] === SECRET_MASK) {
+        const value = incoming[field];
+        if (value === SECRET_MASK) {
           delete incoming[field];
           secretsToReenter.push(field);
+          continue;
+        }
+        if (isSecretMap(value)) {
+          // The keys survive with empty values, which is the map version
+          // of the rule above: a scalar credential that has to be
+          // re-entered becomes absent, and a NAMED one becomes present
+          // and blank. Deleting the key instead would make the journey
+          // that references it fail validation, so the import would be
+          // refused rather than reported - and the operator would have a
+          // file they cannot use and no way to see why.
+          const restored: Record<string, unknown> = {};
+          for (const [key, entry] of Object.entries(value)) {
+            if (entry === SECRET_MASK) {
+              restored[key] = "";
+              secretsToReenter.push(`${field}.${key}`);
+              continue;
+            }
+            restored[key] = entry;
+          }
+          incoming[field] = restored;
         }
       }
       config = incoming;

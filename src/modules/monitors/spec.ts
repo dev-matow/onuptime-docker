@@ -19,6 +19,24 @@ import { findSpec } from "./types/specs";
  */
 export function toCheckSpec(monitor: Monitor): CheckSpec {
   return {
+    subject: {
+      monitorId: monitor.id,
+      organizationId: monitor.organizationId,
+      name: monitor.name,
+      // The instant this evaluation was DUE, not the instant it is
+      // running. A type that deduplicates its own work keys on this, and
+      // the tick, the sub-minute follow-up and a queue replay after a
+      // rolling restart agree about it while disagreeing about every
+      // wall clock reading. Null on a monitor that has never been
+      // scheduled, which reads as "nothing scheduled this".
+      scheduledFor: monitor.nextEvaluationAt,
+      trigger: "schedule",
+      actorUserId: null,
+      // Minted by the worker before it evaluates, when the type keeps a
+      // record of its own. Null here because this function maps a row,
+      // and nothing about a row says which attempt is running.
+      runId: null,
+    },
     checkType: monitor.checkType,
     url: monitor.url,
     port: monitor.port,

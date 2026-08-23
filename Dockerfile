@@ -66,13 +66,20 @@ COPY src ./src
 COPY scripts ./scripts
 # What this replica reports as its version on the Workers page, and what
 # makes the rolling-deploy banner able to say two versions are running.
-# Baked in rather than left to the environment: the entrypoint is `npx`,
-# which does not set `npm_package_version` the way `npm run` does, so an
-# image started any way other than through the compose file that passes
+# Baked in rather than left to the environment: the entrypoint does not
+# set `npm_package_version` the way `npm run` does, so an image started
+# any way other than through the compose file that passes
 # VIGIL_WORKER_VERSION would report every replica as "unknown" - and a
 # fleet view where every row says "unknown" cannot show a rolling deploy,
 # which is the one moment it exists for.
 ARG VIGIL_WORKER_VERSION=unknown
 ENV VIGIL_WORKER_VERSION=$VIGIL_WORKER_VERSION
 USER node
-CMD ["npx", "tsx", "src/worker/index.ts"]
+# tsx directly, never `npx` — the rule Dockerfile.synthetics and
+# Dockerfile.probe already follow, applied late to the image where it
+# matters most. `npx` between PID 1 and the shutdown handler swallows
+# SIGTERM, so every `docker stop` of this worker skipped the graceful
+# drain entirely: no final heartbeat, no shard release, no
+# `boss.stop({graceful})` — the shutdown path the code carefully builds
+# ran only when nobody deployed.
+CMD ["node_modules/.bin/tsx", "src/worker/index.ts"]

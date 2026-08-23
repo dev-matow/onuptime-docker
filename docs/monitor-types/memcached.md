@@ -3,26 +3,26 @@
 Opens a TCP connection, asks `version`, then `stats` and `stats
 settings`, and stops. Nothing is ever written to the cache.
 
-|          |                                                         |
-| -------- | ------------------------------------------------------- |
+|          |                                                        |
+| -------- | ------------------------------------------------------ |
 | Kind     | `active`: Vigil dials it on the monitor's interval     |
-| Target   | a bare hostname, e.g. `cache.example.com`               |
-| Port     | required, defaults to **11211**                         |
-| Settings | `username`, `password`, `maxConnectionUsagePercent`     |
-| Secrets  | `password`                                              |
+| Target   | a bare hostname, e.g. `cache.example.com`              |
+| Port     | required, defaults to **11211**                        |
+| Settings | `username`, `password`, `maxConnectionUsagePercent`    |
+| Secrets  | `password`                                             |
 | Recovery | supported. The target can be re-probed to verify a fix |
 
 ## What it observes
 
-| Fact                     | Meaning                                                           |
-| ------------------------ | ----------------------------------------------------------------- |
-| `version`                | what the `VERSION` reply said                                     |
+| Fact                     | Meaning                                                          |
+| ------------------------ | ---------------------------------------------------------------- |
+| `version`                | what the `VERSION` reply said                                    |
 | `uptimeSeconds`          | `stats uptime`: how long this process has been running           |
-| `currentConnections`     | `stats curr_connections`                                          |
+| `currentConnections`     | `stats curr_connections`                                         |
 | `maxConnections`         | `stats settings maxconns`: the limit the server was started with |
-| `connectionUsagePercent` | the first as a percentage of the second                           |
-| `serverError`            | the server's own words when it refused a command                  |
-| `responseTimeMs`         | connect to the last reply                                         |
+| `connectionUsagePercent` | the first as a percentage of the second                          |
+| `serverError`            | the server's own words when it refused a command                 |
+| `responseTimeMs`         | connect to the last reply                                        |
 
 ## What makes it fail
 

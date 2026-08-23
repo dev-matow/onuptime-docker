@@ -212,6 +212,34 @@ export function encryptWebPush(
  * `dsaEncoding: "ieee-p1363"` produces; Node's default is DER, and a
  * DER signature in a JWT fails verification with no useful message.
  */
+/**
+ * Whether a VAPID public key is the one this private key produces.
+ *
+ * Derived rather than asserted: `setPrivateKey` computes the public
+ * point from the scalar, so the comparison is against what the private
+ * key actually is rather than against what the operator pasted beside
+ * it. Cheap enough for the settings page and deliberately NOT on the
+ * signing path, which runs per message.
+ */
+export function vapidPairMatches(
+  publicKey: string,
+  privateKey: string,
+): boolean {
+  try {
+    const claimed = fromB64url(publicKey);
+    if (claimed.length !== 65) return false;
+    const curve = createECDH("prime256v1");
+    curve.setPrivateKey(fromB64url(privateKey));
+    return curve.getPublicKey().equals(claimed);
+  } catch {
+    // A scalar outside the curve order, or a key that is not base64url.
+    // Both are "these do not go together" as far as the operator is
+    // concerned, and the field-length checks above name the commoner
+    // shapes of wrong.
+    return false;
+  }
+}
+
 export function vapidAuthorization(
   endpoint: string,
   publicKey: string,
@@ -348,8 +376,26 @@ export const webpushProvider: ChannelProvider = {
     if (fromB64url(secrets.vapidPrivateKey ?? "").length !== 32) {
       return "The VAPID private key must decode to 32 bytes.";
     }
-    // Proves the pair actually signs before the operator waits for a
-    // failed delivery to find out they pasted mismatched keys.
+    // Proves the two halves belong to each other before the operator
+    // waits for a failed delivery to find out they pasted keys from two
+    // different pairs.
+    //
+    // A DERIVATION, not a try/catch around the import. `createPrivateKey`
+    // takes a JWK whose `x` and `y` do not lie on the curve point `d`
+    // produces and accepts it without complaint on Node 24, so the
+    // "import the pair and see whether it throws" test that stood here
+    // returned null for every mismatched pair - the check reported
+    // nothing wrong, and the test asserting it failed. Which Node
+    // versions validate on import is not a thing this check should
+    // depend on.
+    if (
+      !vapidPairMatches(
+        config.vapidPublicKey ?? "",
+        secrets.vapidPrivateKey ?? "",
+      )
+    ) {
+      return "The VAPID key pair does not match; the public key must be the one derived from this private key.";
+    }
     try {
       vapidAuthorization(
         parsed.subscription.endpoint,

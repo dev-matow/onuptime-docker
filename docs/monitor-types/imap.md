@@ -4,36 +4,36 @@ Opens a TCP connection to an IMAP server, reads the greeting, sends one
 `CAPABILITY` command and reads the answer. Nothing else: no mailbox is
 selected, no message is fetched, no login is attempted.
 
-|          |                                                         |
-| -------- | ------------------------------------------------------- |
+|          |                                                        |
+| -------- | ------------------------------------------------------ |
 | Kind     | `active`: Vigil dials it on the monitor's interval     |
-| Target   | a bare hostname, e.g. `imap.example.com`                |
-| Port     | required, defaults to **143**                           |
-| Settings | `requiredCapability` (optional)                         |
-| Secrets  | none                                                    |
+| Target   | a bare hostname, e.g. `imap.example.com`               |
+| Port     | required, defaults to **143**                          |
+| Settings | `requiredCapability` (optional)                        |
+| Secrets  | none                                                   |
 | Recovery | supported. The target can be re-probed to verify a fix |
 
 ## What it observes
 
-| Fact                 | Meaning                                                |
-| -------------------- | ------------------------------------------------------ |
+| Fact                 | Meaning                                               |
+| -------------------- | ----------------------------------------------------- |
 | `greetingStatus`     | `OK`, `PREAUTH` or `BYE`: what the server opened with |
-| `banner`             | the greeting line, truncated to 200 characters         |
-| `capabilityAccepted` | the server completed `CAPABILITY` with a tagged `OK`   |
-| `capabilities`       | the atoms it advertised                                |
-| `responseTimeMs`     | greeting to completion                                 |
+| `banner`             | the greeting line, truncated to 200 characters        |
+| `capabilityAccepted` | the server completed `CAPABILITY` with a tagged `OK`  |
+| `capabilities`       | the atoms it advertised                               |
+| `responseTimeMs`     | greeting to completion                                |
 
 ## What makes it fail
 
-| Verdict          | When                                                                                                     |
-| ---------------- | -------------------------------------------------------------------------------------------------------- |
+| Verdict          | When                                                                                                    |
+| ---------------- | ------------------------------------------------------------------------------------------------------- |
 | down             | the greeting is `BYE`: the server is refusing this connection ("too many connections", "shutting down") |
-| down             | whatever answered on the port did not send an IMAP greeting                                              |
-| down             | the server rejected `CAPABILITY` with `NO` or `BAD`                                                      |
-| down             | the server completed `CAPABILITY` and named no `IMAP4rev1`/`IMAP4rev2`                                   |
-| down             | `requiredCapability` is set and no longer appears in the list                                            |
-| degraded         | the exchange took longer than the monitor's degraded threshold                                           |
-| down (transport) | the connection failed, timed out, or was closed mid-conversation                                         |
+| down             | whatever answered on the port did not send an IMAP greeting                                             |
+| down             | the server rejected `CAPABILITY` with `NO` or `BAD`                                                     |
+| down             | the server completed `CAPABILITY` and named no `IMAP4rev1`/`IMAP4rev2`                                  |
+| down             | `requiredCapability` is set and no longer appears in the list                                           |
+| degraded         | the exchange took longer than the monitor's degraded threshold                                          |
+| down (transport) | the connection failed, timed out, or was closed mid-conversation                                        |
 
 A `BYE` greeting is the case this type exists for. The socket opens, so a
 `tcp` monitor on port 143 reports a healthy server for as long as it is

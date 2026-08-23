@@ -25,6 +25,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const TSX_CLI = join(ROOT, "node_modules", "tsx", "dist", "cli.mjs");
 const ARTIFACT = join(ROOT, "kuma-mapping.json");
 const FIXTURE = "tests/fixtures/kuma/kuma-2.4.0.db";
 
@@ -41,7 +42,10 @@ function readMapping() {
       drops: NOTABLE_DROPS,
     }) + "@@");
   `;
-  const out = execFileSync("npx", ["tsx", "-e", script], {
+  // `node node_modules/tsx/dist/cli.mjs`, not `npx tsx`. `execFileSync`
+  // does not go through a shell, and on Windows `npx` is `npx.cmd`, so
+  // the old line was `spawnSync npx ENOENT` on every Windows checkout.
+  const out = execFileSync(process.execPath, [TSX_CLI, "-e", script], {
     cwd: ROOT,
     encoding: "utf8",
     maxBuffer: 32 * 1024 * 1024,

@@ -123,6 +123,7 @@ export function IncidentStatusBadge({ status }: { status: IncidentStatus }) {
   );
 }
 
+
 /**
  * Severity is the one badge allowed to be red, and only at critical.
  * Major and minor are the same outline at two text weights: they are

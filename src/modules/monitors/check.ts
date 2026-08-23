@@ -6,6 +6,7 @@ import type {
   MonitorRowView,
   ProbeContext,
   ProbeResult,
+  ProbeSubject,
 } from "./types/contract";
 import { checkTlsExpiryDays, httpProbe } from "./types/probes/http";
 import { tcpProbe } from "./types/probes/tcp";
@@ -38,6 +39,12 @@ export interface CheckResult extends CheckOutcome {
   /** Everything the probe measured, for the ledger and the UI. */
   facts: FactBag;
   failedAssertions: string[];
+  /**
+   * See {@link ProbeResult.evidence}. Carried through unchanged so the
+   * layer that owns writes can store it; every existing caller ignores
+   * it, which is what it means for this to be additive.
+   */
+  evidence?: unknown;
 }
 
 /** Everything a probe needs, across transports. */
@@ -58,6 +65,12 @@ export interface CheckSpec {
   intervalSeconds: number;
   /** Type-specific settings, for the types added since 1.10.0. */
   config?: unknown;
+  /**
+   * Which monitor this is, for the types that keep evidence of their
+   * own. See {@link ProbeSubject}. Absent when a caller probes a bare
+   * target, which is what every unit test and the legacy helpers do.
+   */
+  subject?: ProbeSubject;
 }
 
 export interface CheckOptions {
@@ -66,6 +79,23 @@ export interface CheckOptions {
   fetchImpl?: typeof fetch;
   /** See `ProbeContext.lookup` — injectable so a test need not resolve. */
   lookup?: ProbeContext<unknown>["lookup"];
+  /**
+   * Cancellation, for the probes whose work outlives one socket.
+   *
+   * Threaded from the worker's shutdown path. A probe that ignores it
+   * behaves exactly as it always did — which is every probe but the
+   * synthetic ones, whose runs can be minutes long and must stop rather
+   * than be killed with a browser session open.
+   */
+  signal?: AbortSignal;
+  /**
+   * Overrides for the subject the spec carries.
+   *
+   * A manual "run now" and a recovery verification probe the same
+   * monitor for different reasons, and the reason is what distinguishes
+   * two runs that would otherwise deduplicate onto one row.
+   */
+  subject?: Partial<ProbeSubject>;
 }
 
 /** The legacy HTTP target shape, still used by unit tests and helpers. */
@@ -95,6 +125,23 @@ function rowView(spec: CheckSpec): MonitorRowView {
     tlsWarnDays: spec.tlsWarnDays ?? 14,
     config: spec.config ?? null,
   };
+}
+
+/**
+ * The subject a probe is handed, with the caller's overrides applied.
+ *
+ * Returns undefined when the spec carries none, rather than inventing
+ * one: a probe that keeps evidence must be able to tell "nobody told me
+ * which monitor this is" from "this is monitor X, run manually", and a
+ * fabricated subject would make the second indistinguishable from the
+ * first.
+ */
+function subjectFor(
+  spec: CheckSpec,
+  options: CheckOptions,
+): ProbeSubject | undefined {
+  if (spec.subject === undefined) return undefined;
+  return { ...spec.subject, ...options.subject };
 }
 
 /**
@@ -156,6 +203,8 @@ export async function performCheck(
     allowPrivateTargets: options.allowPrivateTargets ?? false,
     fetchImpl: options.fetchImpl ?? fetch,
     lookup: options.lookup,
+    subject: subjectFor(spec, options),
+    signal: options.signal,
   });
 
   return judgeMeasurement(definition.assertions, config, result);
@@ -191,6 +240,7 @@ export function judgeMeasurement<Config>(
     failureClass: verdict.failureClass,
     facts: result.facts,
     failedAssertions: verdict.failedAssertions,
+    ...(result.evidence === undefined ? {} : { evidence: result.evidence }),
   };
 }
 

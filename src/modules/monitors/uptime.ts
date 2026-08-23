@@ -263,6 +263,15 @@ const HORIZON_SECONDS =
  * The scan is bounded by the horizon on both sides — a sample older than
  * `start - horizon` cannot reach into the window — so there is no
  * separate carry-in lookup to get wrong.
+ *
+ * `verdict` and `response_time_ms` ride along unused by the three
+ * uptime callers, and that is on purpose. SLOs judge the same segments
+ * by a different rule — `degraded` may spend budget, a latency objective
+ * asks how fast rather than whether — and the alternative was a second
+ * segment expression next to this one. Two copies of the coverage
+ * horizon is precisely how the count-weighted and duration-weighted
+ * uptime numbers drifted apart before 1.13.0. One expression, more
+ * columns, and the parity test still pins the pair that matter.
  */
 export function uptimeSegments(
   monitorIds: readonly string[],
@@ -279,6 +288,8 @@ export function uptimeSegments(
     select
       s.monitor_id,
       s.ok,
+      s.verdict,
+      s.response_time_ms,
       s.seg_start,
       s.seg_end,
       extract(epoch from (s.seg_end - s.seg_start)) * 1000 as duration_ms
@@ -286,6 +297,8 @@ export function uptimeSegments(
       select
         ${monitorChecks.monitorId} as monitor_id,
         ${monitorChecks.ok} as ok,
+        ${monitorChecks.verdict} as verdict,
+        ${monitorChecks.responseTimeMs} as response_time_ms,
         greatest(${monitorChecks.checkedAt}, ${start}) as seg_start,
         least(
           coalesce(

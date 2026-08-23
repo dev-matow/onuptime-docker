@@ -8,7 +8,11 @@ import {
   schedulerBacklog,
 } from "@/modules/monitors/service";
 
-import { QUEUES, type MonitorCheckJob } from "../queues";
+
+import {
+  QUEUES,
+  type MonitorCheckJob,
+} from "../queues";
 
 /**
  * How long a monitor the high-frequency plane owns is stood down for.
@@ -21,6 +25,11 @@ import { QUEUES, type MonitorCheckJob } from "../queues";
 const HIGH_FREQUENCY_DEFERRAL_SECONDS = 60;
 
 interface Enqueuer {
+  /**
+   * How many jobs are waiting on a queue, when the implementation can
+   * say. Optional because the only other caller of this interface is a
+   * test's object literal, and a required method there would be a fake
+   */
   /** Returns the ids it actually inserted, or null when it inserted
    * nothing - pg-boss ends this statement in `ON CONFLICT DO NOTHING`
    * against the queue's own unique index, so a monitor that already has
@@ -136,6 +145,12 @@ export async function runMonitorTick(
   }
   await deferHighFrequencyOwned(db, deferred, HIGH_FREQUENCY_DEFERRAL_SECONDS);
 
+  // Read before the synthetic plane's backpressure filter thins the
+  // list, so `selected` keeps meaning what its comment says: what the
+  // ranking chose, after the high-frequency filter. What backpressure
+  // then held back is reported separately.
+  const selected = candidates.length;
+
   // Claim, then enqueue, and only what was claimed.
   //
   // The order is the interesting part, because both orders lose
@@ -147,10 +162,12 @@ export async function runMonitorTick(
   // claimed but not enqueued, so it is silent until the lease runs out:
   // ninety seconds of one monitor's cadence, self-healing, and visible
   // in the backlog. Ninety seconds late beats twice as often.
+
   const claimed = await claimMonitorsForDispatch(
     db,
     candidates.map((monitor) => monitor.id),
   );
+
 
   let enqueued = 0;
   if (claimed.length > 0) {
@@ -196,7 +213,7 @@ export async function runMonitorTick(
   const result: TickResult = {
     backlog: backlog.dueCount,
     lagSeconds: backlog.oldestDueSeconds,
-    selected: candidates.length,
+    selected,
     claimed: claimed.length,
     enqueued,
     durationMs: Date.now() - startedAt,
@@ -209,3 +226,4 @@ export async function runMonitorTick(
   // leave Core holding a return value nothing reads.
   return result;
 }
+

@@ -414,9 +414,15 @@ export async function egressFetch(
       };
     }
 
-    // Drained before moving on: nothing reads a redirect's body, and an
-    // unconsumed stream holds its buffers and its socket open.
-    await response.arrayBuffer().catch(() => undefined);
+    // Released before moving on: nothing reads a redirect's body, and an
+    // unconsumed stream holds its buffers and its socket open. Read and
+    // DISCARDED with a cap rather than buffered whole — `arrayBuffer()`
+    // materialized the entire hop body in worker memory, and a hop is
+    // attacker-steered: a redirect chain serving large bodies was a
+    // memory spike bounded only by bandwidth × timeout. Past the cap the
+    // stream is cancelled, which destroys the socket; with `agent: false`
+    // there is no pool that could have reused it anyway.
+    await drainBodyCapped(response, MAX_DRAIN_BYTES);
 
     const mutable = new Headers(headers);
     if (next.origin !== url.origin) {
@@ -599,6 +605,46 @@ function pinnedRequest(
   });
 }
 
+/**
+ * How much of a body a caller that wants none of it will still read
+ * before hanging up. Reading a little keeps the common case — a small
+ * body that ends on its own — on the exact path it always took; the cap
+ * is for the response that would not have ended within worker memory.
+ */
+export const MAX_DRAIN_BYTES = 64 * 1024;
+
+/**
+ * Reads and DISCARDS up to `maxBytes` of the body, then stops the
+ * download.
+ *
+ * The memory-safe way to release a response nobody reads. Chunks pass
+ * through one at a time and nothing accumulates — unlike
+ * `arrayBuffer()`, which buffers the whole body and made "drain and
+ * discard" cost the size of whatever the monitored server chose to
+ * send. Cancelling past the cap destroys the underlying stream and its
+ * socket; every transport in this module runs `agent: false`, so no
+ * keep-alive was ever at stake.
+ */
+export async function drainBodyCapped(
+  response: Response,
+  maxBytes: number,
+): Promise<void> {
+  const reader = response.body?.getReader();
+  if (!reader) return;
+  let bytes = 0;
+  try {
+    while (bytes < maxBytes) {
+      const { done, value } = await reader.read();
+      if (done) return;
+      bytes += value.byteLength;
+    }
+  } catch {
+    // A body that errors mid-drain was not going to be read anyway.
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+}
+
 function requestHeaders(
   init: HeadersInit | undefined,
   body: string | Uint8Array | null,
@@ -662,6 +708,15 @@ function webResponse(
     // the cause makes the reader reject, which is what a truncated body
     // is.
     message.on("error", (error) => decompressor.destroy(error));
+    // And the mirror image: a READER that hangs up (a capped drain
+    // cancelling past its limit) destroys the decoder — the stream the
+    // web Response wraps — but `pipe()` only unpipes the source, it
+    // never destroys it. On the identity path the reader's cancel
+    // reaches the socket directly; on this path it stopped at the zlib
+    // transform and the connection lingered, still receiving, until the
+    // check's abort timeout got around to it. The decoder's close is
+    // the last event either exit takes, so the socket follows it down.
+    decompressor.once("close", () => message.destroy());
     // The body is no longer encoded and no longer that length; leaving
     // the headers on would describe a body that is not there.
     headers.delete("content-encoding");

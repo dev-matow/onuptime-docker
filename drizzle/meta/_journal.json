@@ -232,6 +232,34 @@
       "when": 1786567470324,
       "tag": "0032_scheduler_claim_column",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1787089104576,
+      "tag": "0033_synthetic_journeys",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1787178228844,
+      "tag": "0034_slos",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1787229543062,
+      "tag": "0035_runbooks",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1787363665872,
+      "tag": "0036_operations_tasks",
+      "breakpoints": true
     }
   ]
 }

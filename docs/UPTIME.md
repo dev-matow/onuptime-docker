@@ -180,3 +180,18 @@ defensible one.
 Retention prunes `monitor_checks` at 90 days, which is also the
 status-page window, so the oldest end of the strip is always partially
 pruned. That is pre-existing behavior and unchanged by this work.
+
+## Objectives read this rule, and only this rule
+
+Service level objectives (commercial; [SLOS.md](SLOS.md)) are computed
+from the same segments. They add a target, a rolling window and an error
+budget, and they judge each segment by their own definition of "good"
+(`degraded` may spend budget, and a latency objective asks how fast
+rather than whether), but the segment boundaries, the coverage horizon and the
+treatment of `indeterminate` are all this file's. An availability
+objective over one monitor reports the same number the uptime column
+does, and an integration test pins the pair on the same history.
+
+The one difference a reader will notice is precision: uptime renders two
+decimals, an objective renders four. An objective exists to tell 99.99%
+from 99.995%; a status page does not. Rounded to two, they are equal.

@@ -16,7 +16,10 @@
 import { Client } from "pg";
 
 const url = process.env.DATABASE_URL;
-if (!url) { console.error("set DATABASE_URL"); process.exit(2); }
+if (!url) {
+  console.error("set DATABASE_URL");
+  process.exit(2);
+}
 const c = new Client({ connectionString: url });
 await c.connect();
 
@@ -45,7 +48,15 @@ console.log(`  two different workers: ${cross}`);
 console.log(`  the same worker twice: ${rows.length - cross}`);
 if (rows.length > 0) {
   const gaps = rows.map((r) => Number(r.gap_seconds)).sort((a, b) => a - b);
-  console.log(`  gap min ${gaps[0]}s  median ${gaps[Math.floor(gaps.length / 2)]}s  max ${gaps[gaps.length - 1]}s`);
-  console.log("  sample:", rows.slice(0, 5).map((r) => `${r.gap_seconds}s ${r.different_workers ? "cross" : "same"}`).join(", "));
+  console.log(
+    `  gap min ${gaps[0]}s  median ${gaps[Math.floor(gaps.length / 2)]}s  max ${gaps[gaps.length - 1]}s`,
+  );
+  console.log(
+    "  sample:",
+    rows
+      .slice(0, 5)
+      .map((r) => `${r.gap_seconds}s ${r.different_workers ? "cross" : "same"}`)
+      .join(", "),
+  );
 }
 await c.end();

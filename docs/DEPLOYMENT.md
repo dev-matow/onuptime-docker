@@ -80,6 +80,25 @@ See [sample.env.production](../sample.env.production) for the full
 annotated template. Required: `DATABASE_URL`, `BETTER_AUTH_SECRET`,
 `APP_URL`.
 
+## Resource envelope
+
+Measured on the 1.26.0 release over hour-long soaks, at idle and with
+fleets of 100, 500 and 1,000 monitors on one worker (the raw artifacts
+ship with the commercial edition):
+
+- **App (Next.js)**: roughly 115 MB RSS, flat under load.
+- **Worker**: roughly 180 MB as a process tree at idle, 200 MB at 100
+  monitors, 280 MB at 500 to 1,000. Post-settle memory slopes were
+  negative on every plane over hour-long windows: no leak.
+- **PostgreSQL**: 140 to 210 MB of private memory plus shared buffers
+  and your data. Job-queue retention is bounded (finished queue rows
+  are deleted after an hour, swept every ten minutes), so the queue
+  does not grow the database at steady state.
+
+2 GB of RAM fits a single-host Compose install of all services plus
+PostgreSQL with headroom. Disk is dominated by check history, bounded
+by the 90-day retention job.
+
 ## Operational notes
 
 - **Health**: `GET /api/health` returns 200 when the app can reach

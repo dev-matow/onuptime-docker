@@ -26,14 +26,22 @@ Regenerate the counted numbers with `npm run facts`; verify them with
 
 ## Baseline
 
-|                       |                                                                         |
-| --------------------- | ----------------------------------------------------------------------- |
-| Version               | `1.14.0` — manifest, both changelogs and `public-facts.json`            |
-| Branch                | `feat/remote-probes`                                                    |
-| Cut from              | `ba1d8c8` (`v1.13.0`)                                                   |
-| Core edition          | unchanged by this release: probes are commercial and Core gains no code |
-| Billing bot           | not a Git repository; tree SHA-256 recorded per release                 |
-| Uptime Kuma pinned at | `2.4.0`, commit `9f3b837c8c7f359ec1acee80b3c0430451986a03`              |
+|                       |                                                                                   |
+| --------------------- | --------------------------------------------------------------------------------- |
+| Version               | `1.26.0` — manifest, both changelogs and `public-facts.json`                      |
+| Branch                | `release/1.26`                                                                    |
+| Cut from              | `eacc52d` (`v1.22.1`, the previous tagged release)                                |
+| Contains              | 1.23.0 synthetics, 1.24.0 SLOs, 1.25.0 runbooks, 1.26.0 tasks + steady-state pass |
+| Core edition          | cut from the same commit by `scripts/edition-gate.sh` in a required CI job        |
+| Billing bot           | not a Git repository; tree SHA-256 recorded per release                           |
+| Uptime Kuma pinned at | `2.4.0`, commit `9f3b837c8c7f359ec1acee80b3c0430451986a03`                        |
+
+The claim matrix below was written for 1.14.0 and remains satisfied;
+every release since then records its own claims and their evidence in
+`CHANGELOG.md` and under `docs/evidence/` (`slo-bench/`,
+`runbook-bench/`, `task-bench/`, `memsoak/`), each guarded by
+`npm run bench:check` and `npm run facts:check` rather than by this
+table growing stale rows.
 
 The billing bot has no commits to name, so it is identified by hashing
 its tree. A bare hash nobody can recompute identifies nothing, so the
@@ -103,7 +111,7 @@ npm run typecheck                                   # 0
 npm run lint                                        # 0
 npx vitest run                                      # see docs/MONITOR-TYPE-DOD.md for the count
 E2E_BASE_URL=http://localhost:3210 PORT=3210 \
-  E2E_WEB_COMMAND="npm run start" npx playwright test  # 8 passed — docs/evidence/e2e.log
+  E2E_WEB_COMMAND="npm run start" npx playwright test  # CI runs the suite on every push
 npm run facts:check                                 # 0
 npm run dod:check                                   # 0 — no Definition-of-Done gaps
 npm run kuma:check                                  # 0 — 31/31 types, 111 columns
@@ -116,8 +124,6 @@ docker build --target web|worker .                  # 0, both
 node scripts/bench/high-frequency.mjs …             # see docs/HIGH-FREQUENCY.md
 ```
 
-`npm run format:check` reports 25 files. Every one of them was already
-unformatted at `v1.12.0` — mostly the landing site's hand-written HTML
-and CSS. Nothing this branch wrote or touched is among them. It is not
-wired into CI, and the number is recorded here so a later reader can
-tell a standing condition from a regression.
+`npm run format:check` passes clean and is enforced in CI since the
+1.23.0 line; the 25-file drift this paragraph used to record was
+formatted away when the gate landed.

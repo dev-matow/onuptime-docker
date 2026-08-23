@@ -69,9 +69,19 @@ test.describe("Vigil golden path", () => {
     await page.getByRole("button", { name: "Create organization" }).click();
 
     await expect(page).toHaveURL(/\/dashboard$/, { timeout: 15_000 });
-    await expect(page.locator("header").getByText(orgName).first()).toBeVisible(
-      { timeout: 10_000 },
-    );
+    // Wherever the shell chooses to put it, as long as the operator can
+    // SEE which organization they are in.
+    //
+    // This used to look inside `<header>` and take `.first()`. The header
+    // repeats the name only on phones - `md:hidden`, with the sidebar's
+    // switcher carrying it at desktop widths, which the layout says in a
+    // comment - so at Playwright's 1280px viewport the first match was
+    // always the hidden one and this assertion could never pass. It went
+    // unnoticed because `e2e` needs `checks`, and `checks` has been red
+    // on main, so this job was skipped rather than failing.
+    await expect(
+      page.getByText(orgName).filter({ visible: true }).first(),
+    ).toBeVisible({ timeout: 10_000 });
   });
 
   test("creates a monitor that shows up as Pending", async () => {

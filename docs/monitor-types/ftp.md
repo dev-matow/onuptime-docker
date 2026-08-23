@@ -4,31 +4,31 @@ Opens a TCP control connection to an FTP server, reads the greeting,
 sends `FEAT`, and (when an account is configured) sends `USER` and
 `PASS`. Then it quits. No data connection is ever opened.
 
-|          |                                                         |
-| -------- | ------------------------------------------------------- |
+|          |                                                        |
+| -------- | ------------------------------------------------------ |
 | Kind     | `active`: Vigil dials it on the monitor's interval     |
-| Target   | a bare hostname, e.g. `files.example.com`               |
-| Port     | required, defaults to **21**                            |
-| Settings | `username`, `password` (both optional)                  |
-| Secrets  | `password`                                              |
+| Target   | a bare hostname, e.g. `files.example.com`              |
+| Port     | required, defaults to **21**                           |
+| Settings | `username`, `password` (both optional)                 |
+| Secrets  | `password`                                             |
 | Recovery | supported. The target can be re-probed to verify a fix |
 
 ## What it observes
 
-| Fact             | Meaning                                                      |
-| ---------------- | ------------------------------------------------------------ |
+| Fact             | Meaning                                                     |
+| ---------------- | ----------------------------------------------------------- |
 | `greetingCode`   | the reply code the server opened with. 220 when it is ready |
-| `banner`         | the greeting text, truncated to 200 characters               |
+| `banner`         | the greeting text, truncated to 200 characters              |
 | `featCode`       | what it answered `FEAT` with, 211 when it listed features   |
-| `features`       | the feature lines, when it listed any                        |
-| `loginCode`      | the last reply of the login, when an account is configured   |
-| `responseTimeMs` | greeting to last reply                                       |
+| `features`       | the feature lines, when it listed any                       |
+| `loginCode`      | the last reply of the login, when an account is configured  |
+| `responseTimeMs` | greeting to last reply                                      |
 
 ## What makes it fail
 
 | Verdict          | When                                                             |
 | ---------------- | ---------------------------------------------------------------- |
-| down             | the greeting is not 220-421 "too many users" above all         |
+| down             | the greeting is not 220-421 "too many users" above all           |
 | down             | whatever answered on the port did not send an FTP reply          |
 | down             | the server stopped speaking FTP after its banner                 |
 | down             | an account is configured and the server did not answer 230       |

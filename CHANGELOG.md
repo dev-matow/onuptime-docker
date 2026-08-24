@@ -6,6 +6,37 @@ free edition; entries for commercial-only features live in the other
 repository, because they are not in this one and listing them here would
 describe software you do not have.
 
+## 1.28.1 — 2026-08-25
+
+`vigilctl` is executable in this repository again, and this time at a
+tag rather than only on the default branch.
+
+Core 1.28.0 was published with `vigilctl` committed as `100644`, so
+`git clone --branch v1.28.0` — and the release tarball, and
+`./vigilctl update --to v1.28.0` — gave you a file the shell would not
+run. The contents were always correct; only the mode was wrong.
+
+The cause was in the generator, not here. Core is built by piping
+`git ls-files` through tar, and tar reads permissions off the
+filesystem; on a host with no executable bit there is nothing for it to
+read, and `git add` then recorded what tar produced. Files this
+repository already tracked kept the mode already recorded against them,
+which is why it only surfaced when a release introduced an executable
+file for the first time. The mode is now taken from the commercial
+repository's git index and written with `git update-index --chmod`,
+which behaves the same on every host, and publication now fails rather
+than shipping a mirror whose modes disagree with the source.
+
+`scripts/bench/cap-experiment.sh` and `scripts/bench/scheduler-suite.sh`
+get their executable bit back for the same reason. They have been
+`100644` here since 1.26.0.
+
+The `v1.28.0` tag was not moved, deleted or rewritten. GitHub immutable
+releases pins a tag once its release is published, and that is a
+guarantee worth more than a tidy history; its release notes state the
+mode and the workaround instead. If you are on that tag, this release
+is the upgrade.
+
 ## 1.28.0 — 2026-08-24
 
 `vigilctl`, and all of it is here. An operator installing the free

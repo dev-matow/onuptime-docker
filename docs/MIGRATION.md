@@ -10,6 +10,15 @@ Uptime Kuma has its own page, [KUMA-IMPORT.md](KUMA-IMPORT.md), because
 it is a database file rather than an account and its compatibility is
 documented column by column. Everything else is here.
 
+Better Stack also has a second, stronger path: the
+[migration bridge](MIGRATION-BRIDGE.md) imports into a non-paging
+shadow mode, keeps reading Better Stack's incident history read-only
+while both systems run side by side, and writes an evidence-backed
+cutover report stating what matched, what diverged, and whether
+switching is safe. Use the bridge when the question is not "can my
+monitors move" but "can I trust the move"; the one-time import below
+remains the right tool for everything else.
+
 ## The flow
 
 1. **Choose a source** under Settings, Import.
@@ -33,7 +42,7 @@ the status pages they appear on.
 
 | Source                             | Adapter id     | Input | Types mapped | What the credential must be                                                                                                                                                                                                                                                                           |
 | ---------------------------------- | -------------- | ----- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Better Stack (Better Uptime)       | `betterstack`  | API   | 8/12         | An Uptime API token from Better Stack, API tokens. Better Stack publishes no read-only scope, so the token you paste can also write; create one for this migration and revoke it afterwards. This importer only issues GET requests.                                                                  |
+| Better Stack (Better Uptime)       | `betterstack`  | API   | 9/13         | An Uptime API token from Better Stack, API tokens. Better Stack publishes no read-only scope, so the token you paste can also write; create one for this migration and revoke it afterwards. This importer only issues GET requests.                                                                  |
 | Checkly                            | `checkly`      | API   | 8/13         | An API key from Checkly, User Settings, API Keys. A user key on any plan is enough; a read-only service key needs the Enterprise plan. If your account id is shown in Checkly's API examples, paste it too, so the read is scoped to the right account.                                               |
 | Cronitor                           | `cronitor`     | API   | 4/6          | An API key with the `monitor:read` scope, from Cronitor's API keys page. A telemetry key will not work: it carries only `monitor:telemetry` and cannot read configuration.                                                                                                                            |
 | Datadog Synthetics                 | `datadog`      | API   | 7/12         | An API key and an application key from Datadog, Organization Settings. Reading requires both: the API key alone is refused. The application key must carry the `synthetics_read` permission, which the Datadog Read Only role includes.                                                               |
@@ -90,14 +99,24 @@ These are properties of Vigil rather than of any one source.
   line naming the checks that carried it. A group is the nearest thing
   and is not the same thing: a monitor belongs to one group and carries
   any number of tags.
-- **Maintenance windows.** Vigil has none. Pause a monitor for planned
-  work.
+- **Maintenance windows.** Not carried. Vigil has windows of its own
+  (`docs/MAINTENANCE.md`, commercial edition), but a schedule, its
+  recurrence rule and its time zone are an account-level record this
+  importer reads rather than recreates, and importing one wrong is worse
+  than importing none: a window that silences the wrong hours is a page
+  nobody gets. Declare them again after the move. On Core, which has no
+  windows, pause the monitors for planned work.
 - **Alert routing.** Every one of these systems attaches contacts,
   integrations or escalation policies to individual checks. Vigil
-  decides who is told by notification channel and escalation policy,
-  which belong to the organisation rather than to the monitor, so there
-  is no per-check attachment to recreate. Set the channels up under
-  Settings, Notifications and the imported monitors use them.
+  decides who is told by notification channel, escalation policy and,
+  in the commercial edition, a routing policy assigned to the workspace,
+  a service or one monitor. None of those is a per-check attachment, and
+  no credential is copied out of the source account anyway, so there is
+  nothing here an importer could faithfully recreate. Set the channels up
+  under Settings, Notifications and the imported monitors use them; add
+  routing afterwards if you want the per-service exceptions the old
+  system expressed by attaching contacts to checks
+  (`docs/ALERT-ROUTING.md`).
 - **Probe locations.** Region names do not transfer. Vigil checks from
   the worker that runs it, or from a remote probe you enrol. The report
   names the regions each check ran from.
@@ -108,6 +127,14 @@ These are properties of Vigil rather than of any one source.
 - **Anything defined as code.** Browser journeys, k6 scripts, Playwright
   tests, recorded transactions, multistep chains. These are not lossy,
   they are unmigratable, and every one of them is reported by name.
+
+  Vigil does have journeys of its own (`docs/SYNTHETICS.md`, commercial
+  edition), and that is exactly why these are refused rather than
+  approximated: a Vigil journey is a list of typed steps with no loops,
+  no branching and no expressions, so a script that uses any of those has
+  no translation, and one that happens not to would still need a human to
+  confirm the translation asserts the same thing. The report names each
+  one so you know what to write again by hand.
 
 ## Every source type, and what it becomes
 
@@ -127,6 +154,7 @@ These are properties of Vigil rather than of any one source.
 | Better Stack (Better Uptime)       | `pop`                             | - not imported   | Not imported. Vigil has no POP3 check, and neither its IMAP nor its SMTP check speaks the protocol. Watch the port with a TCP monitor if reachability is enough.                                                                                                                                                                                                                                                                                                                    |
 | Better Stack (Better Uptime)       | `dns`                             | - not imported   | Not imported. Better Stack stores the nameserver in `url` and the domain in `request_body`, and stores neither a record type nor an expected answer. Vigil's DNS check must ask for a record type, so importing one would mean choosing a record the operator never chose: a monitor asking for A when the alert was about MX goes green while the mail is down.                                                                                                                    |
 | Better Stack (Better Uptime)       | `playwright`                      | - not imported   | Not imported. The check is a Playwright script that Better Stack runs in a browser, and Vigil has no check type that executes a scripted journey.                                                                                                                                                                                                                                                                                                                                   |
+| Better Stack (Better Uptime)       | `heartbeat`                       | `push`           | The name, the period as the expected interval and the grace period carry. The token in the ping URL does not: it is never read, a new token is generated, and every job has to be repointed at Vigil's push endpoint after the import. Better Stack pages when a ping goes missing, and Vigil does the same once the interval plus the grace period elapses without one.                                                                                                            |
 | Checkly                            | `API`                             | `http`           | The URL, method, frequency, response-time limit, retry strategy and paused state carry, and group settings are resolved before reading so a check inside a group arrives with the group's base URL. A `STATUS_CODE EQUALS` assertion becomes Vigil's expected status code and a `TEXT_BODY CONTAINS` one becomes its body assertion; every other assertion is reported. Request headers, query parameters, the request body, basic auth and setup or teardown scripts do not carry. |
 | Checkly                            | `URL`                             | `http`           | The same, for Checkly's simpler URL monitor.                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | Checkly                            | `ICMP`                            | `ping`           | Imported unchanged.                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |

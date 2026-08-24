@@ -199,6 +199,38 @@ export async function applyOutcome(
         "incident opened",
       );
 
+      // A shadow incident is recorded and then deliberately left alone:
+      // no page, no hooks, no recovery, no ladder, no runbook. The
+      // decision reads the incident's own stored flag rather than the
+      // monitor's current setting, so a cutover that lands between this
+      // check's observation and this line cannot turn a shadow
+      // incident loud halfway through its handling - the incidents a
+      // cutover owes a page to are re-opened by the next check, live.
+      //
+      // The system event is load-bearing, not decoration: it is the
+      // marker `findUnhandledAutoIncident` refuses, which is what stops
+      // every later check from re-entering this block to re-decide an
+      // incident that was already decided. The maintenance hold works
+      // the same way, and a worker that dies between the insert and
+      // this event is repaired by the next check taking this branch
+      // again.
+      if (incident.shadow) {
+        await recordSystemEvent(
+          db,
+          incident.id,
+          "Opened in shadow mode: this monitor runs beside the system it " +
+            "was migrated from, so the incident was recorded for " +
+            "comparison and nobody was paged. It appears on no status " +
+            "page and triggers no automation.",
+        );
+        log.info(
+          { monitorId: monitor.id, incidentId: incident.id },
+          "shadow incident recorded without paging",
+        );
+        await refreshGroups(updated.parentId, deps);
+        return updated;
+      }
+
       const ctx = { db, incident, monitor: updated, boss: deps.boss };
 
       // Two questions, and this file asks nothing else. With no handler

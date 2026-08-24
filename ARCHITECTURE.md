@@ -5,23 +5,32 @@ For setup and product docs, see the [README](README.md).
 
 ## 1. System overview
 
-Vigil is an uptime-monitoring and incident-management platform: organizations
-create monitors of any of forty-two check types. HTTP(S), TCP port, ping, DNS
-record, TLS-certificate expiry, domain expiry, PostgreSQL, MySQL/MariaDB,
-MongoDB, Redis, Docker, MQTT, SMTP, JSON query, a real browser engine, and
-twenty-two more spanning messaging, directory, mail and infrastructure
-protocols, plus push heartbeats, groups and manual status, a background worker
-probes
-them on an
-adapting schedule, failures open incidents automatically, and a public status
-page keeps customers informed. Three of the types are not probes at all: a
-push heartbeat whose silence is what gets measured, a group derived from
-other monitors' states, and a manual status an operator sets by hand
-(`docs/MONITOR-KINDS.md`). AI (Anthropic API) drafts postmortems and public updates from
-incident timelines.
+Vigil is an uptime-monitoring, incident-management and operations platform.
+Organizations create monitors, a background worker probes them on an adapting
+schedule, failures open incidents automatically, and a public status page
+keeps customers informed.
+
+There are forty-two check types: HTTP(S), TCP port, ping, DNS record,
+TLS-certificate expiry, domain expiry, PostgreSQL, MySQL/MariaDB, MongoDB,
+Redis, Docker, MQTT, SMTP, JSON query, a real browser engine, and twenty-two
+more spanning messaging, directory, mail and infrastructure protocols; two
+scripted-synthetic types that run a whole journey rather than one request;
+and three that are not probes at all, a push heartbeat whose silence is what
+gets measured, a group derived from other monitors' states, and a manual
+status an operator sets by hand (`docs/MONITOR-KINDS.md`). AI (Anthropic
+API) drafts postmortems and public updates from incident timelines.
+
+**The end-to-end shape is one line**: an observation lands, the status
+controller decides what is true now, an incident opens, automation gets
+first go at it (recovery triggers, then runbooks), what automation cannot
+do becomes a task a person owns, and both halves are judged after the fact
+against an objective and an append-only record. Each of those is a section
+below; the seams between them are queues on the same Postgres, never a
+service boundary.
 
 The deployment shape is deliberately small, **two processes and one
-datastore**:
+datastore**, plus two optional planes that run nowhere until an
+installation uses them:
 
 ```mermaid
 flowchart LR
@@ -34,17 +43,24 @@ flowchart LR
         UI[App Router pages]
         SA[Server actions]
         AUTH[Better Auth]
+        API[Ingress routes: push · probe · artefacts]
     end
 
     subgraph worker [Worker process]
         TICK[monitor-tick cron]
         CHECK[monitor-check jobs]
-        RET[retention job]
+        SYNTH[synthetic-check jobs]
+        HF[high-frequency plane]
+        DRAIN[notification-delivery drain]
+        AUTO[recovery · runbook · task · slo · maintenance ticks]
+        RET[retention + rollup jobs]
     end
 
     PG[(PostgreSQL 18\ndata + pg-boss queue)]
     TARGETS[Monitored endpoints]
     ANTH[Anthropic API]
+    RUNNER[Synthetics runner\noptional container]
+    PROBES[Remote probe agents\noptional, customer-hosted]
 
     B --> UI --> SA --> PG
     SA --> ANTH
@@ -54,16 +70,44 @@ flowchart LR
     PG --> CHECK
     CHECK --> TARGETS
     CHECK --> PG
+    HF --> TARGETS
+    HF --> PG
+    DRAIN --> PG
+    AUTO --> PG
     RET --> PG
+    PG --> SYNTH
+    SYNTH --> TARGETS
+    SYNTH -.browser journeys.-> RUNNER --> TARGETS
+    SYNTH --> PG
+    PROBES -.outbound poll.-> API --> PG
 ```
 
 - **Next.js app** (`src/app`): dashboard, settings, public status pages, auth
-  endpoints. All mutations are server actions.
+  endpoints, and the three unauthenticated ingress routes (push heartbeats,
+  probe enrolment/poll/results, synthetic artefacts). All mutations are
+  server actions.
 - **Worker** (`src/worker`): a separate long-running Node process that owns
   every background job. It shares the app's code (schema, services) but not
-  its runtime.
+  its runtime. Adding replicas adds capacity: there is no leader election,
+  because Postgres already arbitrates who fires the cron, who runs the tick
+  and who takes each piece of work (§5, `docs/SCALING.md`).
 - **PostgreSQL 18**: the only stateful dependency. It stores both the domain
   data and the job queue (pg-boss creates its own `pgboss` schema).
+
+Two more processes exist and neither is part of the default install:
+
+- **Synthetics runner** (`src/synthetics-runner`, `Dockerfile.synthetics`):
+  a browser and a fixed interpreter, dialled by the worker for
+  `synthetic-browser` journeys only. It is internal infrastructure rather
+  than an agent: it has no enrolment, holds no state and holds no database
+  credential (§8c, `docs/SYNTHETICS.md` §8).
+- **Remote probe agents** (`src/probe-agent`, `Dockerfile.probe`): the
+  customer's own machines, executing assigned monitors and polling
+  outbound-only. The controller never dials them (§5,
+  `docs/REMOTE-PROBES.md`).
+
+Both are commercial, and both are removed from the Core mirror by name
+because a Dockerfile carries no edition marker (`docs/EDITIONS.md` §3.1).
 
 ### Why no Redis / message broker
 
@@ -81,21 +125,37 @@ src/
 ├── app/            # Next.js routes: thin, auth guard, parse, call service
 │   ├── (auth)/     #   sign-in / sign-up / password reset
 │   ├── (app)/      #   authenticated dashboard (sidebar shell)
+│   ├── (print)/    #   the print layout branded client reports render in
 │   ├── status/     #   public status pages (no auth, ISR-cached)
-│   └── api/auth/   #   Better Auth handler
+│   └── api/        #   Better Auth handler, demo login, and the three
+│                   #   unauthenticated ingress routes: push heartbeats,
+│                   #   probe enrol/poll/results, synthetic artefacts
 ├── modules/        # Domain logic, framework-free
-│   ├── monitors/   #   check engine, schemas, service
-│   ├── incidents/  #   lifecycle state machine, service
+│   ├── monitors/   #   check-type registry, probes, judge, scheduler policy
+│   ├── incidents/  #   lifecycle state machine, hook registry, service
 │   ├── recovery/   #   verified recovery loop: engine, schemas, service
 │   ├── runbooks/   #   typed remediation: definition, engine, registry, runs
+│   ├── tasks/      #   the human half: inbox, templates, hand-overs
+│   ├── slo/        #   objectives, budgets, burn rules
+│   ├── maintenance/#   windows, recurrence expansion, suppression
+│   ├── routing/    #   alert-routing policies (the ee half of dispatch)
+│   ├── synthetics/ #   journey model, interpreter contract, runs
+│   ├── probes/     #   remote-probe dispatch, lease, quorum, settlement
+│   ├── cluster/    #   worker heartbeat and the fleet read model
+│   ├── importers/  #   fifteen sources behind one migration pipeline
+│   ├── ledger/     #   the hash chain over observations
+│   ├── reports/    #   branded client reports, frozen and hashed
 │   ├── status-pages/
-│   ├── notifications/ #   email/webhook + escalation channels (email/sms/voice)
+│   ├── notifications/ #   channels, providers, outbox, escalation delivery
 │   ├── oncall/        #   on-call rotation math, schedules, escalation policies
 │   ├── audit/
 │   └── ai/         #   Anthropic client + prompt assembly
-├── worker/         # pg-boss bootstrap + job handlers
+├── worker/         # pg-boss bootstrap + job handlers + the two in-process
+│                   # planes (high frequency, probe settlement)
+├── synthetics-runner/ # the browser service: config, server, interpreter
+├── probe-agent/    # the remote agent: config, client, env guard
 ├── db/             # drizzle client + schema (one file per context)
-├── lib/            # env, logger, session guards, permissions, errors
+├── lib/            # env, logger, session guards, permissions, editions, errors
 └── components/     # UI (shadcn/ui in components/ui, shared pieces above)
 ```
 
@@ -125,7 +185,28 @@ erDiagram
     incidents ||--o{ incident_events : timeline
     status_pages ||--o{ status_page_monitors : shows
     monitors ||--o{ status_page_monitors : "appears as"
+
+    organization ||--o{ notification_channels : configures
+    notification_channels ||--o{ notification_outbox : queues
+    incidents ||--o{ recovery_attempts : "automation tried"
+    organization ||--o{ runbooks : owns
+    runbooks ||--o{ runbook_versions : publishes
+    runbook_versions ||--o{ runbook_runs : "pinned by"
+    runbook_runs ||--o{ runbook_run_steps : "current state"
+    runbook_run_steps ||--o{ runbook_step_attempts : evidence
+    runbook_runs ||--o{ tasks : "hands over to"
+    organization ||--o{ tasks : owns
+    tasks ||--o{ task_events : timeline
+    organization ||--o{ slos : owns
+    slos ||--o{ slo_buckets : accumulates
+    monitors ||--o{ synthetic_runs : "journeys produce"
 ```
+
+Read it as three layers rather than one graph. `monitors` and
+`monitor_checks` are **observation**; `incidents` and their events are
+**judgement**; `recovery_attempts`, `runbook_*` and `tasks` are **response**,
+and `slos` reads back over the first layer to grade all three. Every one of
+them hangs off `organization`, which is the only tenancy mechanism (below).
 
 Decisions worth calling out:
 
@@ -273,11 +354,85 @@ isomorphic; `probes/` reaches for `node:dns`, `node:net`, `node:tls` and
 `node:child_process` and is server-only. Type-specific settings live in a
 nullable `config` jsonb column, so a new type needs no migration.
 
+### The high-frequency plane
+
+The cron fan-out above has a floor of one minute, because that is
+pg-boss's cron floor, and the ordinary scheduler's own minimum interval
+is two seconds. HTTP, JSON-query and TCP monitors can instead be run at
+500 ms by a **second data plane in the same worker process**
+(`HighFrequencyPlane`, `modules/monitors/highfreq`), and the separation
+is the point: a scheduler whose slots are half a second apart cannot
+share an event loop with a job runner that occasionally spends seconds
+on an aggregate.
+
+Three properties are worth stating because they are what the plane costs
+and what it buys:
+
+- **It shards by lease.** Sixteen shard leases divide the enabled
+  monitors across whatever replicas are running. A worker that dies has
+  its shards taken over when its lease expires, and until then those
+  monitors fall back to the ordinary tick, degrading from 500 ms to the
+  configured baseline rather than to silence.
+- **It is idle by default and costs one query.** With no monitor enabled
+  the whole footprint is a discovery `SELECT` every two seconds; the
+  leases and the 25 ms scheduler start in the reload pass that first
+  sees a monitor. It is deliberately not behind an environment variable,
+  because a setting an operator can save on a deployment where nothing
+  honours it is worse than no setting.
+- **Its raw samples are a buffer, not history.** `monitor_hf_samples` is
+  a two-hour window; a minute cron rolls it into minute, hour and day
+  buckets and drops what it aggregated. The rollup runs on the queue
+  rather than inside the plane so that a multi-second aggregate can
+  never become a monitor's cadence.
+
+Measured cadence, the resource cost of each fleet size and the point
+where the plane stops keeping up are in `docs/HIGH-FREQUENCY.md`, which
+also states plainly that a 500 ms interval is not a 500 ms detection
+time.
+
+### Scripted synthetics (commercial)
+
+`synthetic-api` and `synthetic-browser` are check types like any other in
+the registry, and everything below the seam is unchanged: they produce an
+observation, it is judged, and the status controller does the rest. Two
+things about them are architectural.
+
+**A journey is data, never code.** There is no expression evaluator, no
+template with function calls, no regular expressions and no
+`page.evaluate`. The reason is not taste: the worker holds the
+installation's database, notification and recovery credentials, and "run
+this user's JavaScript" in that process is a decision to give every
+operator-editable field the authority of the process itself. What an
+operator writes is a list of typed steps whose text can only become a
+value. Everything a journey declares is therefore decidable before it
+runs, and `checkJourney()` decides it at save time; the executor has no
+"unknown variable" branch because a journey with one cannot be saved.
+`docs/SYNTHETICS.md` §1 is the long form, including what the decision
+costs (no loops, no branching, no arithmetic).
+
+**Journeys get their own queue, and that is what makes them safe to
+host.** A browser journey holds its slot for as long as a customer would
+take to click through the thing being tested, and `monitor-check` runs
+two jobs at a time per replica. Two journeys on the general queue is an
+installation whose HTTP monitors quietly stop being checked, and the
+operator's evidence for it would be a scheduler-lag graph with no cause
+on it. So `synthetic-check` has its own concurrency
+(`SYNTHETIC_CONCURRENCY`, default 2) and its own backpressure
+(`SYNTHETIC_QUEUE_MAX_DEPTH`): past that depth the tick leaves synthetic
+monitors due rather than piling them up. The general queue keeps the
+latency profile it had before the feature existed.
+
+A run is claimed on `(monitorId, scheduledFor)` in `synthetic_runs`
+before anything executes, so a job pg-boss redelivered after a restart, a
+duplicate from a racing tick and a fast follow-up all collapse onto one
+run, and the replicas that lose the claim stop without opening a browser
+or issuing the journey's requests. The runner process itself is §8c.
+
 ### Remote probes and quorum (commercial)
 
 A monitor can be executed by **remote probe agents** the customer runs on
 their own machines instead of by the controller. Operator manual:
-[docs/REMOTE-PROBES.md](docs/REMOTE-PROBES.md).
+`docs/REMOTE-PROBES.md`.
 
 Two words in this repository are now spelled "probe" and they are not the
 same thing. `modules/monitors/types/probes/*` is the function that dials a
@@ -559,19 +714,185 @@ two commit the run WITH its cause; the first two have the same window
 the recovery action's own scheduling has, and the run's dedupe key makes
 a repeat harmless.
 
+## 8b. Who hears about it: maintenance and routing _(commercial)_
+
+Two questions sit between "a notification is owed" and "a message is
+sent", and they are deliberately different questions rather than one with
+a flag: **may anything go out about this at all**, and **which channels**.
+`modules/notifications/dispatch-policy.ts` is the registry that asks
+them, modelled on the incident-hook registry down to the shape: behaviour
+is data in a list, an edition registers into it, and what `strip-ee`
+removes is a registration rather than a branch. Core registers nothing,
+both questions answer "no opinion", and routes resolve from the channel
+subscriptions exactly as they did before the file existed.
+
+**Maintenance windows** answer the first question. A window suppresses
+the page and nothing else: checks keep running, observations are still
+recorded, uptime is still computed and incidents still open, because the
+question after planned work is always "what did it take down" and only
+the evidence answers that. Windows carry an explicit IANA zone so a
+weekly window keeps its local time across a DST change, and an incident a
+window was holding is paged the moment the window ends if it is still
+open. `docs/MAINTENANCE.md`.
+
+**Alert-routing policies** answer the second. A policy is an ordered list
+of rules over (event class, event, severity); an assignment attaches one
+policy to the workspace, a service or a monitor, and the closest
+assignment wins. Exactly one policy is ever selected, so "no duplicate
+alerts from overlapping policies" is a property of the model rather than
+something the code has to be careful about, and an installation with no
+policy assigned behaves byte for byte as it did. Every dispatch records
+why it went where it went (`alert_routing_decisions`), which is what
+makes "the monitor went down, why did nobody get a message" answerable
+from the product. `docs/ALERT-ROUTING.md`.
+
+**A policy that throws degrades toward sending**: not suppressed, default
+routing. The failure mode of a broken routing policy should be an alert
+in the wrong room, never an outage nobody heard about.
+
+## 8c. The synthetics runner _(commercial)_
+
+The browser is a service, and it is the only component in this
+architecture that the worker **dials**. Everything else the product talks
+to is either a customer endpoint or something that dials in.
+
+That direction is the whole security question, and it is answered by
+refusing deployments rather than warning about them. What is reachable is
+a browser that renders whatever it is told to and receives request bodies
+carrying a journey's credentials, so: on loopback nothing is required and
+the kernel is the boundary; on a private network a shared token is
+required; on a public address https **and** a token are required. The
+controller checks this before it builds the request body, so a journey's
+secrets are never put on a connection that would have been refused, and
+the runner refuses to start when it listens beyond loopback with no token
+set. A container network is not an exemption.
+
+The runner holds no database credential, no session secret, no
+organization id and no monitor list, asserted by a test that walks its
+real import graph rather than claimed here, and it holds no state, so
+rotating the token is a restart on both sides.
+
+It is a separate image (`Dockerfile.synthetics`) rather than a stage in
+the main one for an edition reason: the gate has to be able to remove the
+whole build target from the Apache-2.0 mirror with one `rm -f`, and a
+stage in the shared file would be a build target that `COPY`s source the
+strip has deleted. The base image is Microsoft's Playwright image, and
+that is the one decision worth arguing with: Playwright publishes no
+Alpine browser builds, and pinning `apk add chromium` against a
+Playwright release is a version-matrix problem that breaks quietly, on
+somebody else's machine, as "the selector never matched".
+
+`docs/SYNTHETICS.md` §8 is the operator manual; `SECURITY.md` states the
+trust boundary.
+
+## 8d. Operations tasks: the human half _(commercial)_
+
+A runbook does what can be written down. A **task** is the work that
+cannot, recorded beside it: one piece of work, an owner, a deadline, five
+states (`open`, `in_progress`, `blocked`, `completed`, `cancelled`) and an
+append-only event log. Tasks are raised by hand, materialized from a
+recurring template, or handed over from a runbook step that then waits
+for the answer.
+
+Three decisions are architectural rather than product.
+
+**It shares the runbook engine's machinery, not a second one.**
+Recurrence is the maintenance expander unchanged, notices go through the
+Core dispatch path and the routing policy above, and the hand-over is two
+descriptors in the runbook action registry. There is no second scheduler,
+no second delivery path and no second notion of "due".
+
+**Reopening is deliberately absent.** `completed` and `cancelled` are
+terminal. A state that could move backwards out of `completed` would make
+"how long did this take" unanswerable, would let a runbook that already
+resumed be answered a second time, and would leave the event log as the
+only place the truth survived. `in_progress` back to `open` is allowed
+and is a handover, not a reopening.
+
+**A completed task is not a verification.** It records that a person said
+they did something. Whether a service actually recovered is the business
+of a runbook's `verify-monitor`, `verify-service` or `verify-slo` step,
+which reads observations. Nothing in this feature lets a checkbox become
+evidence about a system, which is the same rule the recovery loop follows
+when it insists that success is observed and never assumed.
+
+The `task-tick` pass is every minute and singleton, and the
+materialization horizon is why: work appears as it becomes owed rather
+than weeks early, so the watermark walks forward one tick at a time. What
+makes it safe is the `FOR UPDATE SKIP LOCKED` on the template and the
+unique index on `(template_id, occurrence_at)`, not the singleton policy.
+`docs/TASKS.md`.
+
+## 8e. Grading it afterwards: objectives and evidence _(commercial)_
+
+**An objective** is a target, a rolling window (1-90 days) and an error
+budget, over chosen monitors and services or the whole workspace.
+Compliance is computed from `uptimeSegments`, the one duration-weighted
+rule the monitor list, the status page and the client report already
+read: an objective adds a target, a window and a budget, and deliberately
+does not add a second opinion about whether the thing was up.
+`indeterminate` observations are in neither the numerator nor the
+denominator, for the same reason they open no incident.
+
+Whether planned maintenance spends budget is a property **of the
+objective**, not of the pager. An availability promise to a customer who
+does not care why the thing was unreachable, and an internal engineering
+target, are different promises, and the product refuses to pick one for
+you.
+
+Multi-window burn-rate alerts fire while the budget is going, and they
+reach people through the dispatch path, the routing policies and the
+on-call ladders that already exist: the feature adds no transport of its
+own. Every alert carries its own working, because a page whose arithmetic
+an operator cannot check is a page they will learn to ignore.
+`docs/SLOS.md`.
+
+**The evidence layer under all of it.** The same two-table split appears
+everywhere something reaches outside this process: one row that is the
+current state, updated in place, and an append-only companion that
+answers "did this go twice?". `notification_outbox` has
+`notification_attempts`, `runbook_runs` has `runbook_step_attempts` and
+`runbook_run_transitions`, recovery has `recovery_attempts`, tasks have
+`task_events`, incidents have `incident_events`. A single mutable row
+cannot answer that question, and it is the only question that matters
+when the effect was a POST to somebody else's restart endpoint.
+
+The **ledger** (`modules/ledger`, Core rather than commercial) hashes each
+observation into a per-actor chain, so an installation can verify its own
+history has not been edited underneath it. It proves nothing to a
+sceptic, being the operator's own machine hashing the operator's own
+rows, and that is stated rather than sold. `docs/UPTIME.md` covers what
+the uptime number is computed from and what it excludes.
+
 ## 9. Deployment
 
 `docker-compose.yml` runs the full stack: Postgres 18, a one-shot `migrate`
 service (drizzle migrations), the standalone Next.js image, and the worker
-image. CI (GitHub Actions) runs lint → typecheck → unit+integration tests
-against a Postgres service → build, then Playwright e2e against a production
-build, then builds both Docker images. Two more jobs guard the things a
-green suite cannot see: `core-gate` strips the commercial code and proves
-what is left still builds, migrates onto an empty database and serves
-(`scripts/edition-gate.sh`), and `public-facts` fails if a number this
-project publishes disagrees with the repository it describes
-(`scripts/public-facts.mjs`). Both must be required in branch protection,
-a job that is allowed to fail is a job that is not a gate.
+image. `docker-compose.synthetics.yml` and `docker-compose.probes.yml` are
+overlays for the two optional planes; neither is part of the default `up`.
+
+CI (GitHub Actions) runs lint → format → typecheck → unit+integration tests
+against a Postgres service → build; then Playwright e2e against a production
+build, which is also the only job with a browser and therefore the one that
+runs the synthetics interpreter suite; then the three images (app, worker,
+synthetics runner) plus a containerised browser journey end to end against
+the runner image it just built.
+
+Two jobs then run the supported deployment rather than describing it:
+`compose-journey` installs from zero, drives every feature family, drains
+gracefully and restarts; `compose-upgrade` installs the previous tagged
+release, populates it and upgrades it in place. A deployment document that
+nothing executes is a description of the author's machine.
+
+Two more guard the things a green suite cannot see: `core-gate` strips the
+commercial code and proves what is left still builds, migrates onto an
+empty database and serves (`scripts/edition-gate.sh`), and `public-facts`
+fails if a number this project publishes disagrees with the repository it
+describes (`scripts/public-facts.mjs`), along with the other generated
+artefacts and house rules in the same job (`dod:check`, `kuma:check`,
+`migration:check`, `shots:check`, `bench:check`, `dashes:check`,
+`brand:check`). All of them must be required in branch protection: a job
+that is allowed to fail is a job that is not a gate.
 
 The worker image runs TypeScript via `tsx` rather than a bundling step,
 a documented trade-off: a slightly larger image in exchange for zero build
@@ -579,27 +900,47 @@ complexity and identical code paths in dev and prod.
 
 ### Scaling path
 
-| Pressure                      | First response                                              |
-| ----------------------------- | ----------------------------------------------------------- |
-| More dashboard traffic        | App is stateless, add replicas behind a load balancer       |
-| More monitors                 | Add worker replicas; pg-boss coordinates via the queue      |
-| Check-history growth          | Tighten retention; then partition `monitor_checks` by month |
-| Status-page spikes            | Already ISR-cached; add a CDN in front                      |
-| Rate limiting across replicas | Move the in-memory AI limiter into Postgres/Redis           |
+| Pressure                      | First response                                                     |
+| ----------------------------- | ------------------------------------------------------------------ |
+| More dashboard traffic        | App is stateless, add replicas behind a load balancer              |
+| More monitors                 | Add worker replicas; pg-boss coordinates via the queue             |
+| A tick that cannot keep up    | Raise `MONITOR_SCHEDULER_BATCH`; the fan-out is batched and ranked |
+| More browser journeys         | Raise `SYNTHETIC_CONCURRENCY`, then add runner containers          |
+| Check-history growth          | Tighten retention; then partition `monitor_checks` by month        |
+| Status-page spikes            | Already ISR-cached; add a CDN in front                             |
+| Rate limiting across replicas | Move the in-memory AI limiter into Postgres/Redis                  |
+
+Measured capacity per fleet size, what happens when a worker dies, and
+where the per-worker ceiling actually is: `docs/SCALING.md`, whose every
+number is checked against its own artefact by `npm run bench:check`.
 
 ## 10. Trade-offs & future improvements
 
-Shipped since the first cut: Resend email delivery, on-call schedules and
-escalation policies (§8), SMS/voice via Twilio, status-page email
-subscriptions (§8), and multi-region checks in 1.14.0. A monitor can be
-assigned to remote probe agents the customer runs, and a quorum decides
-the verdict. The infrastructure the earlier note said this needed is the
-customer's: Vigil ships the agent and hosts no regions itself. See
-[docs/REMOTE-PROBES.md](docs/REMOTE-PROBES.md).
+Shipped since the first cut, each of which this document once listed as
+future work: Resend email delivery, on-call schedules and escalation
+policies (§8), SMS/voice via Twilio, status-page email subscriptions
+(§8), multi-region checks by remote probe agents the customer runs with a
+quorum deciding the verdict (§5, 1.14.0), maintenance windows and alert
+routing (§8b, 1.20.0), scripted synthetics and the runner (§5, §8c,
+1.23.0), objectives with error budgets (§8e, 1.24.0), runbooks (§8a,
+1.25.0) and operations tasks (§8d, 1.26.0).
 
 Still consciously deferred, in rough priority order:
 
-1. **DNS-rebinding-proof probes** (pin resolved IPs / egress proxy).
+1. **DNS-rebinding-proof probes** for the non-HTTP types. The HTTP family
+   already resolves once and connects to the address it checked; the
+   database and socket probes hand a hostname to a driver that looks it
+   up again. `SECURITY.md` states the residual window rather than
+   implying it is closed.
 2. **Postgres RLS** as defense-in-depth if non-application SQL access appears.
 3. **Live-updating dashboards** (SSE or polling): today data refreshes on
    navigation/mutation.
+4. **A global rate limiter.** `lib/rate-limit.ts` is per-process, so
+   several app replicas each enforce their own window. It guards cost on
+   the AI actions and nothing security-critical depends on it, which is
+   why it is here rather than higher.
+   Not on that list, and stated here so nobody reads it as an omission:
+   **SSO/SAML is not built and not planned.** `docs/EDITIONS.md` names it on
+   the commercial side of the edition line, which is a statement about where
+   it would go and not a commitment that it is coming; there are no files
+   marked for it. `docs/SALES-KIT.md` says the same thing to a buyer.

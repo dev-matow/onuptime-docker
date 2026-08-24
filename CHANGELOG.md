@@ -6,6 +6,34 @@ free edition; entries for commercial-only features live in the other
 repository, because they are not in this one and listing them here would
 describe software you do not have.
 
+## 1.27.0 — 2026-08-24
+
+The Better Stack migration bridge, and all of it is here: the bridge is
+part of the migration story, and the migration story is Core.
+
+Connect a Better Stack account read-only, import through the same
+engine and honesty rules the one-time importer already has, run both
+systems side by side, and get a frozen cutover report that compares
+real outcomes: which outages both systems recorded, which only one did,
+how far apart detection and recovery were, and a SAFE or NOT SAFE
+verdict with every reason written out. Everything a bridge import
+creates runs in shadow mode: checks execute and incidents are recorded
+with full timelines, and none of it pages, reaches a channel, or
+appears on a public status page until you cut over. The one stored
+credential is sealed with the same secretbox as channel credentials,
+deleted outright on disconnect, and the bridge only ever issues GET
+requests against Better Stack. The importer also now reads Better Stack
+heartbeats and heartbeat groups as Vigil push monitors, one new
+capability row, with the same never-copy-the-token rule as everything
+else. `docs/MIGRATION-BRIDGE.md` states exactly what the report can
+prove and what it cannot.
+
+In this edition, shadow suppression covers what this edition has:
+paging, channels, member and subscriber email, and the public status
+page. The commercial automation the same seams also silence (recovery
+actions, runbooks, escalation ladders, SLO burn alerts) lives in the
+other repository.
+
 ## 1.26.0 — 2026-08-23
 
 Operations tasks are a commercial feature and none of it is here: the

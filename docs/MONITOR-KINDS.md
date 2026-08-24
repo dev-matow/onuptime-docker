@@ -3,12 +3,12 @@
 Most of Vigil's check types dial something and measure the answer. Three
 do not, and they cannot be made to without lying about what they are:
 
-| Kind        | Where the state comes from                     | Scheduled? | Types              |
-| ----------- | ---------------------------------------------- | ---------- | ------------------ |
-| `active`    | Vigil dials the target                         | yes        | the other fourteen |
-| `passive`   | the target reports in; Vigil times the silence | yes        | `push`             |
-| `aggregate` | derived from other monitors' states            | **no**     | `group`            |
-| `manual`    | an operator states it                          | **no**     | `manual`           |
+| Kind        | Where the state comes from                     | Scheduled? | Types            |
+| ----------- | ---------------------------------------------- | ---------- | ---------------- |
+| `active`    | Vigil dials the target                         | yes        | every other type |
+| `passive`   | the target reports in; Vigil times the silence | yes        | `push`           |
+| `aggregate` | derived from other monitors' states            | **no**     | `group`          |
+| `manual`    | an operator states it                          | **no**     | `manual`         |
 
 Every kind still ends at the same place. Each one produces _facts_, the
 shared condition engine judges those facts against the type's declared

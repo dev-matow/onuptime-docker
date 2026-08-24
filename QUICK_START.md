@@ -43,7 +43,7 @@ npm run worker:dev          # terminal 2, background checks
 ## Verify the install
 
 ```bash
-npm run typecheck && npm run lint && npm test   # 4337 tests, ~5s
+npm run typecheck && npm run lint && npm test   # 4487 tests, ~5s
 ```
 
 ## Turn on automatic recovery (optional, ~5 minutes)
@@ -81,7 +81,7 @@ a fleet that went quiet must never read as an outage.
 Three agents on one host share a kernel and a route, so this proves the
 machinery and nothing about reachability. Remote rounds need an interval
 of 20 seconds or more. Full setup, rotation and troubleshooting:
-[docs/REMOTE-PROBES.md](docs/REMOTE-PROBES.md).
+`docs/REMOTE-PROBES.md`.
 
 ## Where to go next
 
@@ -93,4 +93,4 @@ of 20 seconds or more. Full setup, rotation and troubleshooting:
 | Understand the design       | [ARCHITECTURE.md](ARCHITECTURE.md)             |
 | Day-to-day development      | [docs/HANDBOOK.md](docs/HANDBOOK.md)           |
 | Take updates later          | [docs/UPGRADE.md](docs/UPGRADE.md)             |
-| Check from several machines | [docs/REMOTE-PROBES.md](docs/REMOTE-PROBES.md) |
+| Check from several machines | `docs/REMOTE-PROBES.md`                        |

@@ -1,4 +1,15 @@
-import { and, asc, desc, eq, gte, inArray, ne, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNull,
+  ne,
+  or,
+  sql,
+} from "drizzle-orm";
 
 import type { DbClient } from "@/db";
 import {
@@ -201,10 +212,19 @@ export async function setStatusPageMonitors(
           inArray(monitors.id, monitorIds),
           eq(monitors.organizationId, actor.organizationId),
         ),
-        columns: { id: true },
+        columns: { id: true, name: true, shadowBridgeId: true },
       });
       if (owned.length !== monitorIds.length) {
         throw new NotFoundError("Monitor not found.");
+      }
+      // Refused loudly rather than filtered quietly: an operator who
+      // asked for a component deserves to hear "not while it shadows",
+      // not to count the page and find one missing.
+      const shadowed = owned.find((m) => m.shadowBridgeId !== null);
+      if (shadowed) {
+        throw new ConflictError(
+          `"${shadowed.name}" runs in a migration bridge's shadow mode and cannot appear on a status page. Cut the bridge over, or leave the monitor off the page until you do.`,
+        );
       }
     }
 
@@ -385,7 +405,18 @@ export async function getPublicStatusPage(
     })
     .from(statusPageMonitors)
     .innerJoin(monitors, eq(statusPageMonitors.monitorId, monitors.id))
-    .where(eq(statusPageMonitors.statusPageId, page.id))
+    .where(
+      and(
+        eq(statusPageMonitors.statusPageId, page.id),
+        // A monitor in a migration bridge's shadow mode is invisible to
+        // the public: its component chip, its uptime strip and its
+        // incidents all stay off the page until cutover. Filtered at
+        // read time as well as refused at write time, so that a write
+        // path this module grows later cannot quietly publish a fleet
+        // that was imported on the promise of having no public effects.
+        isNull(monitors.shadowBridgeId),
+      ),
+    )
     .orderBy(asc(statusPageMonitors.sortOrder));
 
   const monitorIds = componentRows.map((row) => row.monitorId);
@@ -648,6 +679,13 @@ async function publicIncidents(
   const rows = await db.query.incidents.findMany({
     where: and(
       eq(incidents.organizationId, organizationId),
+      // A shadow incident was recorded for migration comparison and was
+      // never announced to anyone; publishing it here would announce it.
+      // The component query already excludes shadow monitors, so this
+      // predicate is the belt for the one path that does not go through
+      // it: a monitor whose shadow ended still has shadow incidents, and
+      // those stay off the page even once the monitor itself is on it.
+      eq(incidents.shadow, false),
       onThisPage,
       options.active
         ? ne(incidents.status, "resolved")

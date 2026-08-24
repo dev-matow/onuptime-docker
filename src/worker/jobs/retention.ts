@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 
 import { db } from "@/db";
-import { monitorChecks, monitors } from "@/db/schema";
+import { bridgePolls, monitorChecks, monitors } from "@/db/schema";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { pruneExpandedIntents } from "@/modules/notifications/intents";
@@ -119,6 +119,40 @@ export async function pruneOldChecks(
         retentionDays: env.NOTIFICATION_RETENTION_DAYS,
       },
       "pruned notification history",
+    );
+  }
+
+  // Migration-bridge poll rows age with the observation history their
+  // coverage claims sit beside; a coverage claim older than the check
+  // retention window has nothing left to vouch for, and losing one only
+  // turns old extras unprovable, which is the conservative direction.
+  // The source-incident COPIES are deliberately not pruned at all: a
+  // recorded miss is the source's row plus Vigil's absence, deleting
+  // the copy would delete the miss from the next report, and a verdict
+  // must never improve because time passed. Copies, import reports and
+  // cutover reports all live until the bridge itself is deleted.
+  let bridgePollsPruned = 0;
+  for (;;) {
+    const result = await db.execute(sql`
+      delete from ${bridgePolls}
+      where ctid in (
+        select ctid from ${bridgePolls}
+        where ${bridgePolls.createdAt} < ${cutoff.toISOString()}::timestamptz
+        ${
+          options.organizationId
+            ? sql`and ${bridgePolls.organizationId} = ${options.organizationId}`
+            : sql``
+        }
+        limit ${PRUNE_BATCH}
+      )
+    `);
+    bridgePollsPruned += result.rowCount ?? 0;
+    if ((result.rowCount ?? 0) < PRUNE_BATCH) break;
+  }
+  if (bridgePollsPruned > 0) {
+    logger.info(
+      { polls: bridgePollsPruned, retentionDays: CHECK_RETENTION_DAYS },
+      "pruned migration bridge poll history",
     );
   }
 

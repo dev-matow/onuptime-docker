@@ -260,6 +260,20 @@
       "when": 1787363665872,
       "tag": "0036_operations_tasks",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1787538595853,
+      "tag": "0037_thankful_meltdown",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1787554729574,
+      "tag": "0038_freezing_mikhail_rasputin",
+      "breakpoints": true
     }
   ]
 }

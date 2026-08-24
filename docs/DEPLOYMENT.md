@@ -3,6 +3,14 @@
 Vigil deploys as **two processes and one database**: the Next.js app,
 the worker, and PostgreSQL 18+. Nothing else is required.
 
+Two more containers exist and neither is part of that install. Deploy the
+**synthetics runner** only if you run browser journeys (§4 below), and
+**remote probe agents** only if you want checks executed from machines
+other than the one Vigil runs on (`docs/REMOTE-PROBES.md`).
+Every other feature in the product (maintenance windows, alert routing,
+objectives, runbooks, operations tasks) is the same two processes doing
+more work on the same queue, and needs no deployment change at all.
+
 ## 1. Docker Compose (single host)
 
 The included [docker-compose.yml](../docker-compose.yml) is
@@ -73,6 +81,40 @@ ledger identity; sharing one means sharing a chain and contending on its
 sequence). `MONITOR_SCHEDULER_BATCH` bounds how many due monitors one
 tick enqueues; the default of 5000 suits fleets far larger than most
 installations run.
+
+## 4. The two optional planes
+
+Neither is in `docker compose up`. Both are commercial, and both are
+removed from Vigil Core by name.
+
+**The synthetics runner**, for `synthetic-browser` journeys only. It is a
+Compose overlay, and the worker and the runner must present the same
+token:
+
+```bash
+echo "SYNTHETICS_RUNNER_TOKEN=$(openssl rand -base64 32)" >> .env
+docker compose -f docker-compose.yml -f docker-compose.synthetics.yml up -d
+```
+
+The overlay puts the runner on a network of its own and publishes no
+port, which is the point: what is reachable is a browser that renders
+whatever it is told to. Vigil refuses the unsafe deployments rather than
+warning about them: beyond loopback a token is required, and on a public
+address https as well. It checks that before it builds a request
+body, so a journey's secrets are never put on a connection that would
+have been refused. Sizing, readiness, running more than one, and the
+`SYNTHETIC_CONCURRENCY` / `SYNTHETIC_QUEUE_MAX_DEPTH` settings that stop
+browser journeys starving your HTTP monitors are in
+`docs/SYNTHETICS.md` §8, which is the canonical page for all of
+it. API journeys need none of this: they execute in the worker through
+the same egress guard every other HTTP check uses.
+
+**Remote probe agents**, for checks executed somewhere other than the
+host Vigil runs on. A probe is a headless container that connects
+outbound only, so there is no inbound port and nothing to open in a
+firewall. Enrolment, rotation, quorum, firewall rules and mixed-version
+fleets are in `docs/REMOTE-PROBES.md`. Remote rounds need an
+interval of 20 seconds or more.
 
 ## Environment
 
@@ -145,9 +187,15 @@ by the 90-day retention job.
   guard), and recorded on the incident timeline. With _hold alerts
   while recovering_ enabled, a verified recovery pages nobody; a
   failed or overdue one pages immediately.
+- **Planned work, routing, objectives, runbooks and tasks** need no
+  deployment configuration. They are configured in the product and run
+  on the worker's existing queues: `docs/MAINTENANCE.md`,
+  `docs/ALERT-ROUTING.md`, `docs/SLOS.md`,
+  `docs/RUNBOOKS.md`, `docs/TASKS.md`.
 - **Scaling**: app and worker are independently horizontal; the queue
-  serializes per-monitor work. See ARCHITECTURE.md §10 for the pressure
-  → response table.
+  serializes per-monitor work, and there is no leader election to
+  operate. See ARCHITECTURE.md §9 for the pressure → response table and
+  `docs/SCALING.md` for the measured numbers behind it.
 
 ## Backups & restore
 

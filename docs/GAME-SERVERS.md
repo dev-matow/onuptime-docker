@@ -88,9 +88,10 @@ The assertions are the same two `steam` makes.
   domain-validated target cannot be walked into `10.0.0.1` or the cloud
   metadata endpoint. A dependency that resolves and connects on its own
   is an SSRF hole with a pleasant API.
-- **It would be the first monitor dependency.** Fourteen types already
-  speak their protocols by hand; the product ships as two processes and
-  a Postgres, with no broker and no driver except `pg`.
+- **It would be the first monitor dependency.** Every other type in the
+  registry speaks its protocol by hand, `postgres` being the one that
+  uses a driver; the product ships as two processes and a Postgres, with
+  no broker and no driver except `pg`.
 - **The three queries are ninety lines of wire format between them.** A
   dependency that large would be bought for a lookup table.
 
@@ -173,12 +174,15 @@ be wrong for two thirds of the servers this watches.
   CSV exports and public status pages, and every byte was chosen by the
   far end.
 
-## Not yet mapped from Uptime Kuma
+## Importing from Uptime Kuma
 
-`docs/KUMA-IMPORT.md` still records `gamedig` and `steam` as "not
-imported. Vigil has no game-server check type". That is out of date now
-in principle, but the importer mapping has not been rewritten: Kuma's
-`game` field is a game id, not a protocol, and turning three hundred ids
-into three protocols is a table this release does not have. Until then,
-those monitors are reported as skipped rather than imported into a check
-that would query the wrong thing.
+Both types import. Kuma's `game` field is a game id rather than a
+protocol, so `gamedigProtocolFor` resolves it to one of the three
+protocol families here (Source/GoldSrc, Minecraft, id Tech 3), and **a
+game id that is not one of them is refused rather than queried with the
+wrong protocol**. A check pointed at the wrong protocol does not fail
+loudly; it reports an outage of a server that is running.
+
+`docs/KUMA-IMPORT.md` carries the generated row for both types, and
+`npm run kuma:check` fails if it drifts from the mapping the importer
+actually uses.

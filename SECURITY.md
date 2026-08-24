@@ -7,7 +7,8 @@ issue. Email **s8kur3@gmail.com** (the address on
 [the contact page](https://vigil-uptime.com/contact.html)), or use the
 support channel on your purchase receipt, with:
 
-- the affected version and component (the app or the worker),
+- the affected version and component (the app, the worker, the
+  synthetics runner or a probe agent),
 - steps to reproduce,
 - the impact you observed.
 
@@ -38,11 +39,15 @@ The full security model is documented in
 
 ## Outbound requests, the egress policy
 
-Vigil makes outbound requests on your behalf from four places: monitor
-probes, the redirects those probes follow, webhook delivery, and
-recovery triggers. All four go through one policy
-(`src/modules/monitors/egress.ts`), so a rule learned in one is a rule
-everywhere.
+Vigil makes outbound requests on your behalf from a growing number of
+places: monitor probes, the redirects those probes follow, the requests
+an API journey issues, notification-channel deliveries to twenty-five
+provider types, webhook delivery, the importer reading your old
+monitoring account, runbook steps that call an endpoint, and recovery
+triggers. Every one of them goes through one policy
+(`src/modules/monitors/egress.ts`) on one of three channels (`monitor`,
+`webhook` or `recovery`), so a rule learned in one is a rule everywhere,
+and a new caller inherits the posture rather than inventing one.
 
 **The floor, which no setting can lower.** Cloud instance-metadata
 addresses (`169.254.169.254`, `169.254.170.2`, `fd00:ec2::254`,

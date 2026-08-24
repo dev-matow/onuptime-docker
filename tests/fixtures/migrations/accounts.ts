@@ -244,6 +244,53 @@ export const BETTERSTACK: Route[] = [
       },
     },
   },
+  {
+    path: "/api/v2/heartbeat-groups",
+    body: {
+      data: [{ id: "700", attributes: { name: "Cron jobs", sort_index: 0 } }],
+      pagination: { next: null },
+    },
+  },
+  {
+    path: "/api/v2/heartbeats",
+    body: {
+      data: [
+        {
+          // Deliberately the same integer as monitor "2": the two id
+          // sequences are independent, which is why the adapter must
+          // prefix heartbeat ids or a re-import dedupes the wrong row.
+          id: "2",
+          type: "heartbeat",
+          attributes: {
+            name: "Nightly backup",
+            // The path segment is the heartbeat's own token. The adapter
+            // must never read this field.
+            url: `https://uptime.betterstack.com/api/v1/heartbeat/${FIXTURE_SECRET}`,
+            period: 86400,
+            grace: 3600,
+            heartbeat_group_id: "700",
+            paused_at: null,
+            status: "up",
+          },
+        },
+        {
+          id: "31",
+          type: "heartbeat",
+          attributes: {
+            name: "Hourly sync",
+            url: `https://uptime.betterstack.com/api/v1/heartbeat/${FIXTURE_SECRET}`,
+            period: 3600,
+            grace: 300,
+            heartbeat_group_id: null,
+            paused_at: "2026-06-01T10:00:00.000Z",
+            status: "paused",
+            maintenance_days: ["sat", "sun"],
+          },
+        },
+      ],
+      pagination: { next: null },
+    },
+  },
 ];
 
 /* ───────────────────────────── Pingdom ───────────────────────────── */

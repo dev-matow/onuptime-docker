@@ -13,6 +13,7 @@ import {
 } from "@/modules/notifications/channel-service";
 
 
+import { runBridgePoll } from "./jobs/bridge-poll";
 import { runHighFrequencyRollupJob } from "./jobs/high-frequency";
 import { runMonitorCheck } from "./jobs/monitor-check";
 import { runMonitorTick } from "./jobs/monitor-tick";
@@ -109,6 +110,11 @@ async function main() {
   // exactly where nobody is watching the logs.
   await boss.createQueue(QUEUES.highFrequencyRollup, { policy: "singleton" });
   await boss.createQueue(QUEUES.retention);
+  // Singleton: a poll is a sequence of idempotent upserts keyed by the
+  // source's own incident ids, so a second concurrent pass would be
+  // correct - and it would also double the requests made against a
+  // third-party account whose rate limits are undocumented.
+  await boss.createQueue(QUEUES.bridgePoll, { policy: "singleton" });
 
   // Retention for the high-churn queues, applied AFTER creation and
   // through `updateQueue` on purpose: `create_queue` is INSERT ... ON
@@ -186,6 +192,13 @@ async function main() {
     await pruneOldChecks();
   });
 
+  await boss.work(QUEUES.bridgePoll, async () => {
+    const result = await runBridgePoll();
+    // Quiet when no bridge is connected, which is almost every
+    // installation almost all of the time.
+    if (result.bridges > 0) log.info(result, "bridge evidence polled");
+  });
+
   await boss.work(QUEUES.highFrequencyRollup, async () => {
     await runHighFrequencyRollupJob();
   });
@@ -200,6 +213,8 @@ async function main() {
   await boss.schedule(QUEUES.notificationDelivery, "* * * * *");
   await boss.schedule(QUEUES.retention, "0 3 * * *");
   await boss.schedule(QUEUES.highFrequencyRollup, "* * * * *");
+  // Fifteen minutes; see the queue's own comment for why not one.
+  await boss.schedule(QUEUES.bridgePoll, "*/15 * * * *");
 
   // Fire an immediate tick so a fresh deployment doesn't idle for the
   // first minute; the singleton policy dedupes against the cron.
@@ -207,6 +222,10 @@ async function main() {
   // A message queued just before the last shutdown should not wait a
   // minute for its first attempt.
   await boss.send(QUEUES.notificationDelivery, {});
+  // A bridge that missed polls while the worker was down self-heals on
+  // its next window read; the boot send just makes that now rather than
+  // up to fifteen minutes from now.
+  await boss.send(QUEUES.bridgePoll, {});
 
   // The high-frequency plane. Started unconditionally and idle by
   // default: with no monitor enabled its whole footprint is the

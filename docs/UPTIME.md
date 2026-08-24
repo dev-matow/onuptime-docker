@@ -183,7 +183,7 @@ pruned. That is pre-existing behavior and unchanged by this work.
 
 ## Objectives read this rule, and only this rule
 
-Service level objectives (commercial; [SLOS.md](SLOS.md)) are computed
+Service level objectives (commercial; `docs/SLOS.md`) are computed
 from the same segments. They add a target, a rolling window and an error
 budget, and they judge each segment by their own definition of "good"
 (`degraded` may spend budget, and a latency objective asks how fast

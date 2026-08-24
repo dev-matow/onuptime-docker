@@ -1,3 +1,10 @@
+// Specs may import product modules, and a product module reaches
+// `@/lib/env`, which refuses to load without a database URL. CI exports
+// the variables; a developer has them in `.env`, and without this the
+// suite fails at import time with a configuration error rather than
+// running. A no-op wherever the environment is already set.
+import "dotenv/config";
+
 import { defineConfig, devices } from "@playwright/test";
 
 /**
@@ -35,6 +42,17 @@ export default defineConfig({
           // :3000 answered a run whose own server was on :3210.
           reuseExistingServer: !process.env.CI,
           timeout: 120_000,
+          // The Better Stack stub the bridge spec starts on this port.
+          // Set unconditionally: an env var pointing at a port nothing
+          // listens on changes nothing for the specs that never talk to
+          // Better Stack, and the one that does owns the listener. A
+          // developer reusing their own dev server exports it themselves
+          // (reuseExistingServer means this block's env never reaches
+          // that process).
+          env: {
+            ...(process.env as Record<string, string>),
+            VIGIL_BETTERSTACK_TEST_BASE: "http://127.0.0.1:43117",
+          },
         },
       }),
 });

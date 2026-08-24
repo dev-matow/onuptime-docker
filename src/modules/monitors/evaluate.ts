@@ -1,4 +1,4 @@
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 
 import type { DbClient } from "@/db";
 import { monitors } from "@/db/schema";
@@ -78,7 +78,7 @@ export async function evaluateMonitor(
       config,
       definition.derive({
         config,
-        children: await memberStates(db, monitor.id),
+        children: await memberStates(db, monitor.id, monitor.shadowBridgeId),
       }),
     );
   }
@@ -111,10 +111,21 @@ export async function evaluateMonitor(
 /**
  * A group's members, ordered so the "worst member" fact is stable
  * across evaluations that find the same states.
+ *
+ * A member is only a member if it shares the group's shadow setting.
+ * `IS NOT DISTINCT FROM` because both sides are usually null: a live
+ * group aggregates live members, and a group imported by a migration
+ * bridge aggregates the members that came with it. What the predicate
+ * refuses is the mix - a shadow monitor filed into a live group must
+ * not be able to turn that group red and page for a fleet that exists
+ * to be watched without consequences, and a live monitor moved under a
+ * shadow group must not have its state swallowed by a group nothing is
+ * allowed to announce.
  */
 export async function memberStates(
   db: DbClient,
   groupId: string,
+  groupShadowBridgeId: string | null,
 ): Promise<ChildState[]> {
   const rows = await db
     .select({
@@ -125,7 +136,12 @@ export async function memberStates(
       intervalSeconds: monitors.intervalSeconds,
     })
     .from(monitors)
-    .where(eq(monitors.parentId, groupId))
+    .where(
+      and(
+        eq(monitors.parentId, groupId),
+        sql`${monitors.shadowBridgeId} is not distinct from ${groupShadowBridgeId}`,
+      ),
+    )
     .orderBy(asc(monitors.createdAt));
   return rows;
 }

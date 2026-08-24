@@ -44,6 +44,33 @@ Inside that month sit an outage, an incident somebody acknowledged and
 resolved, and a blip the recovery runtime fixed, the four things a
 monthly client report is supposed to be able to show.
 
+### The operations half
+
+Commercial edition only, and it is a second command rather than more of
+the first because everything it creates is commercial:
+
+```bash
+npm run demo:operations
+```
+
+Adds what 1.23 to 1.26 shipped, to the same organization: a scripted API
+journey with twenty-four runs and one read-back failure, two objectives
+measured against the observations `db:seed` already wrote, two runbooks,
+and an operations inbox holding work in every state the product has.
+
+**The hand-over in it is executed, not written down.** The script starts
+a real run, drives the real engine until it suspends on `await-task`,
+completes that task the way a responder would, and lets the engine
+resume, verify against observations and open the follow-up. It fails
+rather than writing a `succeeded` nobody earned, so a demo rebuild is
+also a check that the feature still works end to end.
+
+Nothing in it reaches the network. The seeded plans use only actions
+whose whole effect is a database write, and the tenant's queued
+deliveries are parked for the duration - several engine paths drain the
+outbox inline, which would otherwise post this fixture data to real
+provider endpoints during a rebuild.
+
 ### A report on the demo
 
 Commercial edition only. Client reports are not part of Core, and
@@ -59,8 +86,8 @@ after `db:seed`: on a demo host too, if you want the Reports page to
 show a real document rather than an empty state. It forces
 `DEMO_MODE=false` for its own run, exactly as the seed does.
 
-The seed is **idempotent**: it wipes and recreates only the demo
-organization and demo users, so it doubles as the reset job.
+Both seeds are **idempotent**: each wipes and recreates only what it
+owns in the demo organization, so the pair doubles as the reset job.
 
 Monitors intentionally point at highly-available public endpoints
 (github, cloudflare, mozilla…) so a live worker keeps the demo green;
@@ -73,7 +100,7 @@ Any scheduler that can run one command:
 
 ```cron
 # 03:00 UTC daily, restore pristine demo data
-0 3 * * * cd /srv/vigil && docker compose run --rm worker npx tsx scripts/seed-demo.ts >> /var/log/vigil-demo-reset.log 2>&1
+0 3 * * * cd /srv/vigil && docker compose run --rm worker sh -c 'npx tsx scripts/seed-demo.ts && npx tsx scripts/seed-demo-operations.ts' >> /var/log/vigil-demo-reset.log 2>&1
 ```
 
 (Systemd timer or your platform's cron equivalent works identically,

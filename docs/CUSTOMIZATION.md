@@ -76,24 +76,48 @@ Worked examples to copy from: monitors (full CRUD), incidents
   no dispatch to edit, no `switch` to extend, and no migration: the
   type's settings go in the `config` jsonb column.
 
-  Ship it as `types/commercial/` if it must not appear in Vigil Core. A
-  feature flag would leave the source in the public tree.
+  If it must not appear in Vigil Core, mark each of its own files with
+  `// @edition:ee` on the first line, and give the four lines it adds to
+  the shared files (the import and the map entry, in `registry.ts` and
+  `specs/index.ts`) a trailing `// @edition:ee`; the catalog entry goes
+  in an `// @edition:ee-start` / `-end` block. The strip deletes marked
+  files outright and marked lines in place, so the source never reaches
+  the public tree; a feature flag would leave it there. The two
+  scripted-synthetic types are the worked example, and
+  `docs/EDITIONS.md` §3 is the rule.
 
-- **More alert channels (PagerDuty/Opsgenie)**: email, Slack,
-  Discord and signed webhooks already ship; Slack and Discord are
-  auto-detected by webhook host. So do SMS and voice, through your own
-  Twilio account, along with on-call schedules and escalation policies
-  (since 1.8.0). To add another provider, the reconciliation branches in
-  `src/worker/jobs/monitor-check.ts` are the single dispatch point, and
-  `src/modules/notifications/` is where formatting lives.
+- **Another notification provider**: twenty-five native provider types
+  already ship (PagerDuty, Jira Service Management, Slack, Discord,
+  Teams, Telegram, the push services, Twilio, SMTP, Resend, signed
+  webhooks, Amazon SNS and the rest), plus a bridge to your own Apprise
+  server, unlimited channels, and on-call schedules and escalation
+  ladders on top. Adding one is a file in
+  `src/modules/notifications/providers/` and a line in the
+  `CHANNEL_PROVIDERS` array in that directory's `index.ts`: the channel
+  editor, the docs generator and the public provider count all read that
+  array, so a provider that is not in it does not exist anywhere and no
+  surface can claim one that is not shipped. Set
+  `capabilities.native: false` if what you are adding is a bridge rather
+  than an integration, so it is not counted as one.
+  [NOTIFICATIONS.md](NOTIFICATIONS.md) is the full picture, including the
+  outbox every provider delivers through.
+- **Who gets told, rather than how**: that is not a code change. Alert
+  routing policies decide it from the product
+  (`docs/ALERT-ROUTING.md`), and maintenance windows decide
+  when nobody is told at all (`docs/MAINTENANCE.md`).
 - **Recovery receivers**: the product side is done (signed trigger,
   verify-before/after, bounds, immutable record); your side is the
   endpoint. Start from `examples/recovery-receiver.mjs` and the
   per-platform commands + systemd/Kubernetes manifests in
   `examples/recovery-templates.md`; anything that
-  verifies `X-Vigil-Signature` and restarts a service qualifies. New
-  action kinds belong in `src/worker/jobs/recovery.ts` behind the same
-  attempt record.
+  verifies `X-Vigil-Signature` and restarts a service qualifies. A new
+  kind of automation is a **runbook step type**, not a second recovery
+  path: add a descriptor to the registry in
+  `src/modules/runbooks/registry.ts` with its implementation under
+  `src/modules/runbooks/actions/`, and it inherits the durable run, the
+  approvals, the resource leases and the append-only attempt record
+  (`docs/RUNBOOKS.md`). The per-monitor recovery action stays
+  what it is: one endpoint, one fixed shape.
 - **More AI actions**. Follow `src/modules/ai/incident-ai.ts`: build a
   prompt from owned data, add a rate-limited action, keep output in an
   editable form.

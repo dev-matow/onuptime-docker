@@ -11,11 +11,15 @@ Most questions are answered here:
 - [docs/HANDBOOK.md](docs/HANDBOOK.md), commands, conventions, debugging
 - [ARCHITECTURE.md](ARCHITECTURE.md), how the pieces fit together
 
+Every guide in the tree is indexed under **Documentation** in the
+[README](README.md), grouped by what you are trying to do: install and
+operate, what the product does, building on it, selling it.
+
 ## Before you buy
 
 Questions about licensing, deployment or whether Vigil fits your case:
 use [**the contact page**](https://vigil-uptime.com/contact.html), or
-email s8kur3@gmail.com directly. See [COMMERCIAL.md](COMMERCIAL.md) for
+email s8kur3@gmail.com directly. See `COMMERCIAL.md` for
 what a purchase includes.
 
 ## After you buy
@@ -24,7 +28,8 @@ Use the support channel on your purchase receipt. To get a fast, useful
 answer, include:
 
 - your Vigil version (see [CHANGELOG.md](CHANGELOG.md)),
-- which process is affected, the app or the worker,
+- which process is affected: the app, the worker, or one of the two
+  optional containers (the synthetics runner, a probe agent),
 - the relevant log lines. Both processes emit structured JSON to stdout;
   set `LOG_LEVEL=debug` temporarily for check-level detail.
 

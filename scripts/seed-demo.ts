@@ -29,7 +29,7 @@ import { DEMO_ORG, DEMO_PASSWORD, DEMO_USERS } from "@/lib/demo";
 
 /**
  * Seeds a realistic demo tenant: a team, eleven production-style
- * monitors covering all six check types, with 90 days of check history,
+ * monitors covering six check types, with 90 days of check history,
  * one fully resolved incident (timeline + postmortem), one ongoing
  * outage, and a recovery action with two quiet self-healed incidents
  * (the runtime fixed them; nobody was paged).
@@ -59,7 +59,7 @@ const rand = mulberry32(20260702);
 interface MonitorSeed {
   name: string;
   url: string;
-  /** Defaults to `http`; the demo covers all six registered types. */
+  /** Defaults to `http`; the demo uses six of the registered types. */
   checkType?: string;
   port?: number;
   /** Type-specific settings for the types that use the config blob. */

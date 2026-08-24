@@ -1,4 +1,5 @@
 export * from "./audit";
+export * from "./bridge";
 export * from "./auth";
 export * from "./incidents";
 export * from "./ledger";

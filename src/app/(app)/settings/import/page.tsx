@@ -58,7 +58,16 @@ export default async function ImportSettingsPage() {
             the reason. See <code className="font-mono">docs/MIGRATION.md</code>{" "}
             for the full tables, and{" "}
             <code className="font-mono">docs/KUMA-IMPORT.md</code> for Uptime
-            Kuma&rsquo;s column-by-column one.
+            Kuma&rsquo;s column-by-column one. Migrating from Better Stack? The{" "}
+            <a
+              className="underline underline-offset-2"
+              href="/settings/import/bridge"
+            >
+              migration bridge
+            </a>{" "}
+            imports into a non-paging shadow mode, runs both systems side by
+            side, and writes an evidence-backed cutover report before you
+            switch.
           </CardDescription>
         </CardHeader>
         <CardContent>

@@ -26,15 +26,15 @@ Regenerate the counted numbers with `npm run facts`; verify them with
 
 ## Baseline
 
-|                       |                                                                                   |
-| --------------------- | --------------------------------------------------------------------------------- |
-| Version               | `1.26.0` — manifest, both changelogs and `public-facts.json`                      |
-| Branch                | `release/1.26`                                                                    |
-| Cut from              | `eacc52d` (`v1.22.1`, the previous tagged release)                                |
-| Contains              | 1.23.0 synthetics, 1.24.0 SLOs, 1.25.0 runbooks, 1.26.0 tasks + steady-state pass |
-| Core edition          | cut from the same commit by `scripts/edition-gate.sh` in a required CI job        |
-| Billing bot           | not a Git repository; tree SHA-256 recorded per release                           |
-| Uptime Kuma pinned at | `2.4.0`, commit `9f3b837c8c7f359ec1acee80b3c0430451986a03`                        |
+|                       |                                                                                                                         |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Version               | `1.26.0` — manifest, both changelogs and `public-facts.json`                                                            |
+| Shipped as            | `fbaa2722e37015494a7e8106e4bd46e2194c0ba2` on `main`, tagged `v1.26.0`                                                  |
+| Integrated from       | `release/1.26`, cut from `eacc52d` (`v1.22.1`, the previous tagged release)                                             |
+| Contains              | 1.23.0 synthetics, 1.24.0 SLOs, 1.25.0 runbooks, 1.26.0 tasks + steady-state pass                                       |
+| Core edition          | `vigil-core` `123ea63`, tagged `v1.26.0`, cut from the commercial tag by `scripts/edition-gate.sh` in a required CI job |
+| Billing bot           | `vigil-billing-bot` `d0e67ba`, local only, no remote                                                                    |
+| Uptime Kuma pinned at | `2.4.0`, commit `9f3b837c8c7f359ec1acee80b3c0430451986a03`                                                              |
 
 The claim matrix below was written for 1.14.0 and remains satisfied;
 every release since then records its own claims and their evidence in
@@ -43,24 +43,23 @@ every release since then records its own claims and their evidence in
 `npm run bench:check` and `npm run facts:check` rather than by this
 table growing stale rows.
 
-The billing bot has no commits to name, so it is identified by hashing
-its tree. A bare hash nobody can recompute identifies nothing, so the
-recipe is here rather than in someone's shell history:
+The billing bot is a Git repository as of 4 August 2026, so it is
+identified by a commit like everything else here: `93a3a5e` is its root
+commit and `d0e67ba` is what this release was cut beside. It has no
+remote and is not published, which is why the SHA is only checkable on
+the machine that holds it.
 
-```sh
-cd ../vigil-billing-bot
-find . -type f \
-  -not -path "./node_modules/*" -not -path "./.git/*" \
-  -not -path "./.wrangler/*" -not -name "*.log" \
-  -not -name ".dev.vars" -not -name "wise-details.txt" \
-  | sort | xargs sha256sum | sha256sum
-# 3fc8084dff793ec2a70de9b68aba8af5b025e5998339cc1216e9e3a93482de01
-# 20 files, at 2026-08-01
-```
+Until that day it had no commits to name and was identified by hashing
+its tree, at
+`3fc8084dff793ec2a70de9b68aba8af5b025e5998339cc1216e9e3a93482de01`, over
+twenty files, on 1 August 2026. That hash is history and does not
+reproduce: the tree has changed and grown since. It is recorded here
+because a release document that quietly drops the identifier it used last
+time is one nobody can check backwards.
 
-`.dev.vars` and `wise-details.txt` are excluded by name and never read:
-they hold live credentials and banking details, and a release document
-has no business establishing what is in them — not even by hash.
+Whichever identifier is used, `.dev.vars` and `wise-details.txt` are
+never read: they hold live credentials and banking details, and a release
+document has no business establishing what is in them, not even by hash.
 
 ---
 

@@ -79,6 +79,24 @@ export const incidents = pgTable(
      * scheduled before the upgrade carries a fence to compare it to.
      */
     statusRevision: integer().notNull().default(0),
+    /**
+     * True when this incident was opened by a monitor running in a
+     * migration bridge's shadow mode. Written once at creation, from the
+     * monitor row the opening transaction already holds locked, and
+     * never updated: a shadow incident that outlives its monitor's
+     * shadow period stays shadow, because what the flag records is the
+     * condition under which it was opened, not the monitor's current
+     * setting.
+     *
+     * The open path reads this column to skip the page and the incident
+     * hooks, and the public status page reads it to exclude the row.
+     * Maintenance release never needs to ask: a hold row exists only
+     * for incidents the hooks were asked about, and the shadow branch
+     * returns before asking them. Suppression keyed on a stored fact
+     * cannot change meaning when a bridge row is deleted or a cutover
+     * lands mid-flight.
+     */
+    shadow: boolean().notNull().default(false),
     /** Acknowledgement halts escalation. Set by the acking operator. */
     acknowledgedAt: timestamp({ withTimezone: true }),
     acknowledgedBy: text().references(() => user.id, { onDelete: "set null" }),

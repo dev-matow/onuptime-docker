@@ -119,7 +119,7 @@ The two are not comparable and neither number belongs in the other's
 sentence. Multi-vantage agreement is a **capability**, and its cost is
 measured separately in `docs/evidence/probe-bench/`; half-second cadence
 is a **rate**, measured here. One installation can do both, on different
-monitors. See [REMOTE-PROBES.md](REMOTE-PROBES.md).
+monitors. See `docs/REMOTE-PROBES.md`.
 
 ## Reproducing it
 

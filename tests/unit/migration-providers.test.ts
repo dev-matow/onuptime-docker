@@ -429,6 +429,41 @@ describe("Better Stack", () => {
       byName(snapshot0(await read("betterstack")), "Postgres port").paused,
     ).toBe(true);
   });
+
+  it("reads heartbeats as their own resource, with prefixed ids", async () => {
+    const snapshot = snapshot0(await read("betterstack"));
+    const backup = byName(snapshot, "Nightly backup");
+    expect(backup.kind).toBe("heartbeat");
+    expect(backup.sourceType).toBe("heartbeat");
+    // The fixture's heartbeat deliberately shares the integer "2" with a
+    // monitor, because the two id sequences are independent at the
+    // source. An unprefixed id would make a re-import dedupe silently
+    // match the wrong record.
+    expect(backup.sourceId).toBe("heartbeat:2");
+    expect(backup.heartbeat).toEqual({
+      periodSeconds: 86_400,
+      graceSeconds: 3_600,
+    });
+    expect(backup.groupPath).toEqual(["Cron jobs"]);
+    expect(backup.paused).toBe(false);
+  });
+
+  it("reads a heartbeat as paused from its timestamp, outside any group", async () => {
+    const check = byName(snapshot0(await read("betterstack")), "Hourly sync");
+    expect(check.paused).toBe(true);
+    expect(check.groupPath).toBeUndefined();
+    expect(check.heartbeat).toEqual({
+      periodSeconds: 3_600,
+      graceSeconds: 300,
+    });
+  });
+
+  it("names the ping token it did not read, and never the token itself", async () => {
+    const snapshot = snapshot0(await read("betterstack"));
+    const check = byName(snapshot, "Nightly backup");
+    expect(check.withheld?.join(" ")).toContain("ping URL");
+    expect(JSON.stringify(snapshot)).not.toContain(FIXTURE_SECRET);
+  });
 });
 
 describe("Pingdom", () => {

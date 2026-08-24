@@ -54,8 +54,14 @@ install.
   read-only at the server boundary, not by hiding a button.
 - **Audit trail**: every mutation recorded with actor, target and
   metadata, and a page to read it on.
-- **Alerts**: email plus HMAC-signed webhooks that auto-format for
-  Slack and Discord.
+- **Alerts**: member email plus 25 native provider types behind one
+  channel editor and one delivery pipeline, with no cap on how many
+  channels you configure. Credentials are stored encrypted, deliveries
+  go through a transactional outbox with retries and per-channel rate
+  limits, and a delivery history shows provider, event, attempts, final
+  status and a redacted error. Signed webhooks keep their HMAC-SHA-256
+  signature and versioned payload. Anything not on the list can be
+  reached through an Apprise server you run.
 
 No license key, no telemetry, no expiry, and no cap on monitors, users,
 organizations' members or retention.
@@ -95,10 +101,15 @@ Worth knowing before you deploy:
 - **An import is not a migration of everything.** Every one of Kuma's 31
   selectable monitor types has an equivalent here, but a type having one
   is not a promise that every monitor of that type comes across: Vigil's
-  own rules still refuse what they would refuse from the form, and
-  notification providers, tags and maintenance windows have no
-  counterpart and are reported rather than carried. `docs/KUMA-IMPORT.md`
-  states both numbers and lists every refusal.
+  own rules still refuse what they would refuse from the form. Tags and
+  maintenance windows have no counterpart in Core and are reported rather
+  than carried; notification providers do have one here, but no
+  credential is ever read out of a Kuma database, so those are reported
+  too and set up again under Settings. `docs/KUMA-IMPORT.md` states both
+  numbers and lists every refusal.
+- **No scheduled suppression.** Core has no maintenance windows, so a
+  planned deploy alerts like an outage. Pause the monitors for the
+  duration, or accept the noise.
 - **One organization per install.** Fine for a team watching its own
   systems; not built to run many separate clients side by side.
 
@@ -128,8 +139,10 @@ with your contribution. Security issues go privately to
 
 ## The commercial edition
 
-[Vigil](https://vigil-uptime.com) is the same monitor with five things
-Core does not have, none of which Uptime Kuma has either:
+[Vigil](https://vigil-uptime.com) is the same monitor with a set of
+things Core does not have. Uptime Kuma has none of them either, with one
+exception noted in the list: it has maintenance windows and Core does
+not.
 
 - **Isolate.** Many client organizations in one install, each with its
   own status pages and unable to see the others.
@@ -142,10 +155,26 @@ Core does not have, none of which Uptime Kuma has either:
 - **Confirm.** Probe agents you run on your own machines, in the regions
   you choose, with a quorum deciding the verdict. Vigil ships the agent
   and hosts nothing.
+- **Suppress and route.** Maintenance windows for planned work, and one
+  routing decision about who hears about what, written once and assigned
+  to the workspace, a service or a single monitor. Windows are the
+  exception above: Uptime Kuma has them and Core does not.
+- **Journey.** Multi-step API and browser journeys, `synthetic-api` and
+  `synthetic-browser`, the only two the paid edition adds. They need a
+  browser container the operator deploys and tables of their own; every
+  protocol check type ships in both editions and always will.
+- **Promise.** Service level objectives with error budgets and
+  burn-rate alerting.
+- **Remediate.** Runbooks: typed remediation with immutable published
+  versions, approvals and resource leases. And operations tasks, the
+  human half of the same engine, for the work a runbook cannot do.
+- **See the fleet.** Whether monitoring is actually running, how far
+  behind the scheduler is, and what each worker replica's last tick did.
 
-Everything else (every check type, the scheduler, the ledger, the audit
-page, subscribers, password-protected pages) is here, free, and stays
-here. [What we commit to, in writing](https://vigil-uptime.com/commitments.html).
+Everything else (every protocol check type, the scheduler, the ledger,
+the audit page, subscribers, password-protected pages) is here, free, and
+stays here.
+[What we commit to, in writing](https://vigil-uptime.com/open-source.html).
 
 ## License
 

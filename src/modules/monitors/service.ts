@@ -460,6 +460,11 @@ export async function cloneMonitor(
       updatedAt: _updatedAt,
       importSource: _importSource,
       importSourceId: _importSourceId,
+      // Shadow mode is the bridge's, not the row's. A clone is a new
+      // monitor a person made here, and carrying the flag would hand
+      // them one that silently never pages, cannot join a status page,
+      // and is swept into someone else's cutover.
+      shadowBridgeId: _shadowBridgeId,
       ...carried
     } = source;
 

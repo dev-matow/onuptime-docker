@@ -219,15 +219,38 @@ export const monitors = pgTable(
      */
     importSource: text(),
     /**
-     * The id this monitor had in that system, verbatim and as text.
+     * A SHA-256 digest of the id this monitor had in that system, as
+     * hex text - see `sourceKey` in the importers' provenance module.
      *
-     * Text because the source systems disagree: Kuma's ids are integers,
-     * Pingdom's are integers that exceed 2^31, Checkly's are UUIDs. A
-     * numeric column would force every adapter that has a string id to
-     * invent a number, and the only thing this value is ever used for is
-     * equality against the same source's next answer.
+     * A digest rather than the id itself because for some sources the
+     * id IS a credential (a Healthchecks check is identified by the
+     * same UUID that is the secret in its ping URL), and the only thing
+     * this value is ever used for is equality against the same source's
+     * next answer. Text because the source systems disagree about what
+     * an id even is: integers, integers past 2^31, UUIDs.
      */
     importSourceId: text(),
+    /**
+     * Non-null while this monitor runs in a migration bridge's shadow
+     * mode: checks run and observations are recorded, but an incident it
+     * opens is marked `shadow` at creation and nothing it does pages a
+     * person, reaches a notification channel, triggers automation, or
+     * appears on a public status page.
+     *
+     * Stored on the row rather than inferred from bridge membership,
+     * because every consumer of a monitor's state must be able to answer
+     * "may this page someone?" from the row it already holds - a join
+     * that fails or a bridge row that vanishes must not quietly turn a
+     * silent monitor loud, or a loud one silent.
+     *
+     * References `migration_bridges.id`. The constraint is stated in SQL
+     * (migration 0037) rather than here, because the bridge table's own
+     * file imports this one; it is ON DELETE RESTRICT on purpose - a
+     * bridge cannot be deleted while monitors still shadow under it, so
+     * ending shadow mode is always an explicit act (cut over or abandon)
+     * with an audit row, never a side effect of a cascade.
+     */
+    shadowBridgeId: uuid(),
     createdBy: text().references(() => user.id, { onDelete: "set null" }),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp({ withTimezone: true })

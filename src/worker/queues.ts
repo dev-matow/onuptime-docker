@@ -20,6 +20,18 @@ export const QUEUES = {
   /** Nightly pruning of old check results. */
   retention: "retention",
   /**
+   * Reads incident history from the system a migration bridge is
+   * connected to, read-only, so the cutover report can compare what
+   * that system saw against what Vigil saw over the same window.
+   *
+   * Every fifteen minutes rather than every minute: the evidence is
+   * queried by calendar-date windows with a day of overlap, so nothing
+   * is lost to a slow cadence, and the source is a third-party API with
+   * undocumented rate limits whose goodwill the migrating customer
+   * still depends on.
+   */
+  bridgePoll: "bridge-poll",
+  /**
    * Aggregates high-frequency samples into minute/hour/day buckets and
    * drops the raw ones. Every minute, not nightly: the raw table is a
    * two-hour buffer taking two thousand rows a second, and a job that

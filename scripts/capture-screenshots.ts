@@ -10,7 +10,11 @@ import { and, eq, ne } from "drizzle-orm";
 import { chromium, type Locator, type Page } from "@playwright/test";
 
 import { db } from "@/db";
-import { incidents, monitors, organization } from "@/db/schema";
+import {
+  incidents,
+  monitors,
+  organization,
+} from "@/db/schema";
 import { DEMO_ORG, DEMO_PASSWORD, DEMO_USERS } from "@/lib/demo";
 
 /**
@@ -105,6 +109,7 @@ async function resolveIds() {
   if (!gateway || !auth || !ongoing) {
     throw new Error("Demo data incomplete, re-run `npm run db:seed`.");
   }
+
   return {
     monitorId: gateway.id,
     recoveryMonitorId: auth.id,
@@ -187,6 +192,7 @@ async function main() {
   );
   await page.keyboard.press("Escape");
   await page.keyboard.press("Escape");
+
 
   await fullPage(
     page,

@@ -100,6 +100,11 @@ const CAPABILITIES: readonly ProviderCapability[] = [
     becomes: null,
     note: "Not imported. The check is a Playwright script that Better Stack runs in a browser, and Vigil has no check type that executes a scripted journey.",
   },
+  {
+    sourceType: "heartbeat",
+    becomes: "push",
+    note: "The name, the period as the expected interval and the grace period carry. The token in the ping URL does not: it is never read, a new token is generated, and every job has to be repointed at Vigil's push endpoint after the import. Better Stack pages when a ping goes missing, and Vigil does the same once the interval plus the grace period elapses without one.",
+  },
 ];
 
 const MAPPED = new Map(CAPABILITIES.map((entry) => [entry.sourceType, entry]));
@@ -124,6 +129,22 @@ function acceptedStatusFrom(value: Json): string[] | undefined {
     .filter((code): code is number => code !== undefined)
     .map((code) => String(code));
   return codes.length > 0 ? codes : undefined;
+}
+
+/**
+ * The maintenance-window loss line, shared by monitors and heartbeats,
+ * which store the same `maintenance_days` field.
+ */
+function noteMaintenanceLoss(
+  attributes: Record<string, Json>,
+  losses: string[],
+): void {
+  const maintenanceDays = strs(attributes.maintenance_days);
+  if (maintenanceDays.length > 0) {
+    losses.push(
+      `A maintenance window on ${maintenanceDays.join(", ")} was not carried. Vigil has maintenance windows of its own, but this importer does not create them: the schedules do not translate field for field, and a window imported approximately is a window that silences the wrong hours. Recreate it under Settings, Maintenance.`,
+    );
+  }
 }
 
 function toCheck(
@@ -188,12 +209,7 @@ function toCheck(
       "The outbound proxy was not carried: Vigil's checks go out from the worker, or from a remote probe you enrol, and have no per-monitor proxy.",
     );
   }
-  const maintenanceDays = strs(attributes.maintenance_days);
-  if (maintenanceDays.length > 0) {
-    losses.push(
-      `A maintenance window on ${maintenanceDays.join(", ")} was not carried. Vigil has maintenance windows of its own, but this importer does not create them: the schedules do not translate field for field, and a window imported approximately is a window that silences the wrong hours. Recreate it under Settings, Maintenance.`,
-    );
-  }
+  noteMaintenanceLoss(attributes, losses);
   const domainExpiration = num(attributes.domain_expiration);
   if (domainExpiration !== undefined) {
     losses.push(
@@ -271,6 +287,51 @@ function toCheck(
   }
 }
 
+/**
+ * One heartbeat (a cron monitor) as a source check.
+ *
+ * The `heartbeat:` prefix on the id is load-bearing. Better Stack's
+ * monitor ids and heartbeat ids are two independent integer sequences,
+ * and provenance is keyed per provider, so an unprefixed heartbeat id
+ * would collide with a monitor id and make a re-import dedupe silently
+ * match the wrong record. Monitor ids stay raw: existing installs
+ * already recorded them that way, and changing them would duplicate
+ * every previously imported monitor on the next run.
+ *
+ * The `url` attribute is the ping URL and its path is the heartbeat's
+ * token, so it is never read: Vigil generates its own push token and the
+ * report says what was withheld.
+ */
+function toHeartbeat(
+  row: Record<string, Json>,
+  groupNames: ReadonlyMap<string, string>,
+): SourceCheck {
+  const attributes = obj(row.attributes);
+  const id = str(row.id) ?? "unknown";
+  const name = str(attributes.name) ?? `Better Stack heartbeat ${id}`;
+  const groupId = str(attributes.heartbeat_group_id);
+  const groupName = groupId === undefined ? undefined : groupNames.get(groupId);
+
+  const losses: string[] = [];
+  noteMaintenanceLoss(attributes, losses);
+
+  return {
+    sourceId: `heartbeat:${id}`,
+    name,
+    sourceType: "heartbeat",
+    kind: "heartbeat",
+    paused: str(attributes.paused_at) !== undefined,
+    target: { label: name },
+    heartbeat: {
+      periodSeconds: num(attributes.period),
+      graceSeconds: num(attributes.grace),
+    },
+    groupPath: groupName === undefined ? undefined : [groupName],
+    losses,
+    withheld: ["the token in this heartbeat's ping URL"],
+  };
+}
+
 export const betterStackAdapter: ProviderAdapter = {
   id: "betterstack",
   label: "Better Stack (Better Uptime)",
@@ -334,6 +395,43 @@ export const betterStackAdapter: ProviderAdapter = {
       if (next === undefined) break;
       page += 1;
     }
+    const monitorCount = checks.length;
+
+    const heartbeatGroupNames = new Map<string, string>();
+    try {
+      const response = await transport.json<{ data?: Json }>(
+        "/heartbeat-groups",
+        {
+          per_page: 250,
+        },
+      );
+      for (const entry of arr(response.data)) {
+        const group = obj(entry);
+        const id = str(group.id);
+        const name = str(obj(group.attributes).name);
+        if (id !== undefined && name !== undefined) {
+          heartbeatGroupNames.set(id, name);
+        }
+      }
+    } catch {
+      // Same posture as monitor groups: a read that cannot see them
+      // still reads heartbeats. The folder is lost, not the migration.
+    }
+
+    let heartbeatPage = 1;
+    for (;;) {
+      const response = await transport.json<{
+        data?: Json;
+        pagination?: Json;
+      }>("/heartbeats", { page: heartbeatPage, per_page: 250 });
+      for (const row of arr(response.data)) {
+        checks.push(toHeartbeat(obj(row), heartbeatGroupNames));
+      }
+      const next = str(obj(response.pagination).next);
+      if (next === undefined) break;
+      heartbeatPage += 1;
+    }
+    const heartbeatCount = checks.length - monitorCount;
 
     const extras: SourceExtra[] = [
       {
@@ -355,8 +453,10 @@ export const betterStackAdapter: ProviderAdapter = {
     return {
       provider: "betterstack",
       facts: [
-        `Better Stack Uptime API v2, ${checks.length} monitor(s) over ${page} page(s), ${transport.requestCount} request(s).`,
+        `Better Stack Uptime API v2, ${monitorCount} monitor(s) over ${page} page(s), ${transport.requestCount} request(s).`,
         `${groupNames.size} monitor group(s) read.`,
+        `${heartbeatCount} heartbeat(s) over ${heartbeatPage} page(s).`,
+        `${heartbeatGroupNames.size} heartbeat group(s) read.`,
       ],
       checks,
       statusPages: [],

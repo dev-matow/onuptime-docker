@@ -614,11 +614,23 @@ export async function openMonitorIncident(
       // status. Refusing on `up` is the whole guard: an incident is
       // never opened for a monitor the database currently says is fine.
       const [current] = await tx
-        .select({ status: monitors.currentStatus })
+        .select({
+          status: monitors.currentStatus,
+          paused: monitors.paused,
+          shadowBridgeId: monitors.shadowBridgeId,
+        })
         .from(monitors)
         .where(eq(monitors.id, monitor.id))
         .for("update");
       if (!current || current.status === "up") return null;
+      // Paused is re-read under the same lock as status, and refused
+      // for the same reason: the check that decided to open committed
+      // before this transaction began, and a pause (an operator's, or a
+      // bridge abandon's) can land in between. An incident opened on a
+      // paused monitor would page for a monitor the operator just
+      // silenced and then sit open forever, because a paused monitor is
+      // never checked again and auto-resolve is driven by checks.
+      if (current.paused) return null;
 
       const [incident] = await tx
         .insert(incidents)
@@ -628,6 +640,12 @@ export async function openMonitorIncident(
           severity: "critical",
           source: "monitor",
           monitorId: monitor.id,
+          // Written once, from the row this transaction holds locked, so
+          // the flag and the monitor's shadow setting cannot disagree at
+          // the moment of creation - a cutover landing mid-open
+          // serialises on the same lock. Everything that suppresses
+          // reads this stored flag, never the monitor's current value.
+          shadow: current.shadowBridgeId !== null,
           createdBy: null,
         })
         // The insert is the claim. Postgres rejects the loser, and the

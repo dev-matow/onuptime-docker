@@ -1,0 +1,1 @@
+ALTER TABLE "bridge_monitors" ADD COLUMN "failure_window_seconds" integer;

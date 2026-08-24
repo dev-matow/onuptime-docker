@@ -108,9 +108,30 @@ if [ "$MODE" = "direct" ] && [ -z "$URL" ]; then
   exit 2
 fi
 
+# Read back by the binary that wrote it, never by whatever the host
+# happens to have.
+#
+# In --docker mode the archive comes out of the pg_dump inside the
+# container, and only a pg_restore of at least that version can parse it.
+# The host client is frequently OLDER than the server in the image: an
+# Ubuntu runner ships PostgreSQL 16 and this stack runs 18, and asking
+# the 16 to read an 18 archive reported a perfectly good backup as
+# unreadable and deleted it. The supported single-host install has no
+# client at all, which is the other half of the same answer.
+#
+# pg_restore with no filename reads standard input, and a custom-format
+# archive on a non-seekable stream is a case it handles.
+list_archive() {
+  if [ "$MODE" = "docker" ]; then
+    docker compose exec -T "$SERVICE" pg_restore --list <"$1"
+  else
+    pg_restore --list "$1"
+  fi
+}
+
 # Checked before anything is dropped, not after. A --force run against an
 # unreadable archive would otherwise empty the database and then fail.
-if ! pg_restore --list "$DUMP" >/dev/null 2>&1; then
+if ! list_archive "$DUMP" >/dev/null 2>&1; then
   echo "restore: $DUMP is not a custom-format pg_dump archive." >&2
   echo "  scripts/backup.sh writes one; a plain .sql file is replayed with psql." >&2
   exit 1
@@ -151,25 +172,63 @@ if [ "$FORCE" = "yes" ] && [ "$EXISTING" != "0" ]; then
 fi
 
 # `set -e` would take the exit code as fatal, and pg_restore returns
-# non-zero for warnings that are not failures — a --clean run reports
-# every object it could not drop because it was not there. The code is
-# captured and judged instead.
+# non-zero for errors it IGNORED rather than for a restore that failed.
+# So the code is captured and the errors themselves are judged, which is
+# what the paragraph that used to be here claimed and the code did not
+# do.
 STATUS=0
+RESTORE_LOG="$(mktemp -t vigil-restore-log.XXXXXX)"
+trap 'rm -f "$RESTORE_LOG"' EXIT
 if [ "$MODE" = "docker" ]; then
   echo "restore: restoring $DUMP into $DB via compose service '$SERVICE'"
   docker compose exec -T "$SERVICE" \
-    pg_restore -U "$USER" -d "$DB" "${RESTORE_FLAGS[@]}" <"$DUMP" || STATUS=$?
+    pg_restore -U "$USER" -d "$DB" "${RESTORE_FLAGS[@]}" <"$DUMP" 2>&1 |
+    tee "$RESTORE_LOG" || STATUS=$?
 else
   echo "restore: restoring $DUMP into ${URL##*@}"
-  pg_restore --dbname="$URL" "${RESTORE_FLAGS[@]}" "$DUMP" || STATUS=$?
+  pg_restore --dbname="$URL" "${RESTORE_FLAGS[@]}" "$DUMP" 2>&1 |
+    tee "$RESTORE_LOG" || STATUS=$?
+fi
+
+# ── which errors were they ───────────────────────────────────────────
+#
+# A --clean pass issues a DROP for every object in the archive before
+# recreating it, and on any Vigil database three of those DROPs fail as
+# a matter of course:
+#
+#   pg_restore: error: could not execute query: ERROR:  cannot drop
+#   inherited constraint "job_common_pkey" of relation "job_common"
+#
+# pg-boss partitions `job` and `queue_stats`; a partition's constraint
+# cannot be dropped on the partition, and dropping the parent takes it
+# with it regardless. pg_restore ignores them, prints "errors ignored on
+# restore: 3" and exits 1 — so a --force restore of a real Vigil dump
+# always reported failure while having restored everything correctly.
+# `does not exist` is the other benign one, from an object the archive
+# names and the target never had.
+#
+# Anything else still fails. The rule reads the error text rather than
+# counting errors, because a count would have to be maintained against a
+# schema that grows a partition a day.
+UNEXPECTED=""
+if [ "$STATUS" -ne 0 ]; then
+  UNEXPECTED="$(grep '^pg_restore: error:' "$RESTORE_LOG" |
+    grep -v -e 'does not exist' -e 'cannot drop inherited constraint' || true)"
+fi
+
+if [ -n "$UNEXPECTED" ]; then
+  echo "" >&2
+  echo "restore: pg_restore exited $STATUS with errors that a --clean pass" >&2
+  echo "  does not produce by itself. Read them before treating this" >&2
+  echo "  database as restored:" >&2
+  printf '  %s\n' "$UNEXPECTED" >&2
+  exit "$STATUS"
 fi
 
 if [ "$STATUS" -ne 0 ]; then
-  echo "" >&2
-  echo "restore: pg_restore exited $STATUS. Read the errors above before" >&2
-  echo "  treating this database as restored — with --clean, 'does not" >&2
-  echo "  exist' lines are expected and harmless; anything else is not." >&2
-  exit "$STATUS"
+  echo "restore: pg_restore exited $STATUS, and every error it reported is one"
+  echo "  a --clean pass produces against partitioned tables. Those objects"
+  echo "  were dropped with their parents and recreated from the archive."
 fi
 
 echo "restore: done. Verify before you trust it:"

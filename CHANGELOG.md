@@ -6,6 +6,80 @@ free edition; entries for commercial-only features live in the other
 repository, because they are not in this one and listing them here would
 describe software you do not have.
 
+## 1.28.0 — 2026-08-24
+
+`vigilctl`, and all of it is here. An operator installing the free
+edition needs `install`, `doctor`, `backup` and `restore` at least as
+much as a buyer does, so the lifecycle CLI is not a commercial feature
+and never was one.
+
+```bash
+./vigilctl install            # start it, or repair it
+./vigilctl doctor             # what is wrong, changing nothing
+./vigilctl backup             # a dump, proved readable
+./vigilctl restore ARCHIVE    # put one back, then prove the stack works
+./vigilctl update --to REF    # move to a version you name
+./vigilctl rollback           # undo the last update, code and data
+```
+
+Bash and Docker are the only requirements: no npm, no Node, no Postgres
+client on the host, because the machine that runs a Compose install has
+Docker on it and frequently nothing else. Four exit codes, the same for
+every command — 0 succeeded, 10 nothing to do, 20 refused with one
+actionable reason and nothing changed, 1 tried and did not finish — so
+a wrapper script can tell a safe refusal from a real failure.
+
+Install is idempotent and does not restart a healthy stack: it records
+a checksum of the `.env` it started the stack with and exits 10 when
+the bytes and the health both still hold. Secrets are created once and
+preserved after that, including never inventing a `POSTGRES_PASSWORD`
+for a volume that already has one. `doctor` is read-only by
+construction, and it is the only thing that notices a worker that has
+stopped scheduling. `update` never picks a version for you, takes a
+verified backup and writes the way back to disk before the checkout
+moves, and an interrupted run is finished by re-running it rather than
+restarted. `rollback` moves the checkout and the database together and
+invents no down-migrations, because a generated `down` would be a file
+that runs, reports success and leaves a schema nobody has tested.
+`docs/VIGILCTL.md` documents every command, and every underlying
+command it wraps is still there and still supported.
+
+`scripts/edition-gate.sh` now names every file of the CLI and runs
+`vigilctl help` inside this tree before it is published, so the CLI
+cannot quietly stop shipping here.
+
+### Fixed
+
+- **The documented backup path was unusable on the deployment it
+  documents.** `scripts/backup.sh --docker` dumped through the
+  `pg_dump` in the container and validated the archive with the host's
+  `pg_restore`. The shipped stack runs `postgres:18-alpine`, and a
+  `pg_restore` 16 cannot read an archive written by `pg_dump` 18, so
+  the script took a good backup, declared it unreadable, deleted it and
+  exited 1. The reader matches the writer now, in both directions, and
+  `pg_restore`'s own message is printed rather than discarded.
+
+- **A `--force` restore of a real Vigil dump always reported failure.**
+  `--clean --if-exists` issues a `DROP` for every object in the
+  archive, and pg-boss's partitioned `job` and `queue_stats` tables
+  make three of those fail as a matter of course. `pg_restore` ignores
+  them and exits 1; the script took that as fatal after restoring
+  everything correctly, which broke the documented disaster-recovery
+  path on every installation that has ever run a worker. The error
+  classes a `--clean` pass produces by itself are now read and
+  tolerated, and anything else still fails with the offending lines
+  quoted.
+
+- **A repeat `vigilctl install` bounced a healthy installation**, which
+  is exactly what an operator runs it to avoid.
+
+- Three test-harness defects, fixed rather than worked around: the
+  vigilctl suite was removing `bash` from `PATH` along with
+  `pg_restore` on Linux, the runbook tick's per-test timeout was equal
+  to the budget of the pass it drives, and the bridge cutover
+  concurrency test was spending its barrier budget on Postgres backend
+  startup instead of on the race it exists to force.
+
 ## 1.27.0 — 2026-08-24
 
 The Better Stack migration bridge, and all of it is here: the bridge is

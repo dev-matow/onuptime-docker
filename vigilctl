@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+#
+# vigilctl — the supported lifecycle of a self-hosted Vigil install.
+#
+#   ./vigilctl install            bring the stack up, or repair it
+#   ./vigilctl doctor             say what is wrong, change nothing
+#   ./vigilctl backup             take a dump and prove it reads back
+#   ./vigilctl restore ARCHIVE    put one back, then prove the stack works
+#   ./vigilctl update --to REF    move to a version you name
+#   ./vigilctl rollback           undo the last update, code and data
+#
+# This is not a second deployment system. `docker-compose.yml` is the
+# deployment, `scripts/backup.sh` and `scripts/restore.sh` are the backup
+# path, and the `migrate` service is the migration path. vigilctl runs
+# those in the right order, refuses the orders that are unsafe, and waits
+# for real health instead of reporting that a container started. Every
+# one of them is still there to be run by hand, and docs/DEPLOYMENT.md
+# still publishes the commands.
+#
+# Four outcomes, four exit codes, the same for every subcommand:
+#
+#   0   it did the thing
+#   10  it was already done; nothing changed
+#   20  refused; nothing changed, and the reason is one line
+#   1   it tried and failed
+#   2   the arguments were wrong
+#
+# Bash and Docker are the only requirements. There is deliberately no
+# npm, no node and no Postgres client in the dependency list: the host
+# that runs the supported install has Docker on it and frequently
+# nothing else.
+set -euo pipefail
+
+REPO="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "${BASH_SOURCE[0]}")")" && pwd)"
+VIGILCTL_HOME="$REPO/scripts/vigilctl"
+
+# shellcheck source=scripts/vigilctl/common.sh
+. "$VIGILCTL_HOME/common.sh"
+# shellcheck source=scripts/vigilctl/stack.sh
+. "$VIGILCTL_HOME/stack.sh"
+
+usage() {
+  cat <<'TXT'
+vigilctl: the lifecycle of a self-hosted Vigil install.
+
+Usage: vigilctl COMMAND [OPTIONS]
+
+Commands:
+  install              start or repair the Docker Compose install
+  doctor               diagnose it without changing anything
+  backup               dump the database and validate the archive
+  restore ARCHIVE      replace the database with an archive, then verify
+  update --to REF      move to a version you name, with a backup first
+  rollback             undo the last update: code and database together
+  help                 this
+  version              what this checkout is
+
+Global options:
+  --yes                answer every confirmation in advance
+
+Exit codes: 0 done, 10 nothing to do, 20 refused, 1 failed, 2 bad usage.
+Every command takes -h for its own options.
+
+Documentation: docs/VIGILCTL.md
+TXT
+}
+
+# --yes is global because every destructive command has one, and an
+# operator who has to remember which subcommand spells it which way will
+# eventually spell it wrong on the one that drops a database.
+ARGS=()
+for arg in "$@"; do
+  case "$arg" in
+    --yes | -y) ASSUME_YES="yes" ;;
+    *) ARGS+=("$arg") ;;
+  esac
+done
+set -- ${ARGS[@]+"${ARGS[@]}"}
+
+[ $# -gt 0 ] || {
+  usage
+  exit "$EX_USAGE"
+}
+
+COMMAND="$1"
+shift
+
+case "$COMMAND" in
+  install)
+    . "$VIGILCTL_HOME/cmd-install.sh"
+    cmd_install "$@"
+    ;;
+  doctor)
+    . "$VIGILCTL_HOME/cmd-doctor.sh"
+    cmd_doctor "$@"
+    ;;
+  backup)
+    . "$VIGILCTL_HOME/cmd-backup.sh"
+    cmd_backup "$@"
+    ;;
+  restore)
+    . "$VIGILCTL_HOME/cmd-restore.sh"
+    cmd_restore "$@"
+    ;;
+  update)
+    . "$VIGILCTL_HOME/cmd-update.sh"
+    cmd_update "$@"
+    ;;
+  rollback)
+    . "$VIGILCTL_HOME/cmd-rollback.sh"
+    cmd_rollback "$@"
+    ;;
+  version | --version)
+    # Read out of package.json with sed rather than node. The host that
+    # runs the supported install has Docker on it and often no runtime
+    # at all, and `vigilctl version` is the first thing anybody types.
+    printf 'vigil %s\n' \
+      "$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$REPO/package.json" | awk 'NR==1')"
+    git -C "$REPO" describe --tags --always --dirty 2>/dev/null || true
+    exit "$EX_OK"
+    ;;
+  help | -h | --help)
+    usage
+    exit "$EX_OK"
+    ;;
+  *)
+    usage_error "there is no command called $COMMAND"
+    ;;
+esac

@@ -18,6 +18,24 @@ production-shaped: Postgres with a persistent volume, a one-shot
 `migrate` service, the standalone app image, and the worker image.
 
 ```bash
+./vigilctl install
+```
+
+That is the whole install. It validates Docker, writes a `.env` with
+generated secrets (and preserves any you already set), builds the
+images, runs the migrations, starts the app and the worker, waits until
+the app really answers `/api/health` and the worker really schedules,
+and prints the endpoint. Running it again when nothing needs doing
+exits 10 and changes nothing, so it is also the way to repair an install
+that was interrupted.
+
+The same CLI owns the rest of the lifecycle: `doctor`, `backup`,
+`restore`, `update --to <ref>` and `rollback`. See
+[VIGILCTL.md](VIGILCTL.md) for what each one refuses and why.
+
+By hand, which is still supported and still what vigilctl runs:
+
+```bash
 # .env next to docker-compose.yml
 BETTER_AUTH_SECRET=<openssl rand -base64 32>
 APP_URL=https://vigil.yourdomain.com
@@ -36,6 +54,19 @@ vigil.yourdomain.com {
 ```
 
 ### Upgrading a running stack
+
+```bash
+./vigilctl update --to v1.27.0
+```
+
+Preflight, a verified backup, the checkout, the build, the migrations,
+the restart, then real health. It never picks a version for you, and a
+failed update prints `./vigilctl rollback`, which puts the checkout and
+the database back together. Migrations are forward-only, so the rollback
+restores the pre-update dump rather than pretending to un-apply
+anything: [VIGILCTL.md](VIGILCTL.md) has the detail.
+
+By hand:
 
 ```bash
 git pull

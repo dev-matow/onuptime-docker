@@ -71,12 +71,20 @@ organizations' members or retention.
 ```bash
 git clone https://github.com/sikurdev/vigil-core.git
 cd vigil-core
-cp .env.example .env      # set DATABASE_URL and BETTER_AUTH_SECRET
-docker compose up -d
+./vigilctl install
 ```
 
-Then open http://localhost:3000. [QUICK_START.md](QUICK_START.md) has the
-bare-metal path and the first-monitor walkthrough.
+That generates the secrets, builds the images, runs the migrations,
+starts the app and the worker and waits until both are really answering,
+then prints the endpoint. Docker and bash are all it needs.
+
+The same CLI owns the rest of the lifecycle: `./vigilctl doctor` says
+what is wrong without changing anything, `backup` and `restore` use the
+dump path with the safety checks around it, and `update --to <ref>` and
+`rollback` move the checkout and the database together.
+[docs/VIGILCTL.md](docs/VIGILCTL.md) is the reference;
+[QUICK_START.md](QUICK_START.md) has the bare-metal path and the
+first-monitor walkthrough.
 
 ## Limitations
 

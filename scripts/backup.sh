@@ -118,6 +118,27 @@ trap 'rm -f "$PARTIAL"' EXIT
 
 DUMP_FLAGS=(--format=custom --compress=9 --no-owner --no-privileges)
 
+# Read back by the binary that wrote it, never by whatever the host
+# happens to have.
+#
+# In --docker mode the archive comes out of the pg_dump inside the
+# container, and only a pg_restore of at least that version can parse it.
+# The host client is frequently OLDER than the server in the image: an
+# Ubuntu runner ships PostgreSQL 16 and this stack runs 18, and asking
+# the 16 to read an 18 archive reported a perfectly good backup as
+# unreadable and deleted it. The supported single-host install has no
+# client at all, which is the other half of the same answer.
+#
+# pg_restore with no filename reads standard input, and a custom-format
+# archive on a non-seekable stream is a case it handles.
+list_archive() {
+  if [ "$MODE" = "docker" ]; then
+    docker compose exec -T "$SERVICE" pg_restore --list <"$1"
+  else
+    pg_restore --list "$1"
+  fi
+}
+
 if [ "$MODE" = "docker" ]; then
   echo "backup: dumping $DB from compose service '$SERVICE'"
   docker compose exec -T "$SERVICE" \
@@ -132,8 +153,13 @@ fi
 # having written a partial stream when the redirect above was cut short.
 # `pg_restore --list` parses the archive's table of contents, which is the
 # cheapest proof that what was written can be read back.
-if ! pg_restore --list "$PARTIAL" >/dev/null 2>&1; then
+# The reason is kept, not swallowed. "not readable" with nothing after it
+# sent one investigation looking for a truncated file when the real
+# answer was a version mismatch, and pg_restore had said so.
+if ! LIST_ERROR="$(list_archive "$PARTIAL" 2>&1 >/dev/null)"; then
   echo "backup: the archive pg_dump produced is not readable — nothing kept." >&2
+  [ -z "$LIST_ERROR" ] || printf '  %s
+' "$LIST_ERROR" >&2
   exit 1
 fi
 
@@ -142,7 +168,7 @@ fi
 # get from a database name with a typo in it, or from one the migrations
 # never ran against. Kept, because an empty database is occasionally the
 # honest answer, and said out loud, because usually it is not.
-ENTRIES="$(pg_restore --list "$PARTIAL" | grep -c '^[0-9]' || true)"
+ENTRIES="$(list_archive "$PARTIAL" | grep -c '^[0-9]' || true)"
 if [ "$ENTRIES" -eq 0 ]; then
   echo "backup: WARNING — the database held nothing to dump." >&2
   echo "  Check that the name is the one Vigil migrates into." >&2

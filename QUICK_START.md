@@ -8,15 +8,18 @@ Goal: a fully working Vigil (app, worker, database, demo data) in under
 Requirements: Docker with Compose.
 
 ```bash
-# 1. Configure the one required secret
-echo "BETTER_AUTH_SECRET=$(openssl rand -base64 32)" > .env
+# 1. Everything: secrets, Postgres 18, migrations, app, worker, health
+./vigilctl install
 
-# 2. Boot everything: Postgres 18 → migrations → app → worker
-docker compose up --build -d
-
-# 3. (Optional) seed the demo organization with 90 days of history
+# 2. (Optional) seed the demo organization with 90 days of history
 docker compose run --rm worker npx tsx scripts/seed-demo.ts
 ```
+
+`vigilctl` generates the secrets, waits until the app really answers
+and the worker really schedules, and prints the endpoint. It owns the
+rest of the lifecycle too: `doctor`, `backup`, `restore`,
+`update --to <ref>` and `rollback`. See
+[docs/VIGILCTL.md](docs/VIGILCTL.md).
 
 Open **http://localhost:3000**.
 
@@ -43,7 +46,7 @@ npm run worker:dev          # terminal 2, background checks
 ## Verify the install
 
 ```bash
-npm run typecheck && npm run lint && npm test   # 4487 tests, ~5s
+npm run typecheck && npm run lint && npm test   # 4554 tests, ~5s
 ```
 
 ## Turn on automatic recovery (optional, ~5 minutes)

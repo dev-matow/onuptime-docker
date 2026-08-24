@@ -3,6 +3,16 @@
 Vigil Core is generated from the commercial edition's tree, so its
 upgrades are ordinary: pull, install, migrate, restart.
 
+On the Docker Compose install, that is one command, with a verified
+backup taken before anything moves and a `./vigilctl rollback` waiting
+if it goes wrong:
+
+```bash
+./vigilctl update --to <tag>
+```
+
+By hand, or on a bare-metal install:
+
 ```bash
 git pull
 npm ci

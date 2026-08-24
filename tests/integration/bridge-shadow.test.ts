@@ -53,6 +53,19 @@ import {
  * mocks.
  */
 
+/**
+ * Longer than the barrier's own budget, and that is the whole point of
+ * writing it down.
+ *
+ * `withRowLocked` waits up to eight seconds for both callers to block
+ * and then FAILS WITH A DUMP of what every backend was doing. Vitest's
+ * default test timeout is five, so this test gave up three seconds
+ * before its barrier did and reported "test timed out in 5000ms" -
+ * hiding the one line that mattered, which was that only one of the two
+ * callers had ever reached the row.
+ */
+const BARRIER_TIMEOUT_MS = 30_000;
+
 function monitorInput(
   overrides: Partial<CreateMonitorInput> = {},
 ): CreateMonitorInput {
@@ -391,46 +404,50 @@ describe("shadow mode suppression", () => {
     expect(await intentsOf(actor.organizationId)).toHaveLength(0);
   });
 
-  it("cutover racing an opening check leaves no silent live incident and no loud shadow one", async () => {
-    const actor = await createTestOrg();
-    const bridgeId = await createBridge(actor);
-    const monitor = await shadowMonitor(actor, bridgeId);
-    // First failure: the monitor is down with an open shadow incident,
-    // which is the state a cutover most plausibly races a check in.
-    const down = await applyOutcome(monitor, failResult());
+  it(
+    "cutover racing an opening check leaves no silent live incident and no loud shadow one",
+    { timeout: BARRIER_TIMEOUT_MS },
+    async () => {
+      const actor = await createTestOrg();
+      const bridgeId = await createBridge(actor);
+      const monitor = await shadowMonitor(actor, bridgeId);
+      // First failure: the monitor is down with an open shadow incident,
+      // which is the state a cutover most plausibly races a check in.
+      const down = await applyOutcome(monitor, failResult());
 
-    // Both contenders serialise on the monitor row: the check path's
-    // conditional UPDATE and the cutover's SELECT FOR UPDATE. Whichever
-    // wins, the end state must be consistent - that is the invariant,
-    // not the ordering.
-    await withRowLocked("monitors", monitor.id, 2, async () => {
-      await Promise.all([
-        applyOutcome(down, failResult()),
-        cutOverBridge(db, actor),
-      ]);
-    });
+      // Both contenders serialise on the monitor row: the check path's
+      // conditional UPDATE and the cutover's SELECT FOR UPDATE. Whichever
+      // wins, the end state must be consistent - that is the invariant,
+      // not the ordering.
+      await withRowLocked("monitors", monitor.id, 2, async () => {
+        await Promise.all([
+          applyOutcome(down, failResult()),
+          cutOverBridge(db, actor),
+        ]);
+      });
 
-    const cleared = await db.query.monitors.findFirst({
-      where: eq(monitors.id, monitor.id),
-    });
-    expect(cleared!.shadowBridgeId).toBeNull();
+      const cleared = await db.query.monitors.findFirst({
+        where: eq(monitors.id, monitor.id),
+      });
+      expect(cleared!.shadowBridgeId).toBeNull();
 
-    const all = await db.query.incidents.findMany({
-      where: eq(incidents.monitorId, monitor.id),
-    });
-    for (const incident of all) {
-      if (incident.shadow) {
-        // A shadow incident may survive only resolved: cutover closes
-        // what it found open, and nothing may reopen it.
-        expect(incident.status).toBe("resolved");
-        expect(incident.notifiedAt).toBeNull();
-      } else {
-        // A live incident exists only if the check ran after cutover,
-        // and then it must have been paged, not orphaned.
-        expect(incident.notifiedAt).not.toBeNull();
+      const all = await db.query.incidents.findMany({
+        where: eq(incidents.monitorId, monitor.id),
+      });
+      for (const incident of all) {
+        if (incident.shadow) {
+          // A shadow incident may survive only resolved: cutover closes
+          // what it found open, and nothing may reopen it.
+          expect(incident.status).toBe("resolved");
+          expect(incident.notifiedAt).toBeNull();
+        } else {
+          // A live incident exists only if the check ran after cutover,
+          // and then it must have been paged, not orphaned.
+          expect(incident.notifiedAt).not.toBeNull();
+        }
       }
-    }
-  });
+    },
+  );
 
   it("refuses to open an incident for a monitor that was paused mid-flight", async () => {
     // The check that decides to open commits before openMonitorIncident

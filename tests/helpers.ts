@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 
+import { sql } from "drizzle-orm";
 import { Pool, type PoolClient } from "pg";
 
 import { db, poolStats } from "@/db";
@@ -96,6 +97,30 @@ export async function withRowLocked<T>(
    * before their UPDATE than a single statement. */
   options?: { barrierMs?: number },
 ): Promise<T> {
+  // Every caller `body()` starts needs a pooled connection, and the
+  // barrier below waits a bounded time for them to reach their UPDATE.
+  // A caller that has to OPEN a connection first spends that budget on
+  // Postgres backend startup, and then the budget measures the machine
+  // rather than the callers.
+  //
+  // That is not hypothetical. Entering the bridge cutover barrier, the
+  // application pool held exactly ONE established connection while the
+  // barrier expected two callers to block - everything a test does to
+  // set its row up awaits one statement at a time, so the pool never
+  // needs a second. The second caller therefore opened a backend from
+  // inside the barrier window, and under the full parallel suite that
+  // took longer than the budget in roughly one run in three. The tell
+  // was that the missing caller had no backend in `pg_stat_activity`
+  // at all: not idle, not blocked, not yet connected.
+  //
+  // So the pool is brought up to `waiters` established connections
+  // before the lock is taken. Concurrent statements are what forces
+  // distinct clients; sequential ones would reuse the one already
+  // there, which is how the pool came to be short in the first place.
+  await Promise.all(
+    Array.from({ length: waiters }, () => db.execute(sql`select 1`)),
+  );
+
   const holder = new Pool({
     connectionString: process.env.DATABASE_URL,
     max: 1,

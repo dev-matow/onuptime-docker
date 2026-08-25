@@ -17,8 +17,10 @@ import { NotFoundError } from "@/lib/errors";
 import { formatDateTime, formatDuration } from "@/lib/format";
 import { hasPermission } from "@/lib/permissions";
 import { requireOrgContext } from "@/lib/session";
+import { getIncidentEvidence } from "@/modules/incidents/evidence";
 import { getIncidentDetail } from "@/modules/incidents/service";
 
+import { IncidentEvidenceCard } from "./evidence-card";
 import { PostmortemCard } from "./postmortem-card";
 import { StatusControls } from "./status-controls";
 import { IncidentTimeline } from "./timeline";
@@ -39,6 +41,12 @@ export default async function IncidentDetailPage(
     },
   );
   const { incident, monitor, timeline } = detail;
+
+  // What was known when this opened. Null for a manually reported
+  // incident, for one a monitor opened before this shipped, and for one
+  // whose capture was interrupted - all three render as no card rather
+  // than as an empty one.
+  const evidence = await getIncidentEvidence(db, ctx.organizationId, id);
 
 
   const canUpdate = hasPermission(ctx.role, { incident: ["update"] });
@@ -131,6 +139,7 @@ export default async function IncidentDetailPage(
           {!resolved && canUpdate && (
             <UpdateComposer incidentId={incident.id} aiEnabled={isAiEnabled} />
           )}
+          <IncidentEvidenceCard evidence={evidence} />
           <section
             className="flex flex-col gap-4"
             aria-label="Incident timeline"

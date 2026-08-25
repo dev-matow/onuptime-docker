@@ -218,6 +218,23 @@ const envSchema = z.object({
     .max(3_650)
     .default(30),
   /**
+   * Whether an opening incident may fire its diagnostic burst: at most
+   * four read-only probes - resolve, connect, handshake, request - whose
+   * only output is the incident's evidence snapshot.
+   *
+   * On by default, because the burst is what turns "the check timed out"
+   * into "the name still resolves, the port refuses", and an operator
+   * who cannot tell those apart at 3am is the problem this exists for.
+   * The switch is here for the installation that cannot accept any
+   * unscheduled traffic to its targets - a contractual rate limit, a
+   * metered endpoint, a target that pages its own owner on an
+   * unexpected request. Off, every other part of the snapshot is still
+   * captured and the stage falls back to what the failure itself names -
+   * `reported` where the error carries a code, `unknown` where it does
+   * not. What is lost is the upgrade from `unknown` to `measured`.
+   */
+  INCIDENT_EVIDENCE_BURST: z.stringbool().default(true),
+  /**
    * Public read-only demo deployment: sign-up and every mutation are
    * disabled, and /api/demo signs visitors in as the seeded viewer.
    */

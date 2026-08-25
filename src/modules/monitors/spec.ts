@@ -90,6 +90,28 @@ export function redactTargetCredentials(target: string): string {
 }
 
 /**
+ * The password inside a target, or null when it carries none.
+ *
+ * A third caller for {@link splitTarget}, and it exists so that incident
+ * evidence can put the value into a redactor rather than parse the
+ * target a fourth time. Parsing it a fourth time is not hypothetical: it
+ * was done with `indexOf("@")`, and a password containing an `@` - which
+ * Postgres, Redis and MongoDB all permit - split the target at the wrong
+ * character. The redactor then held a one- or two-character prefix of
+ * the username, which masked every occurrence of those characters in the
+ * whole snapshot and left the real password unmasked. Both halves of that
+ * are bad, and one of them is a leak.
+ */
+export function targetPassword(target: string): string | null {
+  const parts = splitTarget(target);
+  if (parts === null || parts.userinfo === "") return null;
+  const colon = parts.userinfo.indexOf(":");
+  if (colon === -1) return null;
+  const password = parts.userinfo.slice(colon + 1);
+  return password === "" ? null : password;
+}
+
+/**
  * A target split at its userinfo, or `null` when it has no scheme.
  *
  * One parser behind all three of the functions below, because they have

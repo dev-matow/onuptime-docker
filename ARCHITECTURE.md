@@ -132,7 +132,8 @@ src/
 │                   #   probe enrol/poll/results, synthetic artefacts
 ├── modules/        # Domain logic, framework-free
 │   ├── monitors/   #   check-type registry, probes, judge, scheduler policy
-│   ├── incidents/  #   lifecycle state machine, hook registry, service
+│   ├── incidents/  #   lifecycle state machine, hook registry, service,
+│                   #   evidence: onset snapshot, burst, correlation
 │   ├── recovery/   #   verified recovery loop: engine, schemas, service
 │   ├── runbooks/   #   typed remediation: definition, engine, registry, runs
 │   ├── tasks/      #   the human half: inbox, templates, hand-overs
@@ -183,6 +184,7 @@ erDiagram
     monitors ||--o{ monitor_checks : produces
     monitors ||--o{ incidents : "opens (auto)"
     incidents ||--o{ incident_events : timeline
+    incidents ||--|| incident_evidence : "what was seen at onset"
     status_pages ||--o{ status_page_monitors : shows
     monitors ||--o{ status_page_monitors : "appears as"
 
@@ -525,6 +527,49 @@ Every attempt is an immutable row in `recovery_attempts` (pre-check result,
 trigger delivery, verification, timings) plus system events on the incident
 timeline. Resolving the incident stays owned by the regular check loop. A
 verified recovery is confirmed by the next passing check.
+
+### Incident evidence
+
+An incident that opens gets a snapshot of what was known at that moment,
+in a table of its own (`incident_evidence`, one row per incident). It
+holds the failing observation, the last successful one, the meaningful
+differences between them, what a bounded diagnostic burst found, and
+which other monitors were failing for a signal we can name.
+
+**A table rather than a query**, because every input to "why did this
+open" expires: observations are pruned at ninety days, the monitor's
+history is rewritten by every later check, and the correlated failure has
+recovered by the time anyone reads the page. `incident_id` is the primary
+key and the insert is `on conflict do nothing`, so the idempotency
+guarantee is Postgres's rather than the application's: a retry, two
+workers repairing the same unhandled incident, and a flap inside one
+incident all produce one snapshot: the first one committed.
+
+**The layer is stated with its basis.** `measured` (a diagnostic re-probed
+it and it failed), `reported` (the failure names it, as `ENOTFOUND` came
+from a resolver), `assertion` (the target answered, so the observation
+proves the transport), or `unknown`. A bare timeout names no layer and is
+filed `unknown` unless a diagnostic resolves it; guessing would put a
+sentence on an incident page that is wrong often enough for an operator
+to stop reading the field.
+
+**The burst is bounded and consequence-free**: four read-only probes
+(resolve, connect, handshake, request), one socket each, no redirects,
+5s total, two concurrent per worker, 32KB of storage. It writes no
+observation, moves no status, touches no incident, pages nobody, feeds no
+SLO and reaches no status page. It runs after the page has been claimed,
+never before, and shadow mode refuses it outright. Same egress policy as
+the check itself.
+
+**Correlation is a rule, not a score**: time proximity within ten minutes
+_and_ a strong shared signal (host, registrable domain, resolved address,
+failure signature, probe location), each carrying the value it matched
+on. A shared timeout is not strong: it is the most common failure there
+is. Scoped to the organisation inside the query.
+
+The commercial editions enrich the snapshot with a journey's failed step
+(screenshot referenced by id, never copied) and what the remote probes
+saw. See `docs/INCIDENT-EVIDENCE.md`.
 
 ### SSRF posture
 

@@ -4,6 +4,10 @@ import { db } from "@/db";
 import { bridgePolls, monitorChecks, monitors } from "@/db/schema";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
+import {
+  EVIDENCE_RETENTION_DAYS,
+  pruneIncidentEvidence,
+} from "@/modules/incidents/evidence";
 import { pruneExpandedIntents } from "@/modules/notifications/intents";
 import {
   pruneNotificationHistory,
@@ -156,6 +160,25 @@ export async function pruneOldChecks(
     );
   }
 
+
+  // Incident evidence, on its own clock and measured from RESOLUTION
+  // rather than from capture. A year, which is deliberately longer than
+  // the ninety days of observations it was distilled from: by the time
+  // somebody is writing a post-incident review or arguing about an SLA,
+  // the check rows that explained the outage are long gone and these few
+  // kilobytes are the only remaining answer. An unresolved incident's
+  // evidence is never pruned at any age - see the module.
+  const evidence = await pruneIncidentEvidence(
+    db,
+    new Date(now.getTime() - EVIDENCE_RETENTION_DAYS * 86_400_000),
+    PRUNE_BATCH,
+  );
+  if (evidence > 0) {
+    logger.info(
+      { evidence, retentionDays: EVIDENCE_RETENTION_DAYS },
+      "pruned incident evidence for long-resolved incidents",
+    );
+  }
 
   // Expanded dispatch intents, on the same clock as the deliveries they
   // produced. A PENDING intent is never pruned however old it is: it is

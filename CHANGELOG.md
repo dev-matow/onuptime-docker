@@ -6,6 +6,64 @@ free edition; entries for commercial-only features live in the other
 repository, because they are not in this one and listing them here would
 describe software you do not have.
 
+## 1.29.0 — 2026-08-25
+
+An incident opened by a monitor now carries a snapshot of what was known
+at that moment, and this edition has it.
+
+The observation that failed, the last one that succeeded, what changed
+between them, what up to four read-only probes found when they
+re-checked the target, and which other monitors were failing for a
+reason the system can name. It is stored rather than computed on demand
+because everything it is derived from expires: observations are pruned
+at ninety days, the monitor's own history is rewritten by every later
+check, and the correlated failure elsewhere in the fleet has recovered
+by the time anyone reads the incident.
+
+### Added
+
+- `incident_evidence`, one row per incident, keyed on the incident id
+  and inserted with `on conflict do nothing`. A retried check, two
+  workers repairing the same unhandled incident and a monitor that
+  flapped twice inside one incident all leave exactly one snapshot.
+- The failing layer — `dns`, `tcp`, `tls`, `http`, `application` or
+  `unknown` — always alongside how it was established: measured by a
+  diagnostic, named by the failure itself, proven by the check, or not
+  established at all. A bare timeout names no layer and is reported as
+  `unknown` rather than guessed at.
+- The last successful observation and a diff against it, with durations
+  filtered by ratio so ordinary jitter does not crowd out the status
+  code that actually moved.
+- Related failures in the same organisation, by rule: time proximity
+  within ten minutes and at least one strong shared signal — hostname,
+  registrable domain, resolved address or failure signature — each
+  carrying the value it matched on. There is no score and nowhere to put
+  one.
+- A bounded onset diagnostic: at most four read-only probes, one socket
+  each, no redirects followed, five seconds of total budget raced
+  against per-step deadlines, two concurrent per worker process, and a
+  32KB cap on the snapshot. It writes no observation, moves no monitor
+  status, touches no incident, notifies nobody and reaches no status
+  page. Set `INCIDENT_EVIDENCE_BURST=false` to switch it off.
+
+### Changed
+
+- The value-based redactor that scrubs secrets out of anything written
+  down moved to `src/lib/redact.ts`. Snapshots are sealed against the
+  monitor's own secret values — every field its check type declares
+  secret, plus the password inside a connection-string target, in both
+  the stored and the decoded form. Bodies are never stored and response
+  headers are an allow-list.
+- Evidence for a resolved incident is pruned after a year, and never at
+  any age while the incident is open.
+
+### Not in this edition
+
+Scripted-journey evidence and remote-probe reports enrich the snapshot
+in the commercial editions. Neither feature exists here, so neither
+field is ever written; everything above is what Core records on its own
+check types.
+
 ## 1.28.1 — 2026-08-25
 
 `vigilctl` is executable in this repository again, and this time at a

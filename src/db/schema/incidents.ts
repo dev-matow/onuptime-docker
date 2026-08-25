@@ -3,6 +3,7 @@ import {
   boolean,
   index,
   integer,
+  jsonb,
   pgEnum,
   pgTable,
   uniqueIndex,
@@ -10,6 +11,8 @@ import {
   timestamp,
   uuid,
 } from "drizzle-orm/pg-core";
+
+import type { IncidentEvidenceSnapshot } from "@/modules/incidents/evidence/types";
 
 import { organization, user } from "./auth";
 import { monitors } from "./monitors";
@@ -169,4 +172,70 @@ export const incidentEvents = pgTable(
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index().on(t.incidentId, t.createdAt)],
+);
+
+/**
+ * What was known when a monitor opened this incident.
+ *
+ * A table rather than a query over `monitor_checks`, and the difference
+ * is the whole reason it exists. Observations are pruned at
+ * `CHECK_RETENTION_DAYS`; a monitor's own history is rewritten by every
+ * later check; a correlated failure elsewhere in the fleet has recovered
+ * by the time anybody reads the incident. Every input to "why did this
+ * open" is gone or changed within weeks, so the answer is copied here
+ * once, at onset, and left alone.
+ *
+ * `incident_id` is the primary key, which is the idempotency guarantee
+ * stated to Postgres rather than held in application code. Two workers
+ * repairing the same unhandled incident both build a snapshot and
+ * exactly one is stored; a monitor that flaps down twice inside one
+ * incident does not overwrite the record of the first moment with the
+ * second. `ON DELETE CASCADE`, because evidence about a deleted
+ * incident is evidence about nothing.
+ *
+ * The tenant is carried here rather than joined through the incident,
+ * for the reason `synthetic_runs` carries it: retention and every read
+ * are tenant-scoped, an incident cannot move between organisations, and
+ * a join for a column that cannot change is a join that will eventually
+ * be forgotten in one of the two places.
+ */
+export const incidentEvidence = pgTable(
+  "incident_evidence",
+  {
+    incidentId: uuid()
+      .primaryKey()
+      .references(() => incidents.id, { onDelete: "cascade" }),
+    organizationId: text()
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    /**
+     * Which monitor was failing. `ON DELETE SET NULL`, matching the
+     * incident's own column: deleting a monitor must not delete the
+     * record of the outage it had.
+     */
+    monitorId: uuid().references(() => monitors.id, { onDelete: "set null" }),
+    /**
+     * The snapshot format. A column rather than a key inside the blob,
+     * so a reader can select on it and a migration can find every row of
+     * a version without parsing jsonb.
+     */
+    schemaVersion: integer().notNull().default(1),
+    capturedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    /**
+     * The snapshot itself: the failing observation, the last successful
+     * one, what changed between them, the diagnostic burst and the
+     * related failures. Bounded before it is written - see
+     * `MAX_SNAPSHOT_BYTES` - and redacted against the monitor's own
+     * secret values, because an error string is where a credential ends
+     * up when it ends up anywhere.
+     */
+    snapshot: jsonb().$type<IncidentEvidenceSnapshot>().notNull(),
+  },
+  (t) => [
+    // The tenant-scoped sweep retention takes in tests, and any future
+    // "what did this organisation record" read. The nightly prune finds
+    // its rows through the incident join rather than through this index,
+    // and every product read is by primary key.
+    index("incident_evidence_org_idx").on(t.organizationId, t.capturedAt),
+  ],
 );

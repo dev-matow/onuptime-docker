@@ -62,6 +62,48 @@ export function secretFieldsOf(spec: AnyCheckTypeSpec): readonly string[] {
   return spec.secretFields ?? [];
 }
 
+/**
+ * The stored secret VALUES, for building a redactor over them.
+ *
+ * The dangerous-looking function in this file, and the reason it exists
+ * is the one place masking by field name cannot work. Incident evidence
+ * records error strings and fact bags that a target produced, and a
+ * credential that has been interpolated into one of those has no field
+ * name any more - it is bytes inside `connection to db failed for user
+ * app with password hunter2`. Masking `config.password` does nothing
+ * there. Masking the *value* does, and to mask a value you have to hold
+ * it.
+ *
+ * So: this is for `lib/redact.ts` and nothing else. Anything that hands
+ * a monitor to a browser wants {@link redactConfig}, which is the
+ * opposite operation and the one that is safe by default. Reads the
+ * same two shapes `redactConfig` writes, because a shape the two
+ * disagree about is a value one of them would miss.
+ */
+export function secretValuesOf(
+  spec: AnyCheckTypeSpec,
+  config: unknown,
+): string[] {
+  const source = asRecord(config);
+  const values: string[] = [];
+  for (const field of secretFieldsOf(spec)) {
+    const value = source[field];
+    if (typeof value === "string") {
+      values.push(value);
+      continue;
+    }
+    if (isSecretMap(value)) {
+      for (const entry of Object.values(value)) {
+        if (typeof entry === "string") values.push(entry);
+      }
+    }
+  }
+  // The mask is not a secret, and letting it into a redactor would turn
+  // every unchanged-secret sentinel in a log line into `[redacted]` for
+  // no gain.
+  return values.filter((value) => value.length > 0 && value !== SECRET_MASK);
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)

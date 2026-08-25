@@ -225,14 +225,31 @@ const TWO_LEVEL_SUFFIXES = new Set([
   "org.ru",
 ]);
 
-/** A registrable domain: exactly one label in front of a public suffix. */
-function isRegistrableDomain(value: string): boolean {
-  if (!HOSTNAME_PATTERN.test(value)) return false;
-  const labels = value.toLowerCase().split(".");
+/**
+ * The registrable domain a hostname sits under, or null when the value
+ * is not a hostname at all.
+ *
+ * `api.example.com` and `cdn.example.com` both come back
+ * `example.com`, which is what makes "these two failures share a
+ * domain" a claim worth putting on an incident page. An IP literal and
+ * anything that is not a plausible hostname come back null rather than
+ * being coerced: no answer costs one correlation signal, a wrong answer
+ * relates two unrelated outages.
+ */
+export function registrableDomain(value: string): string | null {
+  const host = value.toLowerCase();
+  if (!HOSTNAME_PATTERN.test(host)) return null;
+  const labels = host.split(".");
   const suffixLabels = TWO_LEVEL_SUFFIXES.has(labels.slice(-2).join("."))
     ? 2
     : 1;
-  return labels.length === suffixLabels + 1;
+  if (labels.length < suffixLabels + 1) return null;
+  return labels.slice(-(suffixLabels + 1)).join(".");
+}
+
+/** A registrable domain: exactly one label in front of a public suffix. */
+function isRegistrableDomain(value: string): boolean {
+  return registrableDomain(value) === value.toLowerCase();
 }
 
 export const monitorUrlSchema = z

@@ -3,6 +3,10 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { monitors } from "@/db/schema";
 import { logger } from "@/lib/logger";
+import {
+  captureIncidentEvidence,
+  type CaptureDeps,
+} from "@/modules/incidents/evidence";
 import { askAlertHold, askIncidentOpened } from "@/modules/incidents/hooks";
 import {
   claimIncidentNotification,
@@ -62,6 +66,17 @@ export interface ApplyOutcomeDeps {
    * nothing.
    */
   groupDepth?: number;
+  /**
+   * Overrides for the incident evidence capture: the sockets its
+   * diagnostic burst uses, and whether it may run at all.
+   *
+   * Injectable for the reason `fetchImpl` and `lookup` are on the check
+   * path — a test that proves the snapshot must not need a network, and
+   * a suite that quietly resolves real hostnames fails in a different
+   * test every run. Unset in production, which selects the real sockets
+   * and the installation's own setting.
+   */
+  evidence?: CaptureDeps;
 }
 
 /**
@@ -145,6 +160,37 @@ export async function claimOpenedNotifications(
   return claimed;
 }
 
+/**
+ * Stores what was known when this incident opened.
+ *
+ * A wrapper for one reason: the two call sites below (shadow and loud)
+ * must pass the same arguments, and the failure mode of letting them
+ * diverge is a shadow incident that dials a target because somebody
+ * added a parameter to one of them.
+ */
+async function captureEvidence(
+  incident: Incident,
+  monitor: Monitor,
+  outcome: CheckResult,
+  deps: ApplyOutcomeDeps,
+): Promise<void> {
+  await captureIncidentEvidence(
+    db,
+    {
+      organizationId: monitor.organizationId,
+      incidentId: incident.id,
+      monitor,
+      outcome,
+      // The incident's own stored flag, never the monitor's current
+      // setting, for the same reason every other suppression here reads
+      // it: a cutover landing mid-check must not turn a shadow incident
+      // into one that dials.
+      shadow: incident.shadow,
+    },
+    { ...(deps.now ? { now: deps.now } : {}), ...deps.evidence },
+  );
+}
+
 export async function applyOutcome(
   monitor: Monitor,
   outcome: CheckResult,
@@ -167,6 +213,20 @@ export async function applyOutcome(
     },
     "observation recorded",
   );
+
+  /**
+   * The incident whose evidence is owed, captured at the very end.
+   *
+   * Deferred rather than captured where it is decided, because the
+   * diagnostic burst can take seconds and everything below the incident
+   * block is on the check's critical path: the state-change runbook
+   * trigger, the group re-derivation, and - through the caller - the
+   * sub-minute follow-up. The high-frequency plane is the sharpest case:
+   * it holds a per-monitor `promoting` flag across this whole call and
+   * promotes nothing else while it is set, so a burst in the middle
+   * would stall a plane whose entire purpose is a sub-second cadence.
+   */
+  let pendingEvidence: Incident | null = null;
 
   // Level-triggered: act on what is true now, not on what just changed.
   // `openMonitorIncident` returns null when one is already open and
@@ -227,7 +287,15 @@ export async function applyOutcome(
           { monitorId: monitor.id, incidentId: incident.id },
           "shadow incident recorded without paging",
         );
+        // Recorded, like the incident itself, and with the burst
+        // refused. A shadow fleet exists to be compared, so the
+        // evidence for a comparison is worth keeping; what it must not
+        // do is put four more requests on somebody's endpoint during a
+        // migration, when the same target is already being watched
+        // twice. `captureBurst` writes `skipped: "shadow"` so the page
+        // says which of the two happened.
         await refreshGroups(updated.parentId, deps);
+        await captureEvidence(incident, updated, outcome, deps);
         return updated;
       }
 
@@ -275,6 +343,13 @@ export async function applyOutcome(
         },
         "incident handlers answered",
       );
+
+      // Noted here and captured at the very end of this function. It
+      // must not sit in front of the page above it, and it must not sit
+      // in front of the state-change trigger, the group refresh or the
+      // caller's follow-up scheduling below it - so it goes last, past
+      // everything, rather than merely last inside this block.
+      pendingEvidence = incident;
     }
   } else if (reconciliation.resolveIncidents) {
     // The all-clear is written inside `resolveMonitorIncidents`, in the
@@ -296,6 +371,14 @@ export async function applyOutcome(
 
 
   await refreshGroups(updated.parentId, deps);
+
+  // Genuinely last. Nothing in this function, and nothing the caller
+  // does with the row it gets back, is waiting on it: the page has gone
+  // out, automation has been told, the groups have been re-derived. A
+  // worker that dies here loses a diagnostic row and nothing else.
+  if (pendingEvidence) {
+    await captureEvidence(pendingEvidence, updated, outcome, deps);
+  }
   return updated;
 }
 

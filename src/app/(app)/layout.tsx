@@ -45,16 +45,19 @@ export default async function AppLayout({
         role={ctx.role}
       />
       <SidebarInset className="min-w-0">
-        <header className="bg-background sticky top-0 z-10 flex h-[52px] items-center gap-2 border-b px-5">
+        <header className="bg-background/90 sticky top-0 z-10 flex h-16 items-center gap-3 border-b px-5 backdrop-blur-md lg:px-8">
           <SidebarTrigger className="-ml-1" />
           {/* The organization's name lives in the sidebar's switcher; the
               bar repeats it only on phones, where the sidebar is closed
               and the context would otherwise be invisible. */}
-          <span className="text-[13px] font-medium md:hidden">{org?.name}</span>
+          <span className="text-sm font-semibold md:hidden">{org?.name}</span>
+          <span className="text-muted-foreground ml-auto hidden text-xs md:block">
+            {org?.name}
+          </span>
         </header>
         <main
           id="main-content"
-          className="mx-auto w-full max-w-[1104px] flex-1 p-6"
+          className="mx-auto w-full max-w-[1180px] flex-1 p-5 sm:p-6 lg:p-8"
         >
           {children}
         </main>

@@ -47,21 +47,36 @@ export default async function DashboardPage() {
   const allClear = down === 0 && degraded === 0 && activeIncidents.length === 0;
 
   return (
-    <div className="flex flex-col gap-6">
-      <header>
-        <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-        <p className="text-muted-foreground mt-1 text-sm">
+    <div className="flex flex-col gap-7">
+      <header className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+        <p className="text-primary mb-1 text-xs font-semibold tracking-[0.08em] uppercase">
+          Overview
+        </p>
+        <h1 className="text-2xl font-semibold tracking-[-0.025em]">Dashboard</h1>
+        <p className="text-muted-foreground mt-1.5 text-sm">
           {allClear
             ? "All systems operational."
             : "Something needs your attention."}
         </p>
+        </div>
+        <div className="bg-card flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium shadow-xs">
+          <span
+            aria-hidden
+            className={cn(
+              "size-2 rounded-full",
+              allClear ? "bg-ok-dot" : "bg-destructive",
+            )}
+          />
+          {allClear ? "Healthy" : "Attention required"}
+        </div>
       </header>
 
       {/* The counters are the aggregate signal: "everything is fine" is
           readable here in one number before the list confirms it row by
           row. The rows below carry the same dot vocabulary, so the legend
           and the list stay one language. */}
-      <div className="bg-card grid grid-cols-2 rounded-lg border lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCell
           label="Operational"
           value={`${up}/${active.length}`}
@@ -198,7 +213,7 @@ function StatCell({
   return (
     // 2x2 on phones, one row on desktop. The hairlines follow the shape:
     // stacked rows rule the top edge, the desktop band rules the left.
-    <div className="border-line-inner border-l px-5 py-4 nth-[2n+1]:border-l-0 nth-[n+3]:border-t lg:border-t-0 lg:first:border-l-0 lg:nth-[2n+1]:border-l">
+    <div className="bg-card rounded-xl border px-5 py-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
       <div className="text-muted-foreground flex items-center gap-2 text-[10.5px] font-medium tracking-[0.09em] uppercase">
         <span
           aria-hidden
@@ -215,7 +230,7 @@ function StatCell({
       </div>
       <div
         className={cn(
-          "mt-1.5 text-[34px] leading-none font-semibold tracking-[-0.02em]",
+          "mt-2 text-[30px] leading-none font-semibold tracking-[-0.03em] sm:text-[34px]",
           tone === "down" && !zero && "text-destructive",
           tone === "degraded" && !zero && "text-warn",
         )}

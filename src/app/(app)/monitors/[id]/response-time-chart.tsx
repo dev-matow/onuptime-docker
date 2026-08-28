@@ -1,14 +1,10 @@
 import { formatDateTime, formatDuration } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import type { MonitorCheck } from "@/modules/monitors/service";
 
-const CHART_HEIGHT = 96;
-const BAR_WIDTH = 6;
-const BAR_GAP = 2;
-
 /**
- * Dependency-free SVG bar strip: one bar per check, oldest on the left.
- * Bar height is proportional to response time (scaled to the slowest
- * observed check); failed checks render as full-height red bars.
+ * Dependency-free bar strip: one bar per check, oldest on the left.
+ * Every bar can be hovered or keyboard-focused for the underlying observation.
  */
 export function ResponseTimeChart({
   checks,
@@ -31,15 +27,17 @@ export function ResponseTimeChart({
     1,
     ...ordered.map((check) => check.responseTimeMs ?? 0),
   );
-  const failedCount = ordered.filter((check) => !check.ok).length;
+  const failedCount = ordered.filter(
+    (check) => !check.ok || check.verdict === "down",
+  ).length;
   const degradedCount = ordered.filter(
     (check) =>
       check.ok &&
-      check.responseTimeMs !== null &&
-      check.responseTimeMs > degradedThresholdMs,
+      (check.verdict === "degraded" ||
+        (check.responseTimeMs !== null &&
+          check.responseTimeMs > degradedThresholdMs)),
   ).length;
   const healthyCount = ordered.length - failedCount - degradedCount;
-  const width = ordered.length * (BAR_WIDTH + BAR_GAP) - BAR_GAP;
   const oldest = ordered[0];
   const newest = ordered[ordered.length - 1];
   if (!oldest || !newest) return null;
@@ -67,52 +65,86 @@ export function ResponseTimeChart({
           max {formatDuration(maxMs)}
         </span>
       </div>
-      <svg
-        viewBox={`0 0 ${width} ${CHART_HEIGHT}`}
-        preserveAspectRatio="none"
-        className="border-foreground/10 h-24 w-full border-b"
-        role="img"
+      <div
+        className="border-foreground/10 flex h-24 items-end gap-px border-b"
+        role="list"
         aria-label={summary}
       >
         {ordered.map((check, index) => {
-          const x = index * (BAR_WIDTH + BAR_GAP);
-          const failed = !check.ok;
+          const failed = !check.ok || check.verdict === "down";
           const responseMs = check.responseTimeMs;
-          const barHeight = failed
-            ? CHART_HEIGHT
+          const heightPct = failed
+            ? 100
             : Math.max(
                 responseMs === null
-                  ? 2
-                  : Math.round((responseMs / maxMs) * CHART_HEIGHT),
-                2,
+                  ? 3
+                  : Math.round((responseMs / maxMs) * 100),
+                3,
               );
-          // The same state palette as every other surface: quiet moss for
-          // healthy, ochre for degraded, red for failed. A chart that
-          // invents its own vocabulary makes the operator translate.
+          const degraded =
+            check.verdict === "degraded" ||
+            (responseMs !== null && responseMs > degradedThresholdMs);
           const barClass = failed
-            ? "fill-destructive"
-            : responseMs !== null && responseMs > degradedThresholdMs
-              ? "fill-warn-dot"
-              : "fill-chart-1";
+            ? "bg-destructive"
+            : degraded
+              ? "bg-warn-dot"
+              : "bg-chart-1";
+          const stateLabel = failed
+            ? "Failed"
+            : degraded
+              ? "Degraded"
+              : "Healthy";
           const label = failed
             ? (check.error ?? "Check failed")
             : responseMs !== null
               ? formatDuration(responseMs)
               : "OK";
+
           return (
-            <rect
+            <span
               key={check.id}
-              x={x}
-              y={CHART_HEIGHT - barHeight}
-              width={BAR_WIDTH}
-              height={barHeight}
-              className={barClass}
+              role="listitem"
+              tabIndex={0}
+              aria-label={`${formatDateTime(check.checkedAt)}. ${stateLabel}. ${label}`}
+              className="group/check focus-visible:ring-ring relative min-w-0 flex-1 rounded-t-[2px] outline-none focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-offset-1"
+              style={{ height: `${heightPct}%` }}
             >
-              <title>{`${formatDateTime(check.checkedAt)}, ${label}`}</title>
-            </rect>
+              <span
+                aria-hidden
+                className={cn("block size-full rounded-t-[2px]", barClass)}
+              />
+              <span
+                role="tooltip"
+                className={cn(
+                  "bg-foreground text-background pointer-events-none absolute bottom-[calc(100%+8px)] z-30 hidden w-56 rounded-lg px-3 py-2 text-left text-xs leading-5 shadow-xl group-hover/check:block group-focus-visible/check:block",
+                  index < 8
+                    ? "left-0"
+                    : index > ordered.length - 9
+                      ? "right-0"
+                      : "left-1/2 -translate-x-1/2",
+                )}
+              >
+                <strong className="block font-semibold">{stateLabel}</strong>
+                <span className="block opacity-80">
+                  {formatDateTime(check.checkedAt)}
+                </span>
+                {(check.statusCode !== null || responseMs !== null) && (
+                  <span className="border-background/20 mt-1 block border-t pt-1 font-mono">
+                    {check.statusCode !== null && `HTTP ${check.statusCode}`}
+                    {check.statusCode !== null && responseMs !== null && " · "}
+                    {responseMs !== null && formatDuration(responseMs)}
+                  </span>
+                )}
+                {check.error && (
+                  <span className="border-background/20 mt-1 block border-t pt-1">
+                    {check.error}
+                  </span>
+                )}
+              </span>
+            </span>
           );
         })}
-      </svg>
+      </div>
       <div
         className="text-muted-foreground mt-1.5 flex items-center justify-between font-mono text-[11px]"
         aria-hidden

@@ -12,7 +12,7 @@
      timestamps, durations, status codes, payloads, log lines — and sans
      is everything the product says, including the counters. There is no
      third family. */
-  --font-sans: var(--font-sans);
+  --font-sans: var(--font-app-sans);
   --font-mono: var(--font-mono);
   --font-heading: var(--font-sans);
   --color-line-inner: var(--line-inner);
@@ -86,24 +86,26 @@
  */
 :root,
 .light {
-  --background: #f5f5f3;
-  --foreground: #16181c;
-  --card: #fbfbfa;
-  --card-foreground: #16181c;
+  --font-app-sans: Inter, "Noto Sans Thai", "Segoe UI", "Leelawadee UI",
+    Tahoma, ui-sans-serif, system-ui, sans-serif;
+  --background: #f8f9fc;
+  --foreground: #101828;
+  --card: #ffffff;
+  --card-foreground: #101828;
   --popover: #ffffff;
-  --popover-foreground: #16181c;
-  --primary: #16181c;
-  --primary-foreground: #f5f5f3;
-  --secondary: #ecede9;
-  --secondary-foreground: #16181c;
-  --muted: #ecede9;
-  --muted-foreground: #63676d;
-  --accent: #e9eae5;
-  --accent-foreground: #16181c;
-  --destructive: #c22f24;
-  --border: #e2e3df;
-  --input: #cbccc7;
-  --ring: #16181c;
+  --popover-foreground: #101828;
+  --primary: #6941c6;
+  --primary-foreground: #ffffff;
+  --secondary: #f2f4f7;
+  --secondary-foreground: #344054;
+  --muted: #f2f4f7;
+  --muted-foreground: #667085;
+  --accent: #f4f3ff;
+  --accent-foreground: #53389e;
+  --destructive: #d92d20;
+  --border: #e4e7ec;
+  --input: #d0d5dd;
+  --ring: #7f56d9;
   /* Check bars and sparklines carry the state encoding, not a
      categorical palette: quiet moss is fine, ochre is degraded, red is
      failed, hairline grey is no-data. */
@@ -112,25 +114,25 @@
   --chart-3: #c22f24;
   --chart-4: #e2e3df;
   --chart-5: #63676d;
-  --radius: 5px;
-  --panel: #fbfbfa;
-  --line-inner: #ebebe7;
-  --line-tag: #cbccc7;
-  --line-quiet: #b3b4af;
-  --faint: #8f9298;
-  --body-ink: #3e4146;
-  --ok: #2f7245;
-  --ok-dot: #3a8654;
-  --warn: #8a6510;
-  --warn-dot: #c08c1a;
-  --sidebar: #f1f1ee;
-  --sidebar-foreground: #3e4146;
-  --sidebar-primary: #16181c;
-  --sidebar-primary-foreground: #f5f5f3;
-  --sidebar-accent: #e7e8e3;
-  --sidebar-accent-foreground: #16181c;
-  --sidebar-border: #e2e3df;
-  --sidebar-ring: #16181c;
+  --radius: 8px;
+  --panel: #ffffff;
+  --line-inner: #eaecf0;
+  --line-tag: #d0d5dd;
+  --line-quiet: #98a2b3;
+  --faint: #98a2b3;
+  --body-ink: #344054;
+  --ok: #067647;
+  --ok-dot: #12b76a;
+  --warn: #b54708;
+  --warn-dot: #f79009;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #475467;
+  --sidebar-primary: #6941c6;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #f4f3ff;
+  --sidebar-accent-foreground: #53389e;
+  --sidebar-border: #eaecf0;
+  --sidebar-ring: #7f56d9;
 }
 
 /**
@@ -149,47 +151,47 @@
  * operating system by themselves. Keep the two lists identical.
  */
 .dark {
-  --background: #1c1c1a;
-  --foreground: #f5f5f2;
-  --card: #232320;
-  --card-foreground: #f5f5f2;
-  --popover: #2a2a27;
-  --popover-foreground: #f5f5f2;
-  --primary: #f5f5f2;
-  --primary-foreground: #1c1c1a;
-  --secondary: #2a2a27;
-  --secondary-foreground: #f5f5f2;
-  --muted: #2a2a27;
-  --muted-foreground: #a6a6a0;
-  --accent: #2f2f2b;
-  --accent-foreground: #f5f5f2;
-  --destructive: #f0524a;
-  --border: #343430;
-  --input: #41413d;
-  --ring: #f5f5f2;
+  --background: #101014;
+  --foreground: #f4f4f5;
+  --card: #18181d;
+  --card-foreground: #f4f4f5;
+  --popover: #202026;
+  --popover-foreground: #f4f4f5;
+  --primary: #9e77ed;
+  --primary-foreground: #ffffff;
+  --secondary: #27272f;
+  --secondary-foreground: #e4e4e7;
+  --muted: #27272f;
+  --muted-foreground: #a1a1aa;
+  --accent: #2b2340;
+  --accent-foreground: #d6bbfb;
+  --destructive: #f97066;
+  --border: #303038;
+  --input: #3f3f49;
+  --ring: #9e77ed;
   --chart-1: #47825e;
   --chart-2: #d19a2f;
   --chart-3: #f0524a;
   --chart-4: #343430;
   --chart-5: #a6a6a0;
-  --panel: #232320;
-  --line-inner: #2b2b28;
-  --line-tag: #41413d;
-  --line-quiet: #55554f;
-  --faint: #767670;
-  --body-ink: #d9d9d4;
-  --ok: #55ad7d;
-  --ok-dot: #55ad7d;
-  --warn: #d19a2f;
-  --warn-dot: #d19a2f;
-  --sidebar: #141412;
-  --sidebar-foreground: #d9d9d4;
-  --sidebar-primary: #f5f5f2;
-  --sidebar-primary-foreground: #1c1c1a;
-  --sidebar-accent: #262623;
-  --sidebar-accent-foreground: #f5f5f2;
-  --sidebar-border: #262623;
-  --sidebar-ring: #f5f5f2;
+  --panel: #18181d;
+  --line-inner: #303038;
+  --line-tag: #52525b;
+  --line-quiet: #71717a;
+  --faint: #71717a;
+  --body-ink: #d4d4d8;
+  --ok: #6ce9a6;
+  --ok-dot: #32d583;
+  --warn: #fec84b;
+  --warn-dot: #fdb022;
+  --sidebar: #141419;
+  --sidebar-foreground: #d4d4d8;
+  --sidebar-primary: #9e77ed;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #2b2340;
+  --sidebar-accent-foreground: #d6bbfb;
+  --sidebar-border: #27272f;
+  --sidebar-ring: #9e77ed;
 }
 
 /* Scriptless dark: the same charcoal, applied by the system preference
@@ -200,47 +202,47 @@
    above by contract. */
 @media (prefers-color-scheme: dark) {
   :root:not(.light):not(.dark) {
-    --background: #1c1c1a;
-    --foreground: #f5f5f2;
-    --card: #232320;
-    --card-foreground: #f5f5f2;
-    --popover: #2a2a27;
-    --popover-foreground: #f5f5f2;
-    --primary: #f5f5f2;
-    --primary-foreground: #1c1c1a;
-    --secondary: #2a2a27;
-    --secondary-foreground: #f5f5f2;
-    --muted: #2a2a27;
-    --muted-foreground: #a6a6a0;
-    --accent: #2f2f2b;
-    --accent-foreground: #f5f5f2;
-    --destructive: #f0524a;
-    --border: #343430;
-    --input: #41413d;
-    --ring: #f5f5f2;
+    --background: #101014;
+    --foreground: #f4f4f5;
+    --card: #18181d;
+    --card-foreground: #f4f4f5;
+    --popover: #202026;
+    --popover-foreground: #f4f4f5;
+    --primary: #9e77ed;
+    --primary-foreground: #ffffff;
+    --secondary: #27272f;
+    --secondary-foreground: #e4e4e7;
+    --muted: #27272f;
+    --muted-foreground: #a1a1aa;
+    --accent: #2b2340;
+    --accent-foreground: #d6bbfb;
+    --destructive: #f97066;
+    --border: #303038;
+    --input: #3f3f49;
+    --ring: #9e77ed;
     --chart-1: #47825e;
     --chart-2: #d19a2f;
     --chart-3: #f0524a;
     --chart-4: #343430;
     --chart-5: #a6a6a0;
-    --panel: #232320;
-    --line-inner: #2b2b28;
-    --line-tag: #41413d;
-    --line-quiet: #55554f;
-    --faint: #767670;
-    --body-ink: #d9d9d4;
-    --ok: #55ad7d;
-    --ok-dot: #55ad7d;
-    --warn: #d19a2f;
-    --warn-dot: #d19a2f;
-    --sidebar: #141412;
-    --sidebar-foreground: #d9d9d4;
-    --sidebar-primary: #f5f5f2;
-    --sidebar-primary-foreground: #1c1c1a;
-    --sidebar-accent: #262623;
-    --sidebar-accent-foreground: #f5f5f2;
-    --sidebar-border: #262623;
-    --sidebar-ring: #f5f5f2;
+    --panel: #18181d;
+    --line-inner: #303038;
+    --line-tag: #52525b;
+    --line-quiet: #71717a;
+    --faint: #71717a;
+    --body-ink: #d4d4d8;
+    --ok: #6ce9a6;
+    --ok-dot: #32d583;
+    --warn: #fec84b;
+    --warn-dot: #fdb022;
+    --sidebar: #141419;
+    --sidebar-foreground: #d4d4d8;
+    --sidebar-primary: #9e77ed;
+    --sidebar-primary-foreground: #ffffff;
+    --sidebar-accent: #2b2340;
+    --sidebar-accent-foreground: #d6bbfb;
+    --sidebar-border: #27272f;
+    --sidebar-ring: #9e77ed;
   }
 }
 
@@ -250,14 +252,22 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-feature-settings: "kern" 1, "liga" 1;
+    line-height: 1.5;
   }
   html {
     @apply font-sans;
   }
 
+  :lang(th) {
+    font-family: "Noto Sans Thai", "Leelawadee UI", Tahoma, var(--font-app-sans);
+    line-height: 1.6;
+    letter-spacing: 0;
+  }
+
   ::selection {
-    background: var(--foreground);
-    color: var(--background);
+    background: color-mix(in srgb, var(--primary) 24%, transparent);
+    color: var(--foreground);
   }
 
   /* Long human-written prose: a date inside a sentence should not sit in

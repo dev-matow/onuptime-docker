@@ -1,5 +1,12 @@
 "use client";
 
+import {
+  BroadcastIcon,
+  GearSixIcon,
+  PulseIcon,
+  SirenIcon,
+  SquaresFourIcon,
+} from "@phosphor-icons/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -11,6 +18,7 @@ import {
   SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
+  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
@@ -31,11 +39,11 @@ import { cn } from "@/lib/utils";
  * rail when the sidebar collapses to it.
  */
 const NAV_ITEMS = [
-  { title: "Dashboard", href: "/dashboard" },
-  { title: "Monitors", href: "/monitors" },
-  { title: "Incidents", href: "/incidents" },
-  { title: "Status page", href: "/status-page" },
-  { title: "Settings", href: "/settings" },
+  { title: "Dashboard", href: "/dashboard", icon: SquaresFourIcon },
+  { title: "Monitors", href: "/monitors", icon: PulseIcon },
+  { title: "Incidents", href: "/incidents", icon: SirenIcon },
+  { title: "Status page", href: "/status-page", icon: BroadcastIcon },
+  { title: "Settings", href: "/settings", icon: GearSixIcon },
 ] as const;
 
 export function AppSidebar({
@@ -51,23 +59,37 @@ export function AppSidebar({
 
   return (
     <Sidebar collapsible="icon">
-      <SidebarHeader>
+      <SidebarHeader className="border-sidebar-border border-b p-3">
         {/* The brand lockup, the same one the public site wears: the mark
             and a widely tracked wordmark. The wordmark yields when the
             sidebar collapses to its rail. */}
-        <div className="flex h-9 items-center gap-2.5 px-2 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
-          <VigilMark className="h-[19px] shrink-0" />
-          <span className="text-[13px] font-medium tracking-[0.28em] group-data-[collapsible=icon]:hidden">
+        <div className="flex h-9 items-center gap-2.5 px-1.5 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
+          <span className="bg-primary text-primary-foreground flex size-8 items-center justify-center rounded-lg shadow-sm">
+            <VigilMark className="h-[17px] shrink-0" />
+          </span>
+          <span className="text-[13px] font-semibold tracking-[0.2em] group-data-[collapsible=icon]:hidden">
             VIGIL
           </span>
         </div>
+        <div className="border-sidebar-border mx-1.5 mt-2 rounded-lg border bg-background/60 px-3 py-2 group-data-[collapsible=icon]:hidden">
+          <p className="truncate text-xs font-semibold text-foreground">
+            {organizationName}
+          </p>
+          <p className="text-muted-foreground mt-0.5 text-[11px] capitalize">
+            {role} workspace
+          </p>
+        </div>
       </SidebarHeader>
       <SidebarContent>
-        <SidebarGroup>
+        <SidebarGroup className="px-3 py-4 group-data-[collapsible=icon]:px-2">
+          <SidebarGroupLabel className="h-7 px-2 text-[10px] font-semibold tracking-[0.1em] uppercase">
+            Workspace
+          </SidebarGroupLabel>
           <SidebarGroupContent>
-            <SidebarMenu>
+            <SidebarMenu className="gap-1">
               {NAV_ITEMS.map((item) => {
                 const active = pathname.startsWith(item.href);
+                const Icon = item.icon;
                 return (
                   <SidebarMenuItem key={item.href}>
                     <SidebarMenuButton
@@ -76,14 +98,10 @@ export function AppSidebar({
                       tooltip={item.title}
                     >
                       <Link href={item.href}>
-                        <span
+                        <Icon
                           aria-hidden
-                          className={cn(
-                            "inline-block size-1.5 shrink-0 rounded-full",
-                            active
-                              ? "bg-foreground"
-                              : "border-line-quiet border",
-                          )}
+                          weight={active ? "fill" : "regular"}
+                          className={cn(active && "text-primary")}
                         />
                         <span>{item.title}</span>
                       </Link>
@@ -95,7 +113,7 @@ export function AppSidebar({
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-      <SidebarFooter>
+      <SidebarFooter className="border-sidebar-border border-t p-3">
         <NavUser user={user} />
       </SidebarFooter>
       <SidebarRail />

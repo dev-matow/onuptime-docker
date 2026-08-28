@@ -26,9 +26,9 @@ export function SettingsNav() {
     // keyboard is scrolled into view by the browser.
     <nav
       aria-label="Settings sections"
-      className="[scrollbar-width:none] overflow-x-auto border-b [&::-webkit-scrollbar]:hidden"
+      className="bg-muted/60 rounded-lg border p-1 [scrollbar-width:none] overflow-x-auto [&::-webkit-scrollbar]:hidden"
     >
-      <ul className="-mb-px flex w-max gap-3">
+      <ul className="flex w-max gap-1">
         {TABS.map((tab) => {
           const active = tab.exact
             ? pathname === tab.href
@@ -39,10 +39,10 @@ export function SettingsNav() {
                 href={tab.href}
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "inline-block border-b-2 px-1 pb-2 text-[13.5px] whitespace-nowrap transition-colors",
+                  "inline-block rounded-md border px-3 py-1.5 text-sm whitespace-nowrap transition-colors",
                   active
-                    ? "border-foreground font-medium"
-                    : "text-muted-foreground hover:text-foreground border-transparent",
+                    ? "bg-card text-primary border-border font-semibold shadow-xs"
+                    : "text-muted-foreground hover:bg-card/60 hover:text-foreground border-transparent",
                 )}
               >
                 {tab.title}

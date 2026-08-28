@@ -32,7 +32,7 @@ const MONITOR_STATUS_STYLES: Record<MonitorStatus, StateStyle> = {
   },
   up: {
     dot: "bg-ok-dot",
-    row: "text-body font-normal",
+    row: "text-ok font-medium",
     label: "Operational",
   },
   degraded: {

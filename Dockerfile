@@ -30,6 +30,10 @@ ENV HOSTNAME=0.0.0.0
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
+# Next.js writes its incremental/prerender cache at runtime. The image runs as
+# the unprivileged `node` user, so create only that writable directory up front
+# instead of making the whole application tree writable.
+RUN mkdir -p /app/.next/cache && chown -R node:node /app/.next/cache
 USER node
 EXPOSE 3000
 CMD ["node", "server.js"]

@@ -24,20 +24,26 @@ export default async function OnboardingPage(props: PageProps<"/onboarding">) {
   }
 
   return (
-    <div className="bg-muted/40 flex min-h-svh flex-col items-center justify-center gap-6 p-4">
-      <Logo />
-      <Card className="w-full max-w-sm">
-        <CardHeader>
-          <CardTitle>Create your organization</CardTitle>
+    <div className="relative flex min-h-svh flex-col items-center justify-center overflow-hidden bg-background px-4 py-10">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 h-72 bg-[radial-gradient(circle_at_top,color-mix(in_srgb,var(--primary)_12%,transparent),transparent_68%)]"
+      />
+      <div className="relative flex w-full max-w-md flex-col items-center gap-8">
+        <Logo />
+      <Card className="border-border/80 w-full shadow-[0_12px_32px_rgba(16,24,40,0.08)]">
+        <CardHeader className="gap-1.5 px-6 pt-1">
+          <CardTitle className="text-xl">Create your organization</CardTitle>
           <CardDescription>
             Monitors, incidents and your status page live inside an
             organization. You can invite your team afterwards.
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="px-6 pb-1">
           <CreateOrganizationForm />
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 }

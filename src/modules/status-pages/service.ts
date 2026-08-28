@@ -6,6 +6,7 @@ import {
   gte,
   inArray,
   isNull,
+  lt,
   ne,
   or,
   sql,
@@ -292,6 +293,17 @@ export interface DailyUptime {
    * rather than as 0%.
    */
   uptimePct: number | null;
+  /** At most the two newest public-safe issues observed on this Bangkok day. */
+  issues: PublicCheckSnapshot[];
+}
+
+export interface PublicCheckSnapshot {
+  checkedAt: string;
+  verdict: "up" | "down" | "degraded" | "indeterminate";
+  statusCode: number | null;
+  responseTimeMs: number | null;
+  /** A deliberately coarse description that cannot expose the target. */
+  summary: string;
 }
 
 export interface PublicComponent {
@@ -306,6 +318,8 @@ export interface PublicComponent {
   paused: boolean;
   uptime90dPct: number | null;
   dailyUptime: DailyUptime[];
+  lastCheck: PublicCheckSnapshot | null;
+  recentIssues: PublicCheckSnapshot[];
 }
 
 export interface PublicIncidentEvent {
@@ -334,6 +348,24 @@ export interface PublicStatusPage {
   activeIncidents: PublicIncident[];
   recentIncidents: PublicIncident[];
   overall: "operational" | "degraded" | "outage";
+}
+
+export interface PublicHalfHourSlot {
+  start: string;
+  end: string;
+  status: "up" | "down" | "degraded" | "indeterminate" | "unknown";
+  uptimePct: number | null;
+  checkCount: number;
+  lastCheck: PublicCheckSnapshot | null;
+  issues: PublicCheckSnapshot[];
+}
+
+export interface PublicComponentDayTimeline {
+  componentIndex: number;
+  componentName: string;
+  day: string;
+  windowKind: "rolling" | "calendar";
+  slots: PublicHalfHourSlot[];
 }
 
 export interface StatusPageAccess {
@@ -422,13 +454,11 @@ export async function getPublicStatusPage(
   const monitorIds = componentRows.map((row) => row.monitorId);
   const windowEnd = new Date();
   const windowStart = new Date(windowEnd.getTime() - 90 * 86_400_000);
-  const dailyByMonitor = await dailyUptime(
-    db,
-    monitorIds,
-    windowStart,
-    windowEnd,
-  );
-  const totals = await uptimeByMonitor(db, monitorIds, windowStart, windowEnd);
+  const [dailyByMonitor, totals, observations] = await Promise.all([
+    dailyUptime(db, monitorIds, windowStart, windowEnd),
+    uptimeByMonitor(db, monitorIds, windowStart, windowEnd),
+    publicObservationDetails(db, monitorIds, windowStart),
+  ]);
 
   const components: PublicComponent[] = componentRows.map((row) => ({
     name: row.displayName ?? row.internalName,
@@ -442,7 +472,17 @@ export async function getPublicStatusPage(
     // methodology the strip uses, just at a different resolution — so
     // the headline and the bars can no longer disagree.
     uptime90dPct: totals.get(row.monitorId)?.uptimePct ?? null,
-    dailyUptime: dailyByMonitor.get(row.monitorId) ?? [],
+    dailyUptime: (dailyByMonitor.get(row.monitorId) ?? []).map((day) => ({
+      ...day,
+      issues:
+        observations.issuesByMonitorDay.get(`${row.monitorId}:${day.day}`) ??
+        [],
+    })),
+    lastCheck: observations.latestByMonitor.get(row.monitorId) ?? null,
+    recentIssues: (observations.issuesByMonitor.get(row.monitorId) ?? []).slice(
+      0,
+      2,
+    ),
   }));
 
   const activeIncidents = await publicIncidents(
@@ -502,7 +542,7 @@ export async function getPublicStatusPage(
 }
 
 /**
- * The 90-day strip: duration-weighted uptime per UTC day.
+ * The 90-day strip: duration-weighted uptime per Bangkok calendar day.
  *
  * Each coverage segment is intersected with each day it touches, so an
  * outage that straddles midnight is charged to both days in the exact
@@ -520,10 +560,8 @@ async function dailyUptime(
   if (monitorIds.length === 0) return new Map();
 
   const segments = uptimeSegments(monitorIds, windowStart, windowEnd);
-  // Bucket by UTC day: the UI builds its day keys with toISOString(), so
-  // bucketing in server-local time would desync the two after local
-  // midnight and today's bar would silently render as "no data".
-  // Both segment bounds are converted to UTC wall time up front, so
+  // Bucket by the status page's Bangkok calendar day. Both segment bounds
+  // are converted to Bangkok wall time up front, so
   // every subsequent comparison, `generate_series` step and `+ interval
   // '1 day'` happens in plain `timestamp` space where a day is always
   // exactly 24 hours. Doing it on `timestamptz` would make day
@@ -539,8 +577,8 @@ async function dailyUptime(
       select
         raw.monitor_id,
         raw.ok,
-        raw.seg_start at time zone 'utc' as utc_start,
-        raw.seg_end at time zone 'utc' as utc_end
+        raw.seg_start at time zone 'Asia/Bangkok' as local_start,
+        raw.seg_end at time zone 'Asia/Bangkok' as local_end
       from (${segments}) raw
     ),
     overlap as (
@@ -549,13 +587,13 @@ async function dailyUptime(
         seg.ok,
         d.day,
         extract(epoch from (
-          least(seg.utc_end, d.day + interval '1 day')
-          - greatest(seg.utc_start, d.day)
+          least(seg.local_end, d.day + interval '1 day')
+          - greatest(seg.local_start, d.day)
         )) * 1000 as ms
       from seg
       join lateral generate_series(
-        date_trunc('day', seg.utc_start),
-        date_trunc('day', seg.utc_end - interval '1 microsecond'),
+        date_trunc('day', seg.local_start),
+        date_trunc('day', seg.local_end - interval '1 microsecond'),
         interval '1 day'
       ) as d(day) on true
     )
@@ -581,10 +619,311 @@ async function dailyUptime(
         coveredMs === 0
           ? null
           : round2((Number(row.up_ms ?? 0) / coveredMs) * 100),
+      issues: [],
     });
     map.set(row.monitor_id, list);
   }
   return map;
+}
+
+type ObservationRow = {
+  checkedAt: Date;
+  ok: boolean;
+  verdict: string | null;
+  statusCode: number | null;
+  responseTimeMs: number | null;
+  failureClass: string | null;
+};
+
+function publicVerdict(
+  verdict: string | null,
+  ok: boolean,
+): PublicCheckSnapshot["verdict"] {
+  if (
+    verdict === "up" ||
+    verdict === "down" ||
+    verdict === "degraded" ||
+    verdict === "indeterminate"
+  ) {
+    return verdict;
+  }
+  return ok ? "up" : "down";
+}
+
+/**
+ * Public status pages never receive the stored error string. Probe errors can
+ * contain a private hostname or path even after credentials are redacted, so
+ * this summary exposes the useful category and measurements only.
+ */
+function publicObservation(row: ObservationRow): PublicCheckSnapshot {
+  const verdict = publicVerdict(row.verdict, row.ok);
+  let summary = "Check succeeded";
+  if (verdict === "degraded") {
+    summary =
+      row.responseTimeMs === null
+        ? "Performance degraded"
+        : `Slow response (${row.responseTimeMs}ms)`;
+  } else if (row.statusCode !== null && row.statusCode >= 400) {
+    summary = `HTTP ${row.statusCode}`;
+  } else if (row.failureClass === "transport") {
+    summary = "Service could not be reached";
+  } else if (row.failureClass === "assertion") {
+    summary = "Response did not match the expected result";
+  } else if (row.failureClass === "misconfigured") {
+    summary = "The monitoring check could not run";
+  } else if (verdict === "indeterminate") {
+    summary = "The service could not be measured";
+  } else if (verdict === "down") {
+    summary = "The service did not respond as expected";
+  }
+
+  return {
+    checkedAt: new Date(row.checkedAt).toISOString(),
+    verdict,
+    statusCode: row.statusCode,
+    responseTimeMs: row.responseTimeMs,
+    summary,
+  };
+}
+
+/**
+ * Loads one component's one-day drill-down on demand. The public page uses
+ * its stable display order as the selector, so the monitor UUID never has to
+ * appear in markup or URLs. Only the selected day's checks are read.
+ */
+export async function getPublicComponentDayTimeline(
+  db: DbClient,
+  slug: string,
+  componentIndex: number,
+  day: string,
+): Promise<PublicComponentDayTimeline | null> {
+  if (!Number.isInteger(componentIndex) || componentIndex < 0) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+
+  const selectedDayStart = new Date(`${day}T00:00:00.000+07:00`);
+  if (Number.isNaN(selectedDayStart.getTime())) return null;
+  const bangkokToday = new Date(Date.now() + 7 * 60 * 60_000)
+    .toISOString()
+    .slice(0, 10);
+  const today = new Date(`${bangkokToday}T00:00:00.000+07:00`);
+  const oldest = new Date(today.getTime() - 90 * 86_400_000);
+  if (selectedDayStart < oldest || selectedDayStart > today) return null;
+
+  // Today's drill-down is a rolling 24-hour window. Rounding the end up to
+  // the current half-hour keeps the newest observation in the rightmost slot
+  // instead of leaving future hours as a long gray tail. Historical dates
+  // remain true Bangkok calendar days (00:00–24:00).
+  const windowKind = day === bangkokToday ? "rolling" : "calendar";
+  const halfHourMs = 30 * 60_000;
+  const end =
+    windowKind === "rolling"
+      ? new Date(Math.ceil(Date.now() / halfHourMs) * halfHourMs)
+      : new Date(selectedDayStart.getTime() + 86_400_000);
+  const start =
+    windowKind === "rolling"
+      ? new Date(end.getTime() - 86_400_000)
+      : selectedDayStart;
+
+  const [component] = await db
+    .select({
+      monitorId: monitors.id,
+      internalName: monitors.name,
+      displayName: statusPageMonitors.displayName,
+    })
+    .from(statusPageMonitors)
+    .innerJoin(statusPages, eq(statusPages.id, statusPageMonitors.statusPageId))
+    .innerJoin(monitors, eq(monitors.id, statusPageMonitors.monitorId))
+    .where(
+      and(
+        eq(statusPages.slug, slug),
+        eq(statusPages.published, true),
+        isNull(monitors.shadowBridgeId),
+      ),
+    )
+    .orderBy(asc(statusPageMonitors.sortOrder))
+    .limit(1)
+    .offset(componentIndex);
+  if (!component) return null;
+
+  const checks = await db
+    .select({
+      checkedAt: monitorChecks.checkedAt,
+      ok: monitorChecks.ok,
+      verdict: monitorChecks.verdict,
+      statusCode: monitorChecks.statusCode,
+      responseTimeMs: monitorChecks.responseTimeMs,
+      failureClass: monitorChecks.failureClass,
+    })
+    .from(monitorChecks)
+    .where(
+      and(
+        eq(monitorChecks.monitorId, component.monitorId),
+        gte(monitorChecks.checkedAt, start),
+        lt(monitorChecks.checkedAt, end),
+      ),
+    )
+    .orderBy(asc(monitorChecks.checkedAt));
+
+  const working = Array.from({ length: 48 }, (_, index) => ({
+    start: new Date(start.getTime() + index * 30 * 60_000).toISOString(),
+    end: new Date(start.getTime() + (index + 1) * 30 * 60_000).toISOString(),
+    status: "unknown" as PublicHalfHourSlot["status"],
+    upCount: 0,
+    checkCount: 0,
+    lastCheck: null as PublicCheckSnapshot | null,
+    issues: [] as PublicCheckSnapshot[],
+  }));
+
+  const priority: Record<PublicHalfHourSlot["status"], number> = {
+    unknown: 0,
+    up: 1,
+    degraded: 2,
+    indeterminate: 3,
+    down: 4,
+  };
+
+  for (const row of checks) {
+    const checkedAt = new Date(row.checkedAt);
+    const slotIndex = Math.floor(
+      (checkedAt.getTime() - start.getTime()) / (30 * 60_000),
+    );
+    const slot = working[slotIndex];
+    if (!slot) continue;
+    const snapshot = publicObservation(row);
+    slot.checkCount += 1;
+    slot.lastCheck = snapshot;
+    if (row.ok) slot.upCount += 1;
+    if (priority[snapshot.verdict] > priority[slot.status]) {
+      slot.status = snapshot.verdict;
+    }
+    if (snapshot.verdict !== "up") {
+      slot.issues.unshift(snapshot);
+      if (slot.issues.length > 2) slot.issues.pop();
+    }
+  }
+
+  return {
+    componentIndex,
+    componentName: component.displayName ?? component.internalName,
+    day,
+    windowKind,
+    slots: working.map(({ upCount, ...slot }) => ({
+      ...slot,
+      uptimePct:
+        slot.checkCount === 0
+          ? null
+          : round2((upCount / slot.checkCount) * 100),
+    })),
+  };
+}
+
+async function publicObservationDetails(
+  db: DbClient,
+  monitorIds: string[],
+  windowStart: Date,
+): Promise<{
+  latestByMonitor: Map<string, PublicCheckSnapshot>;
+  issuesByMonitor: Map<string, PublicCheckSnapshot[]>;
+  issuesByMonitorDay: Map<string, PublicCheckSnapshot[]>;
+}> {
+  const latestByMonitor = new Map<string, PublicCheckSnapshot>();
+  const issuesByMonitor = new Map<string, PublicCheckSnapshot[]>();
+  const issuesByMonitorDay = new Map<string, PublicCheckSnapshot[]>();
+  if (monitorIds.length === 0) {
+    return { latestByMonitor, issuesByMonitor, issuesByMonitorDay };
+  }
+
+  const latest = await db
+    .selectDistinctOn([monitorChecks.monitorId], {
+      monitorId: monitorChecks.monitorId,
+      checkedAt: monitorChecks.checkedAt,
+      ok: monitorChecks.ok,
+      verdict: monitorChecks.verdict,
+      statusCode: monitorChecks.statusCode,
+      responseTimeMs: monitorChecks.responseTimeMs,
+      failureClass: monitorChecks.failureClass,
+    })
+    .from(monitorChecks)
+    .where(inArray(monitorChecks.monitorId, monitorIds))
+    .orderBy(
+      monitorChecks.monitorId,
+      desc(monitorChecks.checkedAt),
+      desc(monitorChecks.id),
+    );
+  for (const row of latest) {
+    latestByMonitor.set(row.monitorId, publicObservation(row));
+  }
+
+  const idList = sql.join(
+    monitorIds.map((id) => sql`${id}::uuid`),
+    sql`, `,
+  );
+  const { rows } = await db.execute<{
+    monitor_id: string;
+    checked_at: Date;
+    ok: boolean;
+    verdict: string | null;
+    status_code: number | null;
+    response_time_ms: number | null;
+    failure_class: string | null;
+    day: string;
+  }>(sql`
+    with ranked as (
+      select
+        monitor_id,
+        checked_at,
+        ok,
+        verdict,
+        status_code,
+        response_time_ms,
+        failure_class,
+        to_char(checked_at at time zone 'Asia/Bangkok', 'YYYY-MM-DD') as day,
+        row_number() over (
+          partition by monitor_id, (checked_at at time zone 'Asia/Bangkok')::date
+          order by checked_at desc, id desc
+        ) as day_rank
+      from monitor_checks
+      where monitor_id in (${idList})
+        and checked_at >= ${windowStart}
+        and (
+          ok = false
+          or verdict in ('down', 'degraded', 'indeterminate')
+        )
+    )
+    select
+      monitor_id,
+      checked_at,
+      ok,
+      verdict,
+      status_code,
+      response_time_ms,
+      failure_class,
+      day
+    from ranked
+    where day_rank <= 2
+    order by monitor_id, checked_at desc
+  `);
+
+  for (const row of rows) {
+    const issue = publicObservation({
+      checkedAt: row.checked_at,
+      ok: row.ok,
+      verdict: row.verdict,
+      statusCode: row.status_code,
+      responseTimeMs: row.response_time_ms,
+      failureClass: row.failure_class,
+    });
+    const monitorIssues = issuesByMonitor.get(row.monitor_id) ?? [];
+    monitorIssues.push(issue);
+    issuesByMonitor.set(row.monitor_id, monitorIssues);
+
+    const dayKey = `${row.monitor_id}:${row.day}`;
+    const dayIssues = issuesByMonitorDay.get(dayKey) ?? [];
+    dayIssues.push(issue);
+    issuesByMonitorDay.set(dayKey, dayIssues);
+  }
+
+  return { latestByMonitor, issuesByMonitor, issuesByMonitorDay };
 }
 
 /**

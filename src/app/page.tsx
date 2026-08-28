@@ -42,8 +42,12 @@ export default async function LandingPage() {
   const session = await getSession();
 
   return (
-    <div className="flex min-h-svh flex-col">
-      <header className="mx-auto flex w-full max-w-5xl items-center justify-between px-6 py-5">
+    <div className="relative flex min-h-svh flex-col overflow-hidden">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[520px] bg-[radial-gradient(circle_at_50%_-15%,color-mix(in_srgb,var(--primary)_16%,transparent),transparent_62%)]"
+      />
+      <header className="mx-auto flex w-full max-w-6xl items-center justify-between px-5 py-5 sm:px-8">
         <Logo />
         <nav className="flex items-center gap-2">
           {session ? (
@@ -64,19 +68,19 @@ export default async function LandingPage() {
       </header>
 
       <main className="flex-1">
-        <section className="mx-auto flex w-full max-w-3xl flex-col items-center gap-6 px-6 pt-20 pb-16 text-center">
-          <span className="text-muted-foreground rounded-full border px-3 py-1 font-mono text-xs">
+        <section className="mx-auto flex w-full max-w-4xl flex-col items-center gap-6 px-5 pt-20 pb-20 text-center sm:px-8 sm:pt-28">
+          <span className="border-primary/15 bg-primary/5 text-primary rounded-full border px-3 py-1.5 text-xs font-semibold">
             uptime · incidents · status pages
           </span>
-          <h1 className="text-4xl font-semibold tracking-tight text-balance sm:text-5xl">
+          <h1 className="max-w-3xl text-4xl leading-[1.08] font-semibold tracking-[-0.045em] text-balance sm:text-6xl">
             Know it&apos;s down before your customers do.
           </h1>
-          <p className="text-muted-foreground max-w-xl text-lg text-balance">
+          <p className="text-muted-foreground max-w-2xl text-base leading-7 text-balance sm:text-lg">
             Vigil watches your endpoints, opens incidents when they fail, and
             keeps everyone informed, from the on-call engineer to the customer
             refreshing your status page.
           </p>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center justify-center gap-3 pt-1">
             {env.DEMO_MODE ? (
               <Button asChild size="lg">
                 <a href="/api/demo">Explore the live demo</a>
@@ -95,17 +99,20 @@ export default async function LandingPage() {
         </section>
 
         <section
-          className="mx-auto grid w-full max-w-5xl gap-6 px-6 pb-24 sm:grid-cols-2"
+          className="mx-auto grid w-full max-w-6xl gap-4 px-5 pb-24 sm:grid-cols-2 sm:px-8 lg:grid-cols-4"
           aria-label="Features"
         >
           {FEATURES.map((feature) => (
-            <div key={feature.title} className="rounded-lg border p-6">
+            <div
+              key={feature.title}
+              className="bg-card group rounded-xl border p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)] transition-[transform,box-shadow,border-color] hover:-translate-y-0.5 hover:border-primary/20 hover:shadow-md"
+            >
               <feature.icon
-                className="text-muted-foreground mb-3 size-6"
+                className="text-primary bg-primary/8 mb-4 size-9 rounded-lg p-2"
                 aria-hidden
               />
-              <h2 className="font-medium">{feature.title}</h2>
-              <p className="text-muted-foreground mt-1 text-sm">
+              <h2 className="font-semibold">{feature.title}</h2>
+              <p className="text-muted-foreground mt-1.5 text-sm leading-6">
                 {feature.description}
               </p>
             </div>
